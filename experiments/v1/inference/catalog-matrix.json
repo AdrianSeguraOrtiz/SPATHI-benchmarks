@@ -1,0 +1,186 @@
+{
+  "schema_version": "1.0",
+  "andrea_commit": "d835d20b20b32f427ce682711c2f1da23a3e8ed0",
+  "entries": [
+    {
+      "tool_id": "aracne3",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "Uses the common TF list and no order or regulatory prior."
+    },
+    {
+      "tool_id": "cespgrn",
+      "disposition": "candidate",
+      "tf_list_handling": "prior_information",
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "kernel_source=expression,prior_mode=none", "role": "secondary", "status": "candidate"}],
+      "reason": "Expression-only cell networks can be aggregated by group, but the TF list is a penalty prior rather than a candidate restriction; the no-prior run belongs to the all-gene stratum."
+    },
+    {
+      "tool_id": "clr",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information, but CLR cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "dignet",
+      "disposition": "blocked",
+      "tf_list_handling": "not_supported",
+      "routes": [],
+      "reason": "The catalog limits DIGNET to animal datasets; v1 simulator datasets are synthetic."
+    },
+    {
+      "tool_id": "genie3",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "Uses the same expression partitions and TF candidate set as SPATHI."
+    },
+    {
+      "tool_id": "grnboost2",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "Uses the same expression partitions and TF candidate set as SPATHI."
+    },
+    {
+      "tool_id": "infercsn",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [
+        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "sift_method=none,tf_list", "role": "primary", "status": "candidate"},
+        {"regime": "pseudotime_aware", "execution_mode": "group_emulated", "variant": "sift_method=entropy", "role": "secondary", "status": "candidate"}
+      ],
+      "reason": "Provides a clean no-pseudotime control paired with a pseudotime-aware variant."
+    },
+    {
+      "tool_id": "inferelator3",
+      "disposition": "assisted_only",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "prior_assisted", "execution_mode": "group_native", "variant": "required prior_grn", "role": "assisted", "status": "candidate"}],
+      "reason": "The catalog contract always requires a regulatory prior."
+    },
+    {
+      "tool_id": "kscreni",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Cell-level results are aggregated using only group labels, but kSReCNI cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "lioness",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Cell-level results are aggregated using only group labels, but LIONESS cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "metasem",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [
+        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=unlabeled_all_genes", "role": "secondary", "status": "candidate"},
+        {"regime": "prior_assisted", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=provided_prior", "role": "assisted", "status": "candidate"}
+      ],
+      "reason": "Its expression-only and provided-prior modes must be reported separately."
+    },
+    {
+      "tool_id": "miniex3",
+      "disposition": "blocked",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [],
+      "reason": "The catalog limits MINI-EX to plants and it requires marker/identity inputs outside the primary information set."
+    },
+    {
+      "tool_id": "pidc",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information, but PIDC cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "planet",
+      "disposition": "blocked",
+      "tf_list_handling": "not_supported",
+      "routes": [],
+      "reason": "The catalog limits PlaNet to animal datasets; v1 simulator datasets are synthetic."
+    },
+    {
+      "tool_id": "ppcor",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information, but PPCOR cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "pyscenic",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "Consumes the common TF list without lineage or regulatory priors."
+    },
+    {
+      "tool_id": "scgenerai",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Cell-level results are aggregated using only group labels, but scGeneRAI cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "scing",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information, but SCING cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "scminer",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "driver_source=custom_tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "The custom TF-list variant avoids a species-specific built-in regulator set."
+    },
+    {
+      "tool_id": "scmtni",
+      "disposition": "blocked",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "order_aware", "execution_mode": "group_native", "variant": "indep=false,q=0 with non-truth lineage rates", "role": "secondary", "status": "blocked"}],
+      "reason": "Native simulator lineage gain/loss rates are derived from true GRNs; a neutral non-leaky lineage encoding must be designed and fingerprinted first."
+    },
+    {
+      "tool_id": "scregulate",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [
+        {"regime": "group_only", "execution_mode": "group_native", "variant": "prior_source=null", "role": "secondary", "status": "candidate"},
+        {"regime": "prior_assisted", "execution_mode": "group_native", "variant": "prior_source=provided_prior", "role": "assisted", "status": "candidate"}
+      ],
+      "reason": "The no-prior and provided-prior variants answer different questions."
+    },
+    {
+      "tool_id": "scsgl",
+      "disposition": "candidate",
+      "tf_list_handling": "not_supported",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information, but scSGL cannot restrict candidate regulators to tf_list."
+    },
+    {
+      "tool_id": "simic",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [
+        {"regime": "order_aware", "execution_mode": "group_native", "variant": "similarity=false", "role": "secondary", "status": "candidate"},
+        {"regime": "order_aware", "execution_mode": "group_native", "variant": "similarity=true", "role": "secondary", "status": "candidate"}
+      ],
+      "reason": "Both variants consume ordered column phenotypes."
+    },
+    {
+      "tool_id": "tigress",
+      "disposition": "candidate",
+      "tf_list_handling": "candidate_restriction",
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reason": "Group partitioning is the only group-specific information."
+    }
+  ]
+}

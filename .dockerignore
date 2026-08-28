@@ -1,0 +1,5 @@
+**
+!containers/
+!containers/spathi/
+!containers/spathi/constraints.txt
+!containers/spathi/run_tool.py

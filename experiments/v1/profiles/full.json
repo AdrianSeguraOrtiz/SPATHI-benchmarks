@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "id": "full",
+  "status": "planned",
+  "description": "Publication-scale dynamic and invariant-control benchmark.",
+  "generation_jobs": [],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {
+      "max_parallel_tasks": 4,
+      "max_cores": 32,
+      "max_ram_gb": 128
+    },
+    "infer_network": {
+      "max_cores": 32,
+      "max_ram_gb": 128,
+      "planner": "auto",
+      "planner_time_limit_seconds": 300
+    }
+  },
+  "planned_design": {
+    "simulators": ["dyngen", "scmultisim", "sergio", "boolode", "genespider2"],
+    "replicates_per_condition": 5,
+    "regimes": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"],
+    "factors": [
+      "topology",
+      "noise",
+      "dropout",
+      "group imbalance",
+      "small groups",
+      "rewiring"
+    ],
+    "notes": [
+      "Invariant-network simulators are negative controls for invented reconfiguration.",
+      "Prior-assisted results are reported separately from the primary ranking."
+    ]
+  }
+}

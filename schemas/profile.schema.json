@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/profile.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "status",
+    "description",
+    "generation_jobs",
+    "inference_batches",
+    "resources",
+    "planned_design"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"$ref": "#/$defs/id"},
+    "status": {"enum": ["runnable", "planned"]},
+    "description": {"type": "string", "minLength": 1},
+    "generation_jobs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/generation_job"}
+    },
+    "inference_batches": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/inference_batch"}
+    },
+    "resources": {"$ref": "#/$defs/resources"},
+    "planned_design": {"$ref": "#/$defs/planned_design"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "runnable"}}},
+      "then": {
+        "properties": {
+          "generation_jobs": {"minItems": 1},
+          "inference_batches": {"minItems": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "generation_job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scenario", "simulator_runs"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "scenario": {"$ref": "#/$defs/relative_path"},
+        "simulator_runs": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "inference_batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "regime", "tools_params"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "regime": {
+          "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+        },
+        "tools_params": {"$ref": "#/$defs/relative_path"},
+        "custom_tools": {"$ref": "#/$defs/relative_path"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generate_data", "infer_network"],
+      "properties": {
+        "generate_data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_parallel_tasks", "max_cores", "max_ram_gb"],
+          "properties": {
+            "max_parallel_tasks": {"type": "integer", "minimum": 1},
+            "max_cores": {"type": "integer", "minimum": 1},
+            "max_ram_gb": {"type": "number", "minimum": 1}
+          }
+        },
+        "infer_network": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_cores", "max_ram_gb", "planner", "planner_time_limit_seconds"],
+          "properties": {
+            "max_cores": {"type": "integer", "minimum": 1},
+            "max_ram_gb": {"type": "number", "minimum": 1},
+            "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
+            "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      }
+    },
+    "planned_design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["simulators", "replicates_per_condition", "regimes", "factors", "notes"],
+      "properties": {
+        "simulators": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/id"},
+          "uniqueItems": true
+        },
+        "replicates_per_condition": {"type": "integer", "minimum": 1},
+        "regimes": {
+          "type": "array",
+          "items": {
+            "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+          },
+          "uniqueItems": true
+        },
+        "factors": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "notes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

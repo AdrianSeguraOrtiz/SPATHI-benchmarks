@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "repositories": {
+    "andrea": {
+      "url": "https://github.com/AdrianSeguraOrtiz/ANDREA.git",
+      "commit": "d835d20b20b32f427ce682711c2f1da23a3e8ed0"
+    },
+    "spathi": {
+      "url": "https://github.com/AdrianSeguraOrtiz/SPATHI.git",
+      "commit": "8e79cad3adeadcaa9a5f8f3a774d222325507ed5"
+    }
+  }
+}

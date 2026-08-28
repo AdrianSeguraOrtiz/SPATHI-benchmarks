@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "id": "group_only",
+  "primary": true,
+  "available_information": ["expression", "groups", "tf_list"],
+  "excluded_information": ["lineage_tree", "pseudotime", "prior_grn", "prior_grn_by_group"],
+  "planned_variants": [
+    {"tool_id": "spathi", "execution_mode": "group_native", "variant": "primary", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "aracne3", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "genie3", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "grnboost2", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "infercsn", "execution_mode": "group_emulated", "variant": "sift_method=none,tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "pyscenic", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "scminer", "execution_mode": "group_emulated", "variant": "driver_source=custom_tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "tigress", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "cespgrn", "execution_mode": "group_aggregated", "variant": "kernel_source=expression,prior_mode=none", "role": "secondary", "status": "candidate", "tf_list_handling": "prior_information"},
+    {"tool_id": "clr", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "kscreni", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "lioness", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "metasem", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=unlabeled_all_genes", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "pidc", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "ppcor", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "scgenerai", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "scing", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "scregulate", "execution_mode": "group_native", "variant": "prior_source=null", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
+    {"tool_id": "scsgl", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"}
+  ],
+  "notes": [
+    "Only candidate_restriction variants enter the primary ranking against SPATHI.",
+    "Methods that cannot consume tf_list form a separately labelled all-gene exploratory stratum.",
+    "ANDREA preflight is authoritative for dataset-specific eligibility."
+  ]
+}

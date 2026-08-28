@@ -1,0 +1,15 @@
+{
+  "tools": [
+    {
+      "run_id": "spathi_primary",
+      "name": "SPATHI",
+      "docker_image": "spathi-benchmarks/spathi:8e79cad3",
+      "execution_mode": "group_native",
+      "extra_inputs": ["groups", "tf_list"],
+      "outputs": {
+        "directed": true,
+        "sign": "none"
+      }
+    }
+  ]
+}

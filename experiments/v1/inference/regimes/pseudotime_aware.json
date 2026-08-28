@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "id": "pseudotime_aware",
+  "primary": false,
+  "available_information": ["expression", "groups", "tf_list", "pseudotime"],
+  "excluded_information": ["prior_grn", "prior_grn_by_group"],
+  "planned_variants": [
+    {
+      "tool_id": "infercsn",
+      "execution_mode": "group_emulated",
+      "variant": "sift_method=entropy",
+      "role": "secondary",
+      "status": "candidate",
+      "tf_list_handling": "candidate_restriction"
+    }
+  ],
+  "notes": [
+    "Pair inferCSN entropy with its group_only sift_method=none control.",
+    "inferCSN uses cell-level pseudotime within groups, not merely a group ordering."
+  ]
+}

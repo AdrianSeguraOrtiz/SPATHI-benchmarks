@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/repos-lock.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repositories"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "repositories": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["andrea", "spathi"],
+      "properties": {
+        "andrea": {"$ref": "#/$defs/repository"},
+        "spathi": {"$ref": "#/$defs/repository"}
+      }
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "commit"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "pattern": "\\.git$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "dyngen_smoke",
+      "simulator_id": "dyngen",
+      "replicates": 1,
+      "base_seed": 1729,
+      "native_outputs": [],
+      "params": {
+        "backbone_template": "bifurcating",
+        "num_cells": 30,
+        "num_tfs": 3,
+        "num_targets": 7,
+        "num_hks": 0,
+        "distance_metric": "pearson",
+        "simulation_params": {
+          "num_simulations": 2,
+          "census_interval": 2.0,
+          "num_knockdown_simulations": 0,
+          "compute_dimred": false,
+          "compute_rna_velocity": false
+        },
+        "experiment_params": {
+          "map_reference_cpm": false,
+          "map_reference_ls": false
+        }
+      }
+    }
+  ]
+}

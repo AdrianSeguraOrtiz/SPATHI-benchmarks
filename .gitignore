@@ -16,6 +16,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!scripts/lib/
+!scripts/lib/common.sh
 parts/
 sdist/
 var/
@@ -208,6 +210,10 @@ tempCodeRunnerFile.py
 
 # PyPI configuration file
 .pypirc
+
+# Benchmark runtime outputs
+work/
+reports/generated/
 
 # Marimo
 marimo/_static/
