@@ -50,7 +50,7 @@
   "inference_batches": [],
   "resources": {
     "generate_data": {
-      "max_parallel_tasks": 2,
+      "max_parallel_tasks": 1,
       "max_cores": 8,
       "max_ram_gb": 32
     },

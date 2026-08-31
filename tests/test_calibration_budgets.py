@@ -45,6 +45,7 @@ def test_budgeted_profiles_have_symmetric_conditions_and_expected_dataset_counts
             assert profile["calibration_budget"] == budget
             assert profile["purpose"] == purpose
             assert profile["planned_design"]["replicates_per_condition"] == replicates
+            assert profile["resources"]["generate_data"]["max_parallel_tasks"] <= replicates
             assert {job["dataset_role"] for job in profile["generation_jobs"]} == {role}
             assert (
                 sum(

@@ -753,6 +753,12 @@ def _validate_calibration_budget_profiles(
                 raise BenchmarkConfigError(
                     f"Profile {profile_id} declares the wrong replicate budget"
                 )
+            generation_parallelism = profile["resources"]["generate_data"]["max_parallel_tasks"]
+            if generation_parallelism > expected_replicates:
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} generation parallelism exceeds each request's "
+                    "replicate budget"
+                )
             runs = _calibration_profile_runs(repo_root, profile)
             replicate_counts = [run.get("replicates") for run in runs]
             if not replicate_counts or any(
