@@ -203,6 +203,30 @@ def andrea_command(
     )
 
 
+def andrea_contract_command(
+    arguments: list[str],
+    *,
+    repo_root: Path,
+    andrea_repo: Path,
+    log_path: Path,
+) -> None:
+    """Run a SPATHI-benchmarks contract helper in ANDREA's exact environment."""
+
+    executable = _andrea_python_executable()
+    environment = andrea_environment(andrea_repo)
+    benchmark_source = str((repo_root / "src").resolve())
+    existing = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = benchmark_source + (
+        os.pathsep + existing if existing else ""
+    )
+    stream_command(
+        [str(executable), "-m", "spathi_bench.andrea_bridge", *arguments],
+        cwd=repo_root,
+        log_path=log_path,
+        environment=environment,
+    )
+
+
 def andrea_host_environment() -> dict[str, Any]:
     """Fingerprint the exact host Python environment used to orchestrate ANDREA."""
 
