@@ -4,29 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
 import sys
-import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .artifacts import sha256_file
-from .calibration import (
-    CandidateConfiguration,
-    build_andrea_requests,
-    build_calibration_ranking,
-    build_frozen_selected_config,
-    candidate_from_dict,
-    candidate_to_dict,
-    expand_stage_candidates,
-    expand_stage_runs,
-    expand_validation_runs,
-    load_search_space,
-    locked_spathi_identity,
+from .benchmark_materialization import materialize_benchmark_plan
+from .calibration_materialization import (
+    freeze_calibration_selection,
+    materialize_calibration_stage,
+    rank_calibration_stage,
 )
-from .config import BenchmarkConfigError, load_image_lock, load_json_object, validate_json
+from .config import BenchmarkConfigError
 from .doctor import run_doctor
 from .pipeline import (
     build_spathi_image,
@@ -41,6 +30,7 @@ from .pipeline import (
 from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
+from .workflows import run_calibration_workflow, run_comparison_workflow
 
 
 def _path(value: str) -> Path:
@@ -76,6 +66,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser.add_argument("--output", type=_path)
 
+    calibrate_parser = subparsers.add_parser(
+        "calibrate",
+        help="run or resume the complete adaptive SPATHI calibration",
+    )
+    calibrate_parser.add_argument("--repo-root", type=_path, required=True)
+    calibrate_parser.add_argument("--andrea-repo", type=_path, required=True)
+    calibrate_parser.add_argument("--spathi-repo", type=_path, required=True)
+    calibrate_parser.add_argument("--work-root", type=_path)
+    calibrate_parser.add_argument("--run-id")
+
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="run or resume the selected SPATHI comparison with catalog baselines",
+    )
+    compare_parser.add_argument("--repo-root", type=_path, required=True)
+    compare_parser.add_argument("--andrea-repo", type=_path, required=True)
+    compare_parser.add_argument("--spathi-repo", type=_path, required=True)
+    compare_parser.add_argument("--work-root", type=_path)
+    compare_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
+    compare_parser.add_argument("--calibration-run-id")
+
     calibration_plan = subparsers.add_parser(
         "calibration-plan",
         help="materialize one bounded SPATHI calibration stage as ANDREA requests",
@@ -88,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibration_plan.add_argument("--parents", type=_path)
     calibration_plan.add_argument("--output-dir", type=_path, required=True)
+    calibration_plan.add_argument("--profile-output", type=_path, required=True)
 
     calibration_rank = subparsers.add_parser(
         "calibration-rank",
@@ -111,12 +123,24 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_freeze.add_argument("--ranking", type=_path, required=True)
     calibration_freeze.add_argument("--output", type=_path, required=True)
 
+    benchmark_plan = subparsers.add_parser(
+        "benchmark-plan",
+        help="materialize a post-freeze SPATHI bundle and runnable benchmark profile",
+    )
+    benchmark_plan.add_argument("--repo-root", type=_path, required=True)
+    benchmark_plan.add_argument("--template-profile", choices=("reduced", "full"), required=True)
+    benchmark_plan.add_argument("--baseline-plan", type=_path, required=True)
+    benchmark_plan.add_argument("--output-dir", type=_path, required=True)
+    benchmark_plan.add_argument("--profile-output", type=_path, required=True)
+    benchmark_plan.add_argument("--selected-config", type=_path)
+
     preflight_parser = subparsers.add_parser("preflight", help="validate locks and plan generation")
     _add_common(
         preflight_parser,
         andrea_repository=True,
         spathi_repository=True,
     )
+    preflight_parser.add_argument("--profile-file", type=_path)
 
     build_parser = subparsers.add_parser("build-image", help="build the pinned SPATHI image")
     _add_common(build_parser)
@@ -157,126 +181,32 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _serialized_candidates(path: Path | None) -> tuple[CandidateConfiguration, ...]:
-    if path is None:
-        return ()
-    payload = load_json_object(path, "calibration parents")
-    raw = payload.get("selected_candidates")
-    if not isinstance(raw, list) or not raw:
-        raise BenchmarkConfigError("Calibration parents must contain selected_candidates")
-    return tuple(candidate_from_dict(item) for item in raw)
-
-
-def _write_calibration_plan(args: argparse.Namespace) -> Path:
-    search = load_search_space(args.repo_root)
-    spathi_identity = locked_spathi_identity(args.repo_root)
-    parents = _serialized_candidates(args.parents)
-    if args.stage == "validation":
-        if not parents:
-            raise BenchmarkConfigError("Validation planning requires --parents from estimator")
-        candidates = parents
-        runs = expand_validation_runs(search, candidates)
-        dataset_role = "validation"
-    else:
-        candidates = expand_stage_candidates(search, args.stage, parents=parents)
-        runs = expand_stage_runs(search, args.stage, parents=parents)
-        dataset_role = "development"
-    image_tag = load_image_lock(args.repo_root)["images"]["spathi"]["tag"]
-    tools, custom, metadata = build_andrea_requests(runs, docker_image=image_tag)
-    output_dir: Path = args.output_dir
-    if output_dir.exists():
-        raise BenchmarkConfigError(f"Calibration plan output already exists: {output_dir}")
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}-", dir=output_dir.parent))
-    try:
-        payloads = {
-            "tools-params.json": tools,
-            "custom-tools.json": custom,
-            "run-metadata.json": metadata,
-            "calibration-manifest.json": {
-                "schema_version": "1.0",
-                "search_space_id": search["id"],
-                "stage_id": args.stage,
-                "dataset_role": dataset_role,
-                **spathi_identity,
-                "candidates": [candidate_to_dict(candidate) for candidate in candidates],
-                "run_ids": [run.run_id for run in runs],
-            },
-        }
-        for filename, payload in payloads.items():
-            (temporary / filename).write_text(
-                json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-        os.rename(temporary, output_dir)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-    return output_dir
+def _write_calibration_plan(args: argparse.Namespace) -> tuple[Path, Path]:
+    return materialize_calibration_stage(
+        repo_root=args.repo_root,
+        stage_id=args.stage,
+        parent_ranking_path=args.parents,
+        output_dir=args.output_dir,
+        profile_output=args.profile_output,
+    )
 
 
 def _write_calibration_ranking(args: argparse.Namespace) -> Path:
-    search = load_search_space(args.repo_root)
-    manifest = load_json_object(args.manifest, "calibration manifest")
-    validate_json(
-        manifest,
-        args.repo_root / "schemas" / "calibration-manifest.schema.json",
-        "calibration manifest",
+    return rank_calibration_stage(
+        repo_root=args.repo_root,
+        stage_id=args.stage,
+        manifest_path=args.manifest,
+        summary_path=args.summary,
+        output_path=args.output,
     )
-    if manifest.get("search_space_id") != search["id"] or manifest.get("stage_id") != args.stage:
-        raise BenchmarkConfigError("Calibration manifest identity differs from the requested stage")
-    spathi_identity = locked_spathi_identity(args.repo_root)
-    if any(manifest.get(field) != value for field, value in spathi_identity.items()):
-        raise BenchmarkConfigError("Calibration manifest was generated for another SPATHI build")
-    raw_candidates = manifest.get("candidates")
-    if not isinstance(raw_candidates, list) or not raw_candidates:
-        raise BenchmarkConfigError("Calibration manifest contains no candidates")
-    candidates = tuple(candidate_from_dict(item) for item in raw_candidates)
-    summary = load_json_object(args.summary, "benchmark summary")
-    rows = summary.get("calibration_rows")
-    if not isinstance(rows, list):
-        raise BenchmarkConfigError("Benchmark summary contains no calibration_rows")
-    output: Path = args.output
-    if output.exists():
-        raise BenchmarkConfigError(f"Calibration ranking output already exists: {output}")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_calibration_ranking(
-        search,
-        args.stage,
-        candidates,
-        rows,
-        search_space_sha256=sha256_file(
-            args.repo_root / "experiments" / "v1" / "spathi" / "search-space.json"
-        ),
-        calibration_manifest_sha256=sha256_file(args.manifest),
-        benchmark_summary_sha256=sha256_file(args.summary),
-        **spathi_identity,
-    )
-    validate_json(
-        payload,
-        args.repo_root / "schemas" / "calibration-ranking.schema.json",
-        "calibration ranking",
-    )
-    temporary = output.with_name(f".{output.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, output)
-    return output
 
 
 def _write_frozen_selection(args: argparse.Namespace) -> Path:
-    output: Path = args.output
-    if output.exists():
-        existing = load_json_object(output, "existing selected configuration")
-        if existing.get("status") != "unselected" or existing.get("phase") != "planned":
-            raise BenchmarkConfigError(
-                f"Refusing to replace a non-planned selected configuration: {output}"
-            )
-    output.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_frozen_selected_config(args.repo_root, args.ranking)
-    temporary = output.with_name(f".{output.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, output)
-    return output
+    return freeze_calibration_selection(
+        repo_root=args.repo_root,
+        ranking_path=args.ranking,
+        output_path=args.output,
+    )
 
 
 def _dispatch(
@@ -291,12 +221,38 @@ def _dispatch(
             report_path=args.output,
         )
         return "Environment diagnostics", report
+    if args.command == "calibrate":
+        return "SPATHI calibration completed", run_calibration_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            run_id=args.run_id,
+        )
+    if args.command == "compare":
+        return "SPATHI comparison completed", run_comparison_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
+            calibration_run_id=args.calibration_run_id,
+        )
     if args.command == "calibration-plan":
         return "Calibration plan written", _write_calibration_plan(args)
     if args.command == "calibration-rank":
         return "Calibration ranking written", _write_calibration_ranking(args)
     if args.command == "calibration-freeze":
         return "SPATHI selection frozen", _write_frozen_selection(args)
+    if args.command == "benchmark-plan":
+        return "Benchmark plan written", materialize_benchmark_plan(
+            repo_root=args.repo_root,
+            template_profile_id=args.template_profile,
+            baseline_plan_path=args.baseline_plan,
+            output_dir=args.output_dir,
+            profile_output=args.profile_output,
+            selected_config_path=args.selected_config,
+        )
     common = {
         "repo_root": args.repo_root,
         "profile_id": args.profile,
@@ -307,6 +263,7 @@ def _dispatch(
             **common,
             andrea_repo=args.andrea_repo,
             spathi_repo=args.spathi_repo,
+            profile_file=args.profile_file,
         )
         return "Preflight passed", path
     if args.command == "build-image":
@@ -359,9 +316,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command in {
             "doctor",
+            "calibrate",
+            "compare",
             "calibration-plan",
             "calibration-rank",
             "calibration-freeze",
+            "benchmark-plan",
         }:
             message, result = _dispatch(args)
         else:
@@ -377,7 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         rendered = str(result)
     print(f"{message}: {rendered}")
-    if isinstance(result, dict) and not result.get("ok", False):
+    if args.command == "doctor" and isinstance(result, dict) and not result.get("ok", False):
         return 2
     return 0
 

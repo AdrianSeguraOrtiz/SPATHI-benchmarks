@@ -1,13 +1,57 @@
 {
   "schema_version": "1.0",
   "catalog_images": {
+    "tool:aracne3": {
+      "tag": "adriansegura99/inference-tools_aracne3:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_aracne3@sha256:3532b6dee5b4da7efb960c65a7c658f15d4071845b55cdc8229c011522a23640"
+    },
+    "simulator:boolode": {
+      "tag": "adriansegura99/simulator_boolode:1.0.0",
+      "repo_digest": "adriansegura99/simulator_boolode@sha256:4b9aaae29460e3e0805f34f3cff1ba363188679347b10346abb48425826a4d1f"
+    },
     "simulator:dyngen": {
       "tag": "adriansegura99/simulator_dyngen:1.0.0",
       "repo_digest": "adriansegura99/simulator_dyngen@sha256:01be5a207a98e2edc3c082daf431a4b3901ed4f74db0035ce26e3bd6b26d159a"
     },
+    "simulator:genespider2": {
+      "tag": "adriansegura99/simulator_genespider2:1.0.0",
+      "repo_digest": "adriansegura99/simulator_genespider2@sha256:c9fa3a1d3a474ea8769637995453e0b0edc27388be5219a3cd20a67003a88790"
+    },
+    "simulator:scmultisim": {
+      "tag": "adriansegura99/simulator_scmultisim:1.0.0",
+      "repo_digest": "adriansegura99/simulator_scmultisim@sha256:ecb62fbf5846561d441f783712aacb74425c35c52539f2edde5969e5474a224b"
+    },
+    "simulator:sergio": {
+      "tag": "adriansegura99/simulator_sergio:1.0.0",
+      "repo_digest": "adriansegura99/simulator_sergio@sha256:e8a7eee2fb93ccd31150f1681994893ede42ef7906cd687098bbad859af4645b"
+    },
     "tool:genie3": {
       "tag": "adriansegura99/inference-tools_genie3:1.0.0",
       "repo_digest": "adriansegura99/inference-tools_genie3@sha256:3e1333f4852c7e6872935f4e8b6b49d4ced58a34778eb036c3ec8aabf13e28d0"
+    },
+    "tool:grnboost2": {
+      "tag": "adriansegura99/inference-tools_grnboost2:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_grnboost2@sha256:19400b015ba6ae3eb61badfd7623ad13362c66dc3b83d80bdb68ed20ab2a6d87"
+    },
+    "tool:infercsn": {
+      "tag": "adriansegura99/inference-tools_infercsn:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_infercsn@sha256:2f3b5c864fd876205d3812e38917349ceb32554f3c2ea198bad3e4833b1d6552"
+    },
+    "tool:pyscenic": {
+      "tag": "adriansegura99/inference-tools_pyscenic:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_pyscenic@sha256:6dbae891a11d78f057fe17b7eb45e456ac1249bdac2964d78bcc528d52aaa3a4"
+    },
+    "tool:scminer": {
+      "tag": "adriansegura99/inference-tools_scminer:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_scminer@sha256:37abb550697aabe8dc7b3196df7adade35c92554c408036696e61a9d205c04f8"
+    },
+    "tool:simic": {
+      "tag": "adriansegura99/inference-tools_simic:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_simic@sha256:149c96293a4896a4aaa83c23e5ed2b02bfad1c80b872522eef3b778f50ccb5bb"
+    },
+    "tool:tigress": {
+      "tag": "adriansegura99/inference-tools_tigress:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_tigress@sha256:7905c83384a6b33729b3c700fa374e9d2e88f29e7860ede398e19be40e064ae3"
     }
   },
   "images": {

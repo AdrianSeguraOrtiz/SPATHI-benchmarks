@@ -10,7 +10,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from .artifacts import canonical_json_sha256
+from .artifacts import canonical_json_sha256, sha256_file
 
 
 class BenchmarkConfigError(ValueError):
@@ -73,6 +73,40 @@ def load_profile(
         raise BenchmarkConfigError(
             f"Profile {profile_id!r} is planned but not runnable; freeze its request files first"
         )
+    return profile
+
+
+def load_profile_file(
+    repo_root: Path,
+    profile_file: Path,
+    profile_id: str,
+    *,
+    require_runnable: bool = False,
+    require_runtime: bool = False,
+) -> dict[str, Any]:
+    """Load an explicitly addressed profile without weakening path boundaries.
+
+    High-level workflows materialize profiles below ``work/``.  They are frozen
+    by hash during preflight and never discovered implicitly.
+    """
+
+    root = repo_root.resolve()
+    candidate = profile_file.absolute()
+    if candidate.is_symlink():
+        raise BenchmarkConfigError(f"Profile file cannot be a symlink: {profile_file}")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root):
+        raise BenchmarkConfigError(f"Profile file escapes repository root: {profile_file}")
+    if require_runtime and not resolved.is_relative_to((root / "work").resolve()):
+        raise BenchmarkConfigError(f"Runtime profile must be stored below work/: {profile_file}")
+    profile = load_json_object(resolved, f"profile {profile_id}")
+    validate_json(profile, root / "schemas" / "profile.schema.json", f"profile {profile_id}")
+    if profile.get("id") != profile_id:
+        raise BenchmarkConfigError(
+            f"Profile ID {profile.get('id')!r} does not match requested ID {profile_id!r}"
+        )
+    if require_runnable and profile.get("status") != "runnable":
+        raise BenchmarkConfigError(f"Profile {profile_id!r} is not runnable")
     return profile
 
 
@@ -239,13 +273,69 @@ def _validate_run_identity(
         )
 
 
+def _resolve_generation_job_selector(
+    *,
+    owner: str,
+    selected_jobs: Any,
+    allowed_roles: set[str],
+    generation_roles_by_id: dict[str, str],
+) -> frozenset[str]:
+    if selected_jobs is None:
+        return frozenset(
+            job_id
+            for job_id, dataset_role in generation_roles_by_id.items()
+            if dataset_role in allowed_roles
+        )
+    if not isinstance(selected_jobs, list) or not selected_jobs:
+        raise BenchmarkConfigError(f"{owner} generation_jobs must be a non-empty array")
+    if not all(isinstance(job_id, str) and job_id for job_id in selected_jobs):
+        raise BenchmarkConfigError(f"{owner} contains an invalid generation job ID")
+    if len(set(selected_jobs)) != len(selected_jobs):
+        raise BenchmarkConfigError(f"{owner} contains duplicate generation job IDs")
+    unknown_jobs = sorted(set(selected_jobs) - generation_roles_by_id.keys())
+    if unknown_jobs:
+        raise BenchmarkConfigError(f"{owner} selects unknown generation jobs: {unknown_jobs}")
+    mismatched_jobs = {
+        job_id: generation_roles_by_id[job_id]
+        for job_id in selected_jobs
+        if generation_roles_by_id[job_id] not in allowed_roles
+    }
+    if mismatched_jobs:
+        role_label = (
+            f"dataset role {next(iter(allowed_roles))!r}"
+            if len(allowed_roles) == 1
+            else f"dataset roles {sorted(allowed_roles)!r}"
+        )
+        raise BenchmarkConfigError(
+            f"{owner} selects generation jobs outside {role_label}: {mismatched_jobs}"
+        )
+    return frozenset(selected_jobs)
+
+
 def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> None:
     generation_ids = [job["id"] for job in profile["generation_jobs"]]
     if len(set(generation_ids)) != len(generation_ids):
         raise BenchmarkConfigError("Profile contains duplicate generation job IDs")
+    generation_roles_by_id = {
+        str(job["id"]): str(job["dataset_role"]) for job in profile["generation_jobs"]
+    }
     batch_ids = [batch["id"] for batch in profile["inference_batches"]]
     if len(set(batch_ids)) != len(batch_ids):
         raise BenchmarkConfigError("Profile contains duplicate inference batch IDs")
+    for batch in profile["inference_batches"]:
+        _resolve_generation_job_selector(
+            owner=f"Inference batch {batch['id']}",
+            selected_jobs=batch.get("generation_jobs"),
+            allowed_roles={str(batch["dataset_role"])},
+            generation_roles_by_id=generation_roles_by_id,
+        )
+    for comparison in profile["statistics"]["comparisons"]:
+        _resolve_generation_job_selector(
+            owner=f"Statistics comparison {comparison['id']}",
+            selected_jobs=comparison.get("generation_jobs"),
+            allowed_roles={str(role) for role in comparison["dataset_roles"]},
+            generation_roles_by_id=generation_roles_by_id,
+        )
     if profile.get("status") != "runnable":
         return
     generation_roles = {str(job["dataset_role"]) for job in profile["generation_jobs"]}
@@ -261,14 +351,45 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             f"Runnable {profile['purpose']} profile {profile['id']} must contain exactly "
             f"dataset roles {sorted(expected_roles)}, found {sorted(generation_roles)}"
         )
-    if "test" in generation_roles:
-        _search, selected = validate_calibration_contracts(repo_root)
+    selected: dict[str, Any] | None = None
+    if profile["purpose"] in {"regression", "benchmark"}:
+        raw_selected = profile.get("selected_config")
+        raw_manifest = profile.get("materialization_manifest")
+        if not isinstance(raw_selected, str) or not isinstance(raw_manifest, str):
+            raise BenchmarkConfigError(
+                f"Profile {profile['id']} cannot become runnable before SPATHI selection is "
+                "frozen and recorded in a materialization manifest"
+            )
+        selected_path = resolve_repo_path(
+            repo_root, raw_selected, f"{profile['id']} selected configuration"
+        )
+        _search, selected = validate_calibration_contracts(repo_root, selected_path)
         if selected["status"] != "selected" or selected["phase"] != "frozen":
             raise BenchmarkConfigError(
-                f"Test profile {profile['id']} cannot become runnable before SPATHI selection is frozen"
+                f"Profile {profile['id']} cannot become runnable before SPATHI selection is frozen"
+            )
+        manifest_path = resolve_repo_path(
+            repo_root, raw_manifest, f"{profile['id']} materialization manifest"
+        )
+        materialization = load_json_object(manifest_path, "benchmark materialization manifest")
+        manifest_selection = materialization.get("selected_config")
+        if (
+            materialization.get("profile_id") != profile["id"]
+            or not isinstance(manifest_selection, dict)
+            or manifest_selection.get("path") != raw_selected
+            or manifest_selection.get("sha256") != sha256_file(selected_path)
+        ):
+            raise BenchmarkConfigError(
+                f"Profile {profile['id']} differs from its materialization manifest"
             )
     statistics = profile["statistics"]
-    if statistics["status"] != "enabled":
+    if profile["purpose"] in {"calibration", "selection"}:
+        if statistics["status"] != "not_applicable":
+            raise BenchmarkConfigError(
+                f"Runnable {profile['purpose']} profile {profile['id']} must mark the "
+                "generic statistics stage not_applicable; calibration-rank owns selection"
+            )
+    elif statistics["status"] != "enabled":
         raise BenchmarkConfigError(
             f"Runnable profile {profile['id']} must have an enabled statistics contract"
         )
@@ -293,7 +414,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         raise BenchmarkConfigError(
             "Confirmatory comparisons must use directed AUPR as the primary endpoint"
         )
-    configuration_routes: dict[str, set[tuple[str, str]]] = {}
+    configuration_routes: dict[str, set[tuple[str, str, frozenset[str]]]] = {}
     configuration_families: dict[str, set[str]] = {}
     for job in profile["generation_jobs"]:
         scenario_path = resolve_repo_path(repo_root, job["scenario"], f"{job['id']} scenario")
@@ -342,10 +463,20 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             batch["run_metadata"],
             f"{batch['id']} run metadata",
         )
+        batch_generation_jobs = _resolve_generation_job_selector(
+            owner=f"Inference batch {batch['id']}",
+            selected_jobs=batch.get("generation_jobs"),
+            allowed_roles={str(batch["dataset_role"])},
+            generation_roles_by_id=generation_roles_by_id,
+        )
         for item in metadata["runs"]:
             configuration_id = str(item["configuration_id"])
             configuration_routes.setdefault(configuration_id, set()).add(
-                (str(batch["dataset_role"]), str(batch["regime"]))
+                (
+                    str(batch["dataset_role"]),
+                    str(batch["regime"]),
+                    batch_generation_jobs,
+                )
             )
             family = item.get("family")
             if isinstance(family, str) and family:
@@ -398,7 +529,10 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                     f"Test batch {batch['id']} may execute only a frozen selected "
                     "SPATHI configuration"
                 )
-            _search, selected = validate_calibration_contracts(repo_root)
+            if selected is None:
+                raise BenchmarkConfigError(
+                    f"Test batch {batch['id']} has no frozen selected configuration"
+                )
             if selected["status"] != "selected" or selected["phase"] != "frozen":
                 raise BenchmarkConfigError(
                     f"Test batch {batch['id']} requires a frozen selected-config.json"
@@ -448,42 +582,39 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 repo_root / "schemas" / "calibration-manifest.schema.json",
                 f"{batch['id']} calibration manifest",
             )
-            from .calibration import locked_spathi_identity
+            from .calibration import validate_calibration_manifest
 
-            spathi_identity = locked_spathi_identity(repo_root)
-            if any(manifest.get(field) != value for field, value in spathi_identity.items()):
-                raise BenchmarkConfigError(
-                    f"{batch['id']} calibration manifest targets another SPATHI build"
-                )
+            search = load_json_object(
+                repo_root / "experiments/v1/spathi/search-space.json",
+                "SPATHI search space",
+            )
+            candidates, manifest_runs = validate_calibration_manifest(
+                repo_root,
+                search,
+                manifest,
+            )
             expected_role = "development" if profile["purpose"] == "calibration" else "validation"
             if manifest.get("dataset_role") != expected_role:
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest has the wrong dataset role"
                 )
-            manifest_run_ids = manifest.get("run_ids")
-            if (
-                not isinstance(manifest_run_ids, list)
-                or not all(isinstance(run_id, str) for run_id in manifest_run_ids)
-                or len(set(manifest_run_ids)) != len(manifest_run_ids)
-                or set(manifest_run_ids) != requested_ids
-            ):
+            if manifest.get("profile_id") != profile["id"]:
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest belongs to another profile"
+                )
+            if manifest.get("stage_id") != profile.get("calibration_stage"):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest has the wrong profile stage"
+                )
+            manifest_run_ids = {run.run_id for run in manifest_runs}
+            if manifest_run_ids != requested_ids:
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest run IDs differ from its request"
                 )
-            raw_candidates = manifest.get("candidates")
-            if not isinstance(raw_candidates, list):
-                raise BenchmarkConfigError(
-                    f"{batch['id']} calibration manifest contains no candidates"
-                )
             candidate_digests = {
-                str(candidate.get("configuration_id")): candidate.get("configuration_sha256")
-                for candidate in raw_candidates
-                if isinstance(candidate, dict)
+                candidate.configuration_id: candidate.configuration_sha256
+                for candidate in candidates
             }
-            if len(candidate_digests) != len(raw_candidates):
-                raise BenchmarkConfigError(
-                    f"{batch['id']} calibration manifest contains invalid or duplicate candidates"
-                )
             for item in metadata["runs"]:
                 run_id = str(item["run_id"])
                 configuration_id = str(item["configuration_id"])
@@ -515,16 +646,27 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             raise BenchmarkConfigError(
                 f"Statistics comparison {comparison['id']} primary level is not selected"
             )
-        expected_routes = {
-            (str(role), str(comparison["regime"])) for role in comparison["dataset_roles"]
-        }
+        selected_generation_jobs = _resolve_generation_job_selector(
+            owner=f"Statistics comparison {comparison['id']}",
+            selected_jobs=comparison.get("generation_jobs"),
+            allowed_roles={str(role) for role in comparison["dataset_roles"]},
+            generation_roles_by_id=generation_roles_by_id,
+        )
         for configuration_id in configurations:
             observed_routes = configuration_routes.get(configuration_id, set())
-            if not expected_routes.issubset(observed_routes):
+            covered_generation_jobs = frozenset(
+                job_id
+                for dataset_role, regime, generation_jobs in observed_routes
+                if dataset_role in comparison["dataset_roles"] and regime == comparison["regime"]
+                for job_id in generation_jobs
+            )
+            missing_generation_jobs = sorted(selected_generation_jobs - covered_generation_jobs)
+            if missing_generation_jobs:
                 raise BenchmarkConfigError(
                     f"Statistics comparison {comparison['id']} configuration "
-                    f"{configuration_id!r} is not predeclared for every selected "
-                    "dataset role and regime"
+                    f"{configuration_id!r} has no matching inference batch coverage for "
+                    f"generation jobs {missing_generation_jobs} in regime "
+                    f"{comparison['regime']!r}"
                 )
 
 
@@ -549,11 +691,20 @@ def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
 REGIME_IDS = {"group_only", "order_aware", "pseudotime_aware", "prior_assisted"}
 
 
-def validate_calibration_contracts(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def validate_calibration_contracts(
+    repo_root: Path,
+    selected_config_path: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate the bounded SPATHI search and its frozen-selection record."""
 
     search_path = repo_root / "experiments" / "v1" / "spathi" / "search-space.json"
-    selected_path = repo_root / "experiments" / "v1" / "spathi" / "selected-config.json"
+    selected_path = (
+        selected_config_path.resolve()
+        if selected_config_path is not None
+        else repo_root / "experiments" / "v1" / "spathi" / "selected-config.json"
+    )
+    if not selected_path.is_relative_to(repo_root.resolve()):
+        raise BenchmarkConfigError("SPATHI selected configuration escapes repository root")
     search = load_json_object(search_path, "SPATHI search space")
     selected = load_json_object(selected_path, "SPATHI selected configuration")
     validate_json(

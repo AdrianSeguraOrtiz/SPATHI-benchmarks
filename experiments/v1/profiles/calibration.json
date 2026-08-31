@@ -3,8 +3,49 @@
   "id": "calibration",
   "status": "planned",
   "purpose": "calibration",
-  "description": "Development-only staged SPATHI configuration search; datasets are not frozen yet.",
-  "generation_jobs": [],
+  "description": "Development-only staged SPATHI configuration search on frozen dyngen and scMultiSim panels.",
+  "generation_jobs": [
+    {
+      "id": "dyngen_development_linear_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-baseline-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "linear_baseline"
+    },
+    {
+      "id": "dyngen_development_linear_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-noisy-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "linear_noisy"
+    },
+    {
+      "id": "dyngen_development_bifurcating_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-baseline-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "bifurcating_baseline"
+    },
+    {
+      "id": "dyngen_development_bifurcating_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-noisy-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "bifurcating_noisy"
+    },
+    {
+      "id": "scmultisim_development_dynamic",
+      "scenario": "experiments/v1/simulations/scmultisim/development/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/development/dynamic-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "scmultisim_dynamic"
+    }
+  ],
   "inference_batches": [],
   "resources": {
     "generate_data": {
@@ -24,10 +65,11 @@
     "simulators": ["dyngen", "scmultisim"],
     "replicates_per_condition": 3,
     "regimes": ["group_only"],
-    "factors": ["convergence", "structure", "estimator"],
+    "factors": ["topology", "kinetics_noise", "convergence", "structure", "estimator"],
     "notes": [
-      "Contains development datasets only.",
-      "Candidate bundles are generated from experiments/v1/spathi/search-space.json."
+      "Contains 15 development datasets: twelve dyngen and three scMultiSim instances.",
+      "Candidate bundles are generated from experiments/v1/spathi/search-space.json.",
+      "The scMultiSim development topology is not reused by validation or test."
     ]
   },
   "statistics": {

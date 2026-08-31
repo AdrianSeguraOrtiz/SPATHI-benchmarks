@@ -20,6 +20,11 @@
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
     "purpose": {"enum": ["smoke", "calibration", "selection", "regression", "benchmark"]},
+    "calibration_stage": {
+      "enum": ["convergence", "structure", "estimator", "validation"]
+    },
+    "selected_config": {"$ref": "#/$defs/relative_path"},
+    "materialization_manifest": {"$ref": "#/$defs/relative_path"},
     "description": {"type": "string", "minLength": 1},
     "generation_jobs": {
       "type": "array",
@@ -42,6 +47,41 @@
           "inference_batches": {"minItems": 1}
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "runnable"},
+          "purpose": {"enum": ["calibration", "selection"]}
+        },
+        "required": ["status", "purpose"]
+      },
+      "then": {"required": ["calibration_stage"]}
+    },
+    {
+      "if": {"properties": {"purpose": {"const": "selection"}}, "required": ["purpose"]},
+      "then": {"properties": {"calibration_stage": {"const": "validation"}}}
+    },
+    {
+      "if": {
+        "properties": {"purpose": {"const": "calibration"}},
+        "required": ["purpose"]
+      },
+      "then": {
+        "properties": {
+          "calibration_stage": {"enum": ["convergence", "structure", "estimator"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "runnable"},
+          "purpose": {"enum": ["regression", "benchmark"]}
+        },
+        "required": ["status", "purpose"]
+      },
+      "then": {"required": ["selected_config", "materialization_manifest"]}
     }
   ],
   "$defs": {
@@ -86,6 +126,12 @@
         "id": {"$ref": "#/$defs/id"},
         "kind": {"enum": ["baseline", "spathi"]},
         "dataset_role": {"enum": ["smoke", "development", "validation", "test"]},
+        "generation_jobs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
         "regime": {
           "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
         },
@@ -171,7 +217,7 @@
         "comparisons"
       ],
       "properties": {
-        "status": {"enum": ["enabled", "planned"]},
+        "status": {"enum": ["enabled", "planned", "not_applicable"]},
         "alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
         "random_seed": {"type": "integer", "minimum": 0},
         "permutations": {"type": "integer", "minimum": 9999, "maximum": 9999999},
@@ -218,6 +264,12 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"enum": ["smoke", "development", "validation", "test"]}
+        },
+        "generation_jobs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
         },
         "regime": {
           "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]

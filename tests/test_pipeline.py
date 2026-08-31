@@ -8,12 +8,14 @@ from typing import Any
 import pytest
 
 import spathi_bench.pipeline as pipeline
-from spathi_bench.artifacts import ArtifactKey
+from spathi_bench.artifacts import Artifact, ArtifactKey
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.pipeline import (
     _analysis_bundle_spec,
     _artifact_store,
+    _batch_selects_dataset,
     _evaluation_spec,
+    _execute_unique_missing_tasks,
     _generation_spec,
     _inference_spec,
     _integration_spec,
@@ -29,6 +31,179 @@ def _state() -> dict[str, Any]:
         "host_environment": {"fingerprint": "h" * 64},
         "catalog_images": {"simulator:dyngen": {"locked_repo_digest": "dyngen@sha256:" + "d" * 64}},
     }
+
+
+def test_inference_batch_without_generation_jobs_selects_entire_role() -> None:
+    batch = {"dataset_role": "development"}
+
+    assert _batch_selects_dataset(
+        batch, {"dataset_role": "development", "generation_job": "dyngen"}
+    )
+    assert _batch_selects_dataset(
+        batch, {"dataset_role": "development", "generation_job": "scmultisim"}
+    )
+    assert not _batch_selects_dataset(
+        batch, {"dataset_role": "validation", "generation_job": "dyngen"}
+    )
+
+
+def test_inference_batch_generation_jobs_filter_datasets_within_role() -> None:
+    batch = {"dataset_role": "development", "generation_jobs": ["dyngen"]}
+
+    assert _batch_selects_dataset(
+        batch, {"dataset_role": "development", "generation_job": "dyngen"}
+    )
+    assert not _batch_selects_dataset(
+        batch, {"dataset_role": "development", "generation_job": "scmultisim"}
+    )
+    assert not _batch_selects_dataset(
+        batch, {"dataset_role": "validation", "generation_job": "dyngen"}
+    )
+
+
+def test_inference_key_ignores_classification_regime() -> None:
+    state = _state()
+    dataset = {
+        "dataset_id": "dataset_a",
+        "dataset_artifact": {"key": "sha256:" + "d" * 64},
+    }
+    run = {
+        "run_id": "spathi_selected__seed_1729",
+        "tool_id": "custom_spathi_selected__seed_1729",
+        "params": {"random_seed": 1729},
+        "execution": {"mode": "group_native"},
+    }
+    metadata = {
+        "run_id": run["run_id"],
+        "configuration_id": "spathi_selected",
+        "selection_role": "selected",
+        "algorithm_seed": 1729,
+        "algorithm_seed_parameter": "random_seed",
+    }
+    custom_definition = {
+        "run_id": run["run_id"],
+        "docker_image": "sha256:" + "e" * 64,
+    }
+    tool_image = {"kind": "spathi", "image_id": "sha256:" + "e" * 64}
+    resources = {
+        "max_cores": 2,
+        "max_ram_gb": 8,
+        "planner": "heuristic",
+        "planner_time_limit_seconds": 30,
+    }
+
+    group_only = _inference_spec(
+        state=state,
+        dataset=dataset,
+        batch={"kind": "spathi", "regime": "group_only"},
+        run=run,
+        metadata=metadata,
+        custom_definition=custom_definition,
+        tool_image=tool_image,
+        resources=resources,
+    )
+    pseudotime_aware = _inference_spec(
+        state=state,
+        dataset=dataset,
+        batch={"kind": "spathi", "regime": "pseudotime_aware"},
+        run=run,
+        metadata=metadata,
+        custom_definition=custom_definition,
+        tool_image=tool_image,
+        resources=resources,
+    )
+
+    assert group_only == pseudotime_aware
+    assert ArtifactKey.from_spec("inference", group_only) == ArtifactKey.from_spec(
+        "inference", pseudotime_aware
+    )
+
+
+def test_missing_tasks_execute_once_per_key_and_reuse_the_artifact(tmp_path: Path) -> None:
+    first_key = ArtifactKey.from_spec("inference", {"request": "first"})
+    second_key = ArtifactKey.from_spec("inference", {"request": "second"})
+    first_spec = {"request": "first"}
+    prepared = [
+        {"key": first_key, "spec": first_spec, "artifact": None, "cache_hit": False},
+        {
+            "key": first_key,
+            "spec": deepcopy(first_spec),
+            "artifact": None,
+            "cache_hit": False,
+        },
+        {
+            "key": second_key,
+            "spec": {"request": "second"},
+            "artifact": None,
+            "cache_hit": False,
+        },
+    ]
+    artifacts = {
+        key: Artifact(key=key, path=tmp_path / key.digest, manifest={})
+        for key in (first_key, second_key)
+    }
+    calls: list[ArtifactKey] = []
+
+    def execute(task: dict[str, Any]) -> Artifact:
+        calls.append(task["key"])
+        return artifacts[task["key"]]
+
+    reused = _execute_unique_missing_tasks(
+        prepared,
+        max_workers=2,
+        thread_name_prefix="test-deduplication",
+        execute=execute,
+    )
+
+    assert sorted(calls, key=lambda key: key.value) == sorted(
+        (first_key, second_key), key=lambda key: key.value
+    )
+    assert reused == (1,)
+    assert prepared[0]["artifact"] is artifacts[first_key]
+    assert prepared[1]["artifact"] is artifacts[first_key]
+    assert prepared[2]["artifact"] is artifacts[second_key]
+    assert [task["cache_hit"] for task in prepared] == [False, True, False]
+
+
+def test_missing_tasks_reject_same_key_with_different_specs() -> None:
+    key = ArtifactKey.from_spec("inference", {"request": "first"})
+    prepared = [
+        {"key": key, "spec": {"request": "first"}, "artifact": None},
+        {"key": key, "spec": {"request": "different"}, "artifact": None},
+    ]
+
+    with pytest.raises(BenchmarkConfigError, match="different execution specifications"):
+        _execute_unique_missing_tasks(
+            prepared,
+            max_workers=1,
+            thread_name_prefix="test-deduplication",
+            execute=lambda _task: pytest.fail("inconsistent tasks must not execute"),
+        )
+
+
+def test_missing_tasks_reject_executor_artifact_with_another_key(tmp_path: Path) -> None:
+    requested = ArtifactKey.from_spec("inference", {"request": "expected"})
+    returned = ArtifactKey.from_spec("inference", {"request": "wrong"})
+    prepared = [
+        {
+            "key": requested,
+            "spec": {"request": "expected"},
+            "artifact": None,
+            "cache_hit": False,
+        }
+    ]
+
+    with pytest.raises(BenchmarkConfigError, match="for requested key"):
+        _execute_unique_missing_tasks(
+            prepared,
+            max_workers=1,
+            thread_name_prefix="test-deduplication",
+            execute=lambda _task: Artifact(
+                key=returned,
+                path=tmp_path / returned.digest,
+                manifest={},
+            ),
+        )
 
 
 def test_generation_key_does_not_depend_on_spathi(tmp_path: Path) -> None:
@@ -271,27 +446,33 @@ def test_spathi_change_invalidates_only_spathi_inference_and_evaluation() -> Non
 
     changed_orchestrator = deepcopy(state)
     changed_orchestrator["benchmark_repository"]["commit"] = "c" * 40
-    assert ArtifactKey.from_spec(
-        "joint-inference",
-        _integration_spec(
-            state=changed_orchestrator,
-            dataset=dataset,
-            regime="group_only",
-            inference_runs=[baseline_for_joint, new_spathi_for_joint],
-        ),
-    ) != new_joint_key
-    assert ArtifactKey.from_spec(
-        "analysis-bundle",
-        _analysis_bundle_spec(
-            state=changed_orchestrator,
-            source_artifact=baseline_inference["artifact"],
-            producer_command="infer-network",
-            dataset_id="dataset_a",
-            scope="individual",
-            regime="group_only",
-            run_id="genie3",
-        ),
-    ) != baseline_bundle
+    assert (
+        ArtifactKey.from_spec(
+            "joint-inference",
+            _integration_spec(
+                state=changed_orchestrator,
+                dataset=dataset,
+                regime="group_only",
+                inference_runs=[baseline_for_joint, new_spathi_for_joint],
+            ),
+        )
+        != new_joint_key
+    )
+    assert (
+        ArtifactKey.from_spec(
+            "analysis-bundle",
+            _analysis_bundle_spec(
+                state=changed_orchestrator,
+                source_artifact=baseline_inference["artifact"],
+                producer_command="infer-network",
+                dataset_id="dataset_a",
+                scope="individual",
+                regime="group_only",
+                run_id="genie3",
+            ),
+        )
+        != baseline_bundle
+    )
 
 
 def test_spathi_build_fingerprint_covers_every_locked_input() -> None:

@@ -427,6 +427,7 @@ def summarize(
                     "schema_version": "2.0",
                     "profile_id": profile_id,
                     "purpose": state["purpose"],
+                    "benchmark_commit": state["benchmark_repository"]["commit"],
                     "metric_rows": len(rows),
                     "aggregates": aggregates,
                     "calibration_rows": _calibration_rows(rows),

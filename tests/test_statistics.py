@@ -217,16 +217,12 @@ def _run(
 
 
 def test_friedman_exact_oracles_and_ties() -> None:
-    balanced = _friedman_test(
-        [[3, 2, 1], [1, 2, 3]], permutations=9999, random_seed=1
-    )
+    balanced = _friedman_test([[3, 2, 1], [1, 2, 3]], permutations=9999, random_seed=1)
     assert balanced["statistic"] == pytest.approx(0.0)
     assert balanced["p_raw"] == pytest.approx(1.0)
     assert balanced["kendalls_w"] == pytest.approx(0.0)
 
-    ordered = _friedman_test(
-        [[3, 2, 1], [3, 2, 1], [3, 2, 1]], permutations=9999, random_seed=1
-    )
+    ordered = _friedman_test([[3, 2, 1], [3, 2, 1], [3, 2, 1]], permutations=9999, random_seed=1)
     assert ordered["statistic"] == pytest.approx(6.0)
     assert ordered["p_raw"] == pytest.approx(1 / 36)
     assert ordered["kendalls_w"] == pytest.approx(1.0)
@@ -360,9 +356,50 @@ def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
     assert load_state(run_root, "smoke")["statistics"]["files"]["statistics.json"][
         "sha256"
     ] == sha256_file(paths[0])
-    assert analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    ) == paths
+    assert analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root) == paths
+
+
+def test_comparison_generation_jobs_exclude_other_jobs_from_strata_and_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison["generation_jobs"] = ["selected_job"]
+    comparison["stratify_by"] = ["dataset_role", "regime", "level"]
+    datasets = [_dataset(1), _dataset(2)]
+    datasets[0]["generation_job"] = "selected_job"
+    datasets[1]["generation_job"] = "excluded_job"
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=dataset["dataset_id"],
+            run_id=configuration,
+            context="group:a",
+            score=0.8 if configuration == "spathi" else 0.5,
+        )
+        for dataset in datasets
+        for configuration in ("genie3", "spathi")
+    ]
+    for row in rows:
+        row["generation_job"] = next(
+            dataset["generation_job"]
+            for dataset in datasets
+            if dataset["dataset_id"] == row["dataset_id"]
+        )
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=datasets,
+        rows=rows,
+        monkeypatch=monkeypatch,
+    )
+
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    report = json.loads(statistics.read_text(encoding="utf-8"))
+    assert len(report["analyses"]) == 1
+    analysis = report["analyses"][0]
+    assert analysis["n_expected_blocks"] == 1
+    assert [block["dataset_id"] for block in analysis["blocks"]] == ["dataset_1"]
 
 
 def test_complete_panel_averages_contexts_then_seeds_and_runs_friedman(
@@ -458,9 +495,7 @@ def test_incomplete_context_panel_is_reported_and_never_pairwise_deleted(
         monkeypatch=monkeypatch,
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
     assert analysis["status"] == "incomplete_panel"
     assert analysis["n_expected_blocks"] == 2
@@ -530,11 +565,7 @@ def test_different_algorithm_seed_panels_are_aggregated_without_adding_blocks(
             ),
             context="group:a",
             score=(
-                0.5
-                if configuration == "deterministic"
-                else 0.7
-                if algorithm_seed == 1
-                else 0.9
+                0.5 if configuration == "deterministic" else 0.7 if algorithm_seed == 1 else 0.9
             ),
             dataset_role="test",
             algorithm_seed=algorithm_seed,
@@ -552,9 +583,7 @@ def test_different_algorithm_seed_panels_are_aggregated_without_adding_blocks(
         purpose="benchmark",
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
     assert analysis["status"] == "tested"
     assert analysis["n_complete_blocks"] == 2
@@ -604,9 +633,7 @@ def test_one_algorithm_seed_cannot_be_counted_twice_under_distinct_run_ids(
         monkeypatch=monkeypatch,
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
     assert analysis["status"] == "incomplete_panel"
     assert all(
@@ -641,9 +668,7 @@ def test_candidate_universes_must_match_within_each_paired_context(
         monkeypatch=monkeypatch,
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
     assert analysis["status"] == "incomplete_panel"
     assert analysis["n_complete_blocks"] == 0
@@ -769,16 +794,13 @@ def test_significant_adverse_result_is_reported_explicitly_for_the_control(
         purpose="benchmark",
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
     assert analysis["omnibus"]["reject"] is True
     assert all(pair["reject"] for pair in analysis["pairwise"])
     assert all(pair["rank_biserial"] < 0 for pair in analysis["pairwise"])
     assert all(
-        pair["bootstrap_confidence_level"] == pytest.approx(0.95)
-        for pair in analysis["pairwise"]
+        pair["bootstrap_confidence_level"] == pytest.approx(0.95) for pair in analysis["pairwise"]
     )
     assert analysis["conclusion"].startswith("control_significantly_worse")
 
@@ -816,9 +838,7 @@ def test_markdown_report_contains_omnibus_posthoc_effect_and_interval_evidence(
         purpose="benchmark",
     )
 
-    *_, markdown = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    *_, markdown = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     rendered = markdown.read_text(encoding="utf-8").lower()
     assert "friedman" in rendered
     assert "kendall" in rendered
@@ -868,9 +888,7 @@ def test_exploratory_comparison_cannot_be_promoted_by_primary_metric_names(
         purpose="benchmark",
     )
 
-    statistics, *_ = analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    )
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analyses = {
         item["comparison_id"]: item
         for item in json.loads(statistics.read_text(encoding="utf-8"))["analyses"]
@@ -915,9 +933,7 @@ def test_existing_statistics_detect_tampering_and_recovers_after_state_gap(
     with pytest.raises(BenchmarkConfigError, match="Incomplete or stale"):
         analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     paths[1].write_bytes(rankings)
-    assert analyze_statistics(
-        repo_root=repo_root, profile_id="smoke", run_root=run_root
-    ) == paths
+    assert analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root) == paths
 
     paths[1].write_text("tampered\n", encoding="utf-8")
     with pytest.raises(BenchmarkConfigError, match="missing or changed"):
@@ -929,7 +945,9 @@ def test_statistics_cli_dispatches_under_the_run_lock(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    outputs = tuple(tmp_path / name for name in ("statistics.json", "rankings.csv", "pairwise.csv", "report.md"))
+    outputs = tuple(
+        tmp_path / name for name in ("statistics.json", "rankings.csv", "pairwise.csv", "report.md")
+    )
     observed: dict[str, Any] = {}
 
     def fake_statistics(**kwargs: Any) -> tuple[Path, Path, Path, Path]:
@@ -940,17 +958,20 @@ def test_statistics_cli_dispatches_under_the_run_lock(
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     run_root = tmp_path / "run"
-    assert main(
-        [
-            "statistics",
-            "--repo-root",
-            str(repo_root),
-            "--profile",
-            "smoke",
-            "--run-root",
-            str(run_root),
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "statistics",
+                "--repo-root",
+                str(repo_root),
+                "--profile",
+                "smoke",
+                "--run-root",
+                str(run_root),
+            ]
+        )
+        == 0
+    )
     assert observed == {
         "repo_root": repo_root.resolve(),
         "profile_id": "smoke",

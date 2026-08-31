@@ -5,23 +5,50 @@
   "additionalProperties": false,
   "required": [
     "schema_version",
+    "profile_id",
     "search_space_id",
+    "search_space_sha256",
     "stage_id",
     "dataset_role",
     "spathi_commit",
     "spathi_build_fingerprint",
     "spathi_image_tag",
+    "parent_ranking",
     "candidates",
-    "run_ids"
+    "runs"
   ],
   "properties": {
     "schema_version": {"const": "1.0"},
+    "profile_id": {
+      "enum": [
+        "calibration-convergence",
+        "calibration-structure",
+        "calibration-estimator",
+        "selection-validation"
+      ]
+    },
     "search_space_id": {"const": "spathi_calibration_v1"},
+    "search_space_sha256": {"$ref": "#/$defs/sha256"},
     "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
     "dataset_role": {"enum": ["development", "validation"]},
     "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "spathi_build_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "spathi_image_tag": {"type": "string", "minLength": 1},
+    "parent_ranking": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "stage_id"],
+          "properties": {
+            "path": {"$ref": "#/$defs/relative_path"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "stage_id": {"enum": ["convergence", "structure", "estimator"]}
+          }
+        }
+      ]
+    },
     "candidates": {
       "type": "array",
       "minItems": 1,
@@ -56,18 +83,88 @@
         }
       }
     },
-    "run_ids": {
+    "runs": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "configuration_id",
+          "configuration_sha256",
+          "algorithm_seed",
+          "execution_sha256"
+        ],
+        "properties": {
+          "run_id": {"$ref": "#/$defs/id"},
+          "configuration_id": {"$ref": "#/$defs/id"},
+          "configuration_sha256": {"$ref": "#/$defs/sha256"},
+          "algorithm_seed": {"type": "integer", "minimum": 0},
+          "execution_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
     }
   },
   "allOf": [
     {
       "if": {"properties": {"stage_id": {"const": "validation"}}},
-      "then": {"properties": {"dataset_role": {"const": "validation"}}},
-      "else": {"properties": {"dataset_role": {"const": "development"}}}
+      "then": {
+        "properties": {
+          "profile_id": {"const": "selection-validation"},
+          "dataset_role": {"const": "validation"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "estimator"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {"dataset_role": {"const": "development"}}
+      }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "convergence"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-convergence"},
+          "parent_ranking": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "structure"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-structure"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "convergence"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "estimator"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-estimator"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "structure"}}
+          }
+        }
+      }
     }
-  ]
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    }
+  }
 }

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "boolode_invariant_gsd_clean_test",
+      "simulator_id": "boolode",
+      "replicates": 5,
+      "base_seed": 43001,
+      "params": {
+        "model_preset": "GSD",
+        "model_type": "hill",
+        "simulation_time": 8,
+        "num_cells": 300,
+        "n_clusters": 3,
+        "sample_cells": false,
+        "sample_parameters": true,
+        "sample_std": 0.1,
+        "identical_parameters": false,
+        "integration_step_size": 0.1,
+        "dropout": {
+          "enabled": false
+        }
+      },
+      "notes": "Five clean invariant-topology datasets; trajectory clusters share the fixed GSD Boolean network."
+    }
+  ]
+}

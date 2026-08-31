@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "dyngen_linear_baseline",
+      "simulator_id": "dyngen",
+      "replicates": 5,
+      "base_seed": 31001,
+      "native_outputs": [],
+      "params": {
+        "backbone_template": "linear",
+        "num_cells": 200,
+        "num_tfs": 10,
+        "num_targets": 50,
+        "num_hks": 10,
+        "distance_metric": "pearson",
+        "simulation_params": {
+          "num_simulations": 32,
+          "census_interval": 4.0,
+          "num_knockdown_simulations": 0,
+          "compute_dimred": false,
+          "compute_rna_velocity": false,
+          "kinetics_noise_kind": "simple",
+          "kinetics_noise_mean": 1.0,
+          "kinetics_noise_sd": 0.005
+        },
+        "experiment_params": {
+          "kind": "snapshot",
+          "map_reference_cpm": false,
+          "map_reference_ls": false
+        }
+      }
+    }
+  ]
+}

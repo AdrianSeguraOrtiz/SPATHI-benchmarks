@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "template_profile_id": "reduced",
+  "baseline_batches": [
+    {
+      "id": "group-only-primary",
+      "kind": "baseline",
+      "dataset_role": "development",
+      "generation_jobs": [
+        "dyngen_development_linear_baseline",
+        "dyngen_development_linear_noisy",
+        "dyngen_development_bifurcating_baseline",
+        "dyngen_development_bifurcating_noisy",
+        "scmultisim_development_dynamic"
+      ],
+      "regime": "group_only",
+      "tools_params": "experiments/v1/inference/group_only/reduced-primary.json",
+      "run_metadata": "experiments/v1/inference/group_only/reduced-primary-metadata.json"
+    }
+  ],
+  "statistics": {
+    "status": "enabled",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": [
+      {
+        "id": "reduced-group-only-tf-restricted",
+        "comparison_role": "exploratory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": [
+          "development"
+        ],
+        "generation_jobs": [
+          "dyngen_development_linear_baseline",
+          "dyngen_development_linear_noisy",
+          "dyngen_development_bifurcating_baseline",
+          "dyngen_development_bifurcating_noisy",
+          "scmultisim_development_dynamic"
+        ],
+        "regime": "group_only",
+        "levels": [
+          "directed",
+          "topology"
+        ],
+        "metrics": [
+          "aupr",
+          "auroc",
+          "f1_at_truth_count",
+          "epr_at_truth_count"
+        ],
+        "primary_level": "directed",
+        "primary_metric": "aupr",
+        "configuration_ids": [
+          "selected_spathi",
+          "genie3_default",
+          "grnboost2_default",
+          "infercsn_none"
+        ],
+        "control_configuration_id": "selected_spathi",
+        "stratify_by": [
+          "dataset_role",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 8,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      }
+    ]
+  }
+}

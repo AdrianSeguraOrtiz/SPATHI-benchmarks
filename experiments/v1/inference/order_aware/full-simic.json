@@ -1,0 +1,70 @@
+{
+  "runs": [
+    {
+      "run_id": "simic_no_similarity_seed_1729",
+      "tool_id": "simic",
+      "params": {
+        "similarity": false,
+        "random_seed": 1729
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    },
+    {
+      "run_id": "simic_no_similarity_seed_31415",
+      "tool_id": "simic",
+      "params": {
+        "similarity": false,
+        "random_seed": 31415
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    },
+    {
+      "run_id": "simic_no_similarity_seed_104729",
+      "tool_id": "simic",
+      "params": {
+        "similarity": false,
+        "random_seed": 104729
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    },
+    {
+      "run_id": "simic_similarity_seed_1729",
+      "tool_id": "simic",
+      "params": {
+        "similarity": true,
+        "random_seed": 1729
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    },
+    {
+      "run_id": "simic_similarity_seed_31415",
+      "tool_id": "simic",
+      "params": {
+        "similarity": true,
+        "random_seed": 31415
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    },
+    {
+      "run_id": "simic_similarity_seed_104729",
+      "tool_id": "simic",
+      "params": {
+        "similarity": true,
+        "random_seed": 104729
+      },
+      "execution": {
+        "mode": "group_native"
+      }
+    }
+  ]
+}

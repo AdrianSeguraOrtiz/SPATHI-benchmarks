@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "scmultisim_dynamic_custom_development",
+      "simulator_id": "scmultisim",
+      "replicates": 3,
+      "base_seed": 14001,
+      "params": {
+        "grn_source": "input_tsv",
+        "tree_preset": "phyla5",
+        "population_mode": "continuous",
+        "num_cells": 300,
+        "num_genes": 80,
+        "num_cifs": 30,
+        "velocity": {
+          "enabled": false
+        },
+        "dynamic_grn": {
+          "enabled": true,
+          "num_steps": 5,
+          "cell_per_step": 1,
+          "num_changing_edges": 6,
+          "create_tf_edges": false,
+          "weight_mean": 0,
+          "weight_sd": 0.8
+        },
+        "technical_noise": {
+          "enabled": false
+        },
+        "batch_effect": {
+          "enabled": false
+        }
+      },
+      "notes": "Three development seeds over a topology exclusive to this dataset role."
+    }
+  ]
+}

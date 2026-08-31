@@ -216,6 +216,7 @@ def _evaluated_run(
             "schema_version": "3.0",
             "profile_id": "smoke",
             "purpose": "smoke",
+            "benchmark_repository": {"commit": "4" * 40},
             "status": "exported",
             "artifact_store": str(store.root),
             "datasets": [_dataset("dyngen-1729", 1729)],
@@ -252,6 +253,7 @@ def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path)
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["schema_version"] == "2.0"
+    assert summary["benchmark_commit"] == "4" * 40
     assert summary["metric_rows"] == 3
     aggregates = {
         (item["configuration_id"], item["level"], item["regime"]): item

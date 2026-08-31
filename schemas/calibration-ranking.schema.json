@@ -6,12 +6,15 @@
   "required": [
     "schema_version",
     "artifact_type",
+    "profile_id",
     "search_space_id",
     "search_space_sha256",
     "stage_id",
     "dataset_role",
+    "parent_ranking",
     "calibration_manifest_sha256",
     "benchmark_summary_sha256",
+    "benchmark_commit",
     "spathi_commit",
     "spathi_build_fingerprint",
     "spathi_image_tag",
@@ -27,12 +30,36 @@
   "properties": {
     "schema_version": {"const": "1.0"},
     "artifact_type": {"const": "spathi_calibration_ranking"},
+    "profile_id": {
+      "enum": [
+        "calibration-convergence",
+        "calibration-structure",
+        "calibration-estimator",
+        "selection-validation"
+      ]
+    },
     "search_space_id": {"const": "spathi_calibration_v1"},
     "search_space_sha256": {"$ref": "#/$defs/sha256"},
     "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
     "dataset_role": {"enum": ["development", "validation"]},
+    "parent_ranking": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "stage_id"],
+          "properties": {
+            "path": {"$ref": "#/$defs/relative_path"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "stage_id": {"enum": ["convergence", "structure", "estimator"]}
+          }
+        }
+      ]
+    },
     "calibration_manifest_sha256": {"$ref": "#/$defs/sha256"},
     "benchmark_summary_sha256": {"$ref": "#/$defs/sha256"},
+    "benchmark_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "spathi_build_fingerprint": {"$ref": "#/$defs/sha256"},
     "spathi_image_tag": {"type": "string", "minLength": 1},
@@ -73,7 +100,12 @@
       "if": {"properties": {"stage_id": {"const": "validation"}}},
       "then": {
         "properties": {
+          "profile_id": {"const": "selection-validation"},
           "dataset_role": {"const": "validation"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "estimator"}}
+          },
           "ranking": {"minItems": 2, "maxItems": 3},
           "selected_candidates": {"minItems": 1, "maxItems": 1},
           "winner": {"$ref": "#/$defs/winner"}
@@ -85,11 +117,49 @@
           "winner": {"type": "null"}
         }
       }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "convergence"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-convergence"},
+          "parent_ranking": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "structure"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-structure"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "convergence"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"stage_id": {"const": "estimator"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"const": "calibration-estimator"},
+          "parent_ranking": {
+            "type": "object",
+            "properties": {"stage_id": {"const": "structure"}}
+          }
+        }
+      }
     }
   ],
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
     "calibration_row": {
       "type": "object",
       "additionalProperties": false,
@@ -106,7 +176,9 @@
         "group_contexts",
         "spathi_commit",
         "spathi_build_fingerprint",
-        "spathi_image_id"
+        "spathi_image_id",
+        "run_id",
+        "execution_sha256"
       ],
       "properties": {
         "configuration_id": {"$ref": "#/$defs/id"},
@@ -132,7 +204,7 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
         },
-        "run_id": {"type": "string", "minLength": 1},
+        "run_id": {"$ref": "#/$defs/id"},
         "execution_sha256": {"$ref": "#/$defs/sha256"}
       }
     },

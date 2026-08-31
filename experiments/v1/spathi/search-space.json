@@ -15,7 +15,7 @@
     "roles": [
       {
         "id": "development",
-        "purpose": "Explore convergence and construct a bounded shortlist without accessing validation or test datasets.",
+        "purpose": "Run the bounded tree-count sweep and construct a shortlist without accessing validation or test datasets.",
         "permitted_uses": ["convergence", "structure_search", "estimator_search"]
       },
       {
@@ -112,17 +112,17 @@
         {
           "id": "trees_100",
           "parameter_overrides": {"n_estimators": 100},
-          "rationale": "Low-cost convergence boundary."
+          "rationale": "Low-cost tree-count boundary."
         },
         {
           "id": "trees_250",
           "parameter_overrides": {"n_estimators": 250},
-          "rationale": "Intermediate convergence point below the reference."
+          "rationale": "Intermediate tree-count point below the reference."
         },
         {
           "id": "trees_1000",
           "parameter_overrides": {"n_estimators": 1000},
-          "rationale": "High-tree reference for detecting residual Monte Carlo variation."
+          "rationale": "High-tree reference for measuring residual Monte Carlo variation."
         }
       ],
       "advance_limit": 1

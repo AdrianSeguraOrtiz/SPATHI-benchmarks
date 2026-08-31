@@ -22,11 +22,11 @@
     {"tool_id": "ppcor", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
     {"tool_id": "scgenerai", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
     {"tool_id": "scing", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
-    {"tool_id": "scregulate", "execution_mode": "group_native", "variant": "prior_source=null", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
     {"tool_id": "scsgl", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"}
   ],
   "notes": [
     "Only candidate_restriction variants enter the primary ranking against SPATHI.",
+    "ARACNe3 is TF-restricted but undirected, so it enters topology analyses rather than the directed confirmatory family.",
     "Methods that cannot consume tf_list form a separately labelled all-gene exploratory stratum.",
     "ANDREA preflight is authoritative for dataset-specific eligibility."
   ]

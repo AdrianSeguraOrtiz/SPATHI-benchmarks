@@ -50,14 +50,93 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
         "containers/spathi/constraints.txt",
         "containers/spathi/run_tool.py",
     }
-    assert {profile["id"] for profile in profiles} == {
+    profile_ids = {profile["id"] for profile in profiles}
+    assert {
         "smoke",
         "calibration",
         "selection",
         "reduced",
         "full",
+    } <= profile_ids
+    status_by_id = {profile["id"]: profile["status"] for profile in profiles}
+    assert status_by_id["smoke"] == "runnable"
+    assert status_by_id["calibration"] == "planned"
+    assert status_by_id["selection"] == "planned"
+    assert status_by_id["reduced"] == "planned"
+    assert status_by_id["full"] == "planned"
+
+
+def test_full_panel_freezes_supported_robustness_conditions() -> None:
+    profile = load_profile(REPO_ROOT, "full")
+    jobs = {job["id"]: job for job in profile["generation_jobs"]}
+    runs_by_job = {
+        job_id: load_json_object(REPO_ROOT / job["simulator_runs"])["runs"][0]
+        for job_id, job in jobs.items()
     }
-    assert {profile["id"] for profile in profiles if profile["status"] == "runnable"} == {"smoke"}
+
+    assert sum(run["replicates"] for run in runs_by_job.values()) == 50
+    assert {
+        run["base_seed"] + offset
+        for run in runs_by_job.values()
+        for offset in range(run["replicates"])
+    } == {
+        seed
+        for start in (
+            31001,
+            31101,
+            31201,
+            31301,
+            41001,
+            41101,
+            42001,
+            43001,
+            43101,
+            44001,
+        )
+        for seed in range(start, start + 5)
+    }
+
+    low = runs_by_job["scmultisim_test_dynamic_low_balanced"]["params"]
+    high = runs_by_job["scmultisim_test_dynamic_high_imbalanced"]["params"]
+    assert low["dynamic_grn"]["num_changing_edges"] == 2
+    assert low["population_mode"] == "continuous"
+    assert high["dynamic_grn"]["num_changing_edges"] == 12
+    assert high["population_mode"] == "discrete"
+    assert high["discrete_population"]["min_pop_size"] == 12
+    assert high["technical_noise"] == {
+        "enabled": True,
+        "protocol": "UMI",
+        "alpha_mean": 0.1,
+        "alpha_sd": 0.02,
+        "depth_mean": 100000,
+        "depth_sd": 3000,
+        "n_pcr1": 16,
+        "n_pcr2": 10,
+        "atac_obs_prob": 0.3,
+        "atac_sd_frac": 0.5,
+    }
+
+    clean = runs_by_job["boolode_test_invariant_clean"]["params"]["dropout"]
+    dropout = runs_by_job["boolode_test_invariant_dropout"]["params"]["dropout"]
+    assert clean == {"enabled": False}
+    assert dropout == {"enabled": True, "drop_cutoff": 0.6, "drop_prob": 0.6}
+
+    dyngen = [run["params"] for job_id, run in runs_by_job.items() if job_id.startswith("dyngen_")]
+    assert {params["num_cells"] for params in dyngen} == {200, 300, 400, 500}
+    assert {params["num_tfs"] + params["num_targets"] + params["num_hks"] for params in dyngen} == {
+        70,
+        100,
+        130,
+    }
+
+    plan = load_json_object(REPO_ROOT / "experiments/v1/inference/plans/full-v1.json")
+    group_batch = next(
+        batch for batch in plan["baseline_batches"] if batch["regime"] == "group_only"
+    )
+    assert set(group_batch["generation_jobs"]) == set(jobs)
+    for comparison in plan["statistics"]["comparisons"]:
+        if comparison["regime"] == "group_only":
+            assert set(comparison["generation_jobs"]) == set(jobs)
 
 
 def test_load_json_object_rejects_invalid_json_and_non_object(tmp_path: Path) -> None:
@@ -170,6 +249,83 @@ def test_profile_job_and_batch_ids_must_be_unique() -> None:
     profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
     profile["inference_batches"].append(deepcopy(profile["inference_batches"][0]))
     with pytest.raises(BenchmarkConfigError, match="duplicate inference batch IDs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_inference_batch_generation_jobs_must_be_non_empty_and_unique() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["inference_batches"][0]["generation_jobs"] = []
+    with pytest.raises(BenchmarkConfigError, match="must be a non-empty array"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    profile["inference_batches"][0]["generation_jobs"] = ["dyngen_smoke", "dyngen_smoke"]
+    with pytest.raises(BenchmarkConfigError, match="duplicate generation job IDs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_inference_batch_generation_jobs_must_exist_and_match_role() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["inference_batches"][0]["generation_jobs"] = ["missing"]
+    with pytest.raises(BenchmarkConfigError, match="unknown generation jobs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    development_job = deepcopy(profile["generation_jobs"][0])
+    development_job.update({"id": "dyngen_development", "dataset_role": "development"})
+    profile["generation_jobs"].append(development_job)
+    profile["inference_batches"][0]["generation_jobs"] = ["dyngen_development"]
+    with pytest.raises(BenchmarkConfigError, match="outside dataset role 'smoke'"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_inference_batch_generation_jobs_accept_matching_subset() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["inference_batches"][0]["generation_jobs"] = ["dyngen_smoke"]
+
+    validate_profile_references(REPO_ROOT, profile)
+
+
+def test_statistics_generation_jobs_must_be_non_empty_unique_existing_and_in_role() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    comparison = profile["statistics"]["comparisons"][0]
+
+    comparison["generation_jobs"] = []
+    with pytest.raises(BenchmarkConfigError, match="must be a non-empty array"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    comparison["generation_jobs"] = ["dyngen_smoke", "dyngen_smoke"]
+    with pytest.raises(BenchmarkConfigError, match="duplicate generation job IDs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    comparison["generation_jobs"] = ["missing"]
+    with pytest.raises(BenchmarkConfigError, match="unknown generation jobs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    development_job = deepcopy(profile["generation_jobs"][0])
+    development_job.update({"id": "dyngen_development", "dataset_role": "development"})
+    profile["generation_jobs"].append(development_job)
+    comparison["generation_jobs"] = ["dyngen_development"]
+    with pytest.raises(BenchmarkConfigError, match="outside dataset role 'smoke'"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_statistics_configuration_batches_must_cover_selected_generation_jobs() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    second_job = deepcopy(profile["generation_jobs"][0])
+    second_job["id"] = "dyngen_smoke_second"
+    profile["generation_jobs"].append(second_job)
+    comparison = profile["statistics"]["comparisons"][0]
+    comparison["generation_jobs"] = ["dyngen_smoke_second"]
+
+    validate_profile_references(REPO_ROOT, profile)
+
+    spathi_batch = next(
+        batch for batch in profile["inference_batches"] if batch["kind"] == "spathi"
+    )
+    spathi_batch["generation_jobs"] = ["dyngen_smoke"]
+    with pytest.raises(
+        BenchmarkConfigError,
+        match="spathi_smoke.*coverage.*dyngen_smoke_second",
+    ):
         validate_profile_references(REPO_ROOT, profile)
 
 

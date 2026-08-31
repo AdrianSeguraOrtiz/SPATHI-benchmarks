@@ -1,0 +1,97 @@
+{
+  "runs": [
+    {
+      "run_id": "genie3_default_seed_1729",
+      "tool_id": "genie3",
+      "params": {
+        "seed": 1729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "genie3_default_seed_31415",
+      "tool_id": "genie3",
+      "params": {
+        "seed": 31415
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "genie3_default_seed_104729",
+      "tool_id": "genie3",
+      "params": {
+        "seed": 104729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "grnboost2_default_seed_1729",
+      "tool_id": "grnboost2",
+      "params": {
+        "seed": 1729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "grnboost2_default_seed_31415",
+      "tool_id": "grnboost2",
+      "params": {
+        "seed": 31415
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "grnboost2_default_seed_104729",
+      "tool_id": "grnboost2",
+      "params": {
+        "seed": 104729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "infercsn_none_seed_1729",
+      "tool_id": "infercsn",
+      "params": {
+        "sift_method": "none",
+        "seed": 1729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "infercsn_none_seed_31415",
+      "tool_id": "infercsn",
+      "params": {
+        "sift_method": "none",
+        "seed": 31415
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    },
+    {
+      "run_id": "infercsn_none_seed_104729",
+      "tool_id": "infercsn",
+      "params": {
+        "sift_method": "none",
+        "seed": 104729
+      },
+      "execution": {
+        "mode": "group_emulated"
+      }
+    }
+  ]
+}

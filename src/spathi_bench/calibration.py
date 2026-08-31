@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -30,7 +31,22 @@ from .config import (
 SEARCH_SPACE_PATH = Path("experiments/v1/spathi/search-space.json")
 SEARCH_SPACE_SCHEMA_PATH = Path("schemas/spathi-search-space.schema.json")
 RANKING_SCHEMA_PATH = Path("schemas/calibration-ranking.schema.json")
+MANIFEST_SCHEMA_PATH = Path("schemas/calibration-manifest.schema.json")
 SELECTED_CONFIG_SCHEMA_PATH = Path("schemas/spathi-selected-config.schema.json")
+
+_STAGE_PROFILE_IDS = {
+    "convergence": "calibration-convergence",
+    "structure": "calibration-structure",
+    "estimator": "calibration-estimator",
+    "validation": "selection-validation",
+}
+_PARENT_STAGES = {
+    "convergence": None,
+    "structure": "convergence",
+    "estimator": "structure",
+    "validation": "estimator",
+}
+_GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
 class CalibrationError(BenchmarkConfigError):
@@ -216,8 +232,10 @@ def _normalized_evidence_rows(
         "spathi_commit",
         "spathi_build_fingerprint",
         "spathi_image_id",
+        "run_id",
+        "execution_sha256",
     )
-    optional = ("run_id", "execution_sha256")
+    optional: tuple[str, ...] = ()
     normalized: list[dict[str, Any]] = []
     for index, raw in enumerate(summary_rows):
         row = _mapping(raw, f"summary row {index}")
@@ -254,6 +272,148 @@ def load_search_space(repo_root: Path) -> dict[str, Any]:
     )
     _validate_search_semantics(search_space)
     return search_space
+
+
+def stage_profile_id(stage_id: str) -> str:
+    """Return the one canonical runnable profile identifier for a search stage."""
+
+    try:
+        return _STAGE_PROFILE_IDS[stage_id]
+    except KeyError as exc:
+        raise CalibrationError(f"Unknown calibration stage: {stage_id!r}") from exc
+
+
+def canonical_run_records(runs: Sequence[CalibrationRun]) -> list[dict[str, Any]]:
+    """Serialize the complete run identity used to reconcile summary evidence."""
+
+    records = [
+        {
+            "run_id": run.run_id,
+            "configuration_id": run.configuration_id,
+            "configuration_sha256": run.configuration_sha256,
+            "algorithm_seed": run.algorithm_seed,
+            "execution_sha256": canonical_json_sha256(dict(run.parameters)),
+        }
+        for run in runs
+    ]
+    if len({record["run_id"] for record in records}) != len(records):
+        raise CalibrationError("Calibration runs contain duplicate run IDs")
+    return records
+
+
+def build_stage_profile(
+    template: Mapping[str, Any],
+    stage_id: str,
+    *,
+    bundle_path: str,
+) -> dict[str, Any]:
+    """Materialize one stage-specific runnable profile from its planned template."""
+
+    profile_id = stage_profile_id(stage_id)
+    expected_purpose = "selection" if stage_id == "validation" else "calibration"
+    expected_role = "validation" if stage_id == "validation" else "development"
+    if template.get("status") != "planned" or template.get("purpose") != expected_purpose:
+        raise CalibrationError(
+            f"Stage {stage_id!r} requires a planned {expected_purpose!r} profile template"
+        )
+    raw_jobs = template.get("generation_jobs")
+    if not isinstance(raw_jobs, list) or not raw_jobs:
+        raise CalibrationError(f"The {expected_purpose} template has no frozen generation jobs")
+    observed_roles = {job.get("dataset_role") for job in raw_jobs if isinstance(job, Mapping)}
+    if observed_roles != {expected_role}:
+        raise CalibrationError(
+            f"Stage {stage_id!r} requires only {expected_role!r} generation jobs; "
+            f"found {sorted(str(role) for role in observed_roles)}"
+        )
+    if not isinstance(bundle_path, str) or not bundle_path:
+        raise CalibrationError("Calibration profile requires a repository-relative bundle path")
+
+    profile = copy.deepcopy(dict(template))
+    profile.update(
+        {
+            "id": profile_id,
+            "status": "runnable",
+            "calibration_stage": stage_id,
+            "description": (
+                f"{str(template.get('description', '')).strip()} "
+                f"Materialized immutable {stage_id} stage."
+            ).strip(),
+            "inference_batches": [
+                {
+                    "id": f"spathi-{stage_id}",
+                    "kind": "spathi",
+                    "dataset_role": expected_role,
+                    "regime": "group_only",
+                    "tools_params": f"{bundle_path}/tools-params.json",
+                    "custom_tools": f"{bundle_path}/custom-tools.json",
+                    "calibration_manifest": f"{bundle_path}/calibration-manifest.json",
+                    "run_metadata": f"{bundle_path}/run-metadata.json",
+                }
+            ],
+        }
+    )
+    statistics = _mapping(profile.get("statistics"), "profile statistics")
+    profile["statistics"] = {
+        **copy.deepcopy(dict(statistics)),
+        "status": "not_applicable",
+        "comparisons": [],
+    }
+    return profile
+
+
+def load_parent_ranking(
+    repo_root: Path,
+    search_space: Mapping[str, Any],
+    stage_id: str,
+    ranking_path: Path | None,
+) -> tuple[tuple[CandidateConfiguration, ...], dict[str, Any] | None]:
+    """Validate a preceding ranking and return its frozen shortlist and link."""
+
+    if stage_id not in _PARENT_STAGES:
+        raise CalibrationError(f"Unknown calibration stage: {stage_id!r}")
+    expected_stage = _PARENT_STAGES[stage_id]
+    if expected_stage is None:
+        if ranking_path is not None:
+            raise CalibrationError("The convergence stage cannot receive --parents")
+        return (), None
+    if ranking_path is None:
+        raise CalibrationError(f"Stage {stage_id!r} requires --parents from {expected_stage!r}")
+
+    root = repo_root.resolve()
+    resolved = ranking_path.resolve()
+    try:
+        relative = resolved.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise CalibrationError(
+            "Parent ranking must be stored inside the benchmark repository"
+        ) from exc
+    resolved = resolve_repo_path(root, relative, "parent calibration ranking")
+    ranking = load_json_object(resolved, "parent calibration ranking")
+    validate_json(ranking, root / RANKING_SCHEMA_PATH, "parent calibration ranking")
+    search_digest = sha256_file(root / SEARCH_SPACE_PATH)
+    locked_identity = locked_spathi_identity(root)
+    if any(ranking.get(field) != value for field, value in locked_identity.items()):
+        raise CalibrationError("Parent ranking was produced by another SPATHI build")
+    if ranking.get("stage_id") != expected_stage:
+        raise CalibrationError(
+            f"Stage {stage_id!r} requires a {expected_stage!r} ranking, "
+            f"not {ranking.get('stage_id')!r}"
+        )
+    validate_ranking_chain(
+        root,
+        search_space,
+        ranking,
+        expected_search_space_sha256=search_digest,
+    )
+    raw_candidates = ranking.get("selected_candidates")
+    if not isinstance(raw_candidates, list) or not raw_candidates:
+        raise CalibrationError("Parent ranking contains no selected candidates")
+    candidates = tuple(candidate_from_dict(item) for item in raw_candidates)
+    return candidates, {
+        "path": relative,
+        "sha256": sha256_file(resolved),
+        "stage_id": expected_stage,
+    }
 
 
 def expand_stage_candidates(
@@ -394,6 +554,109 @@ def expand_validation_runs(
     )
 
 
+def validate_calibration_manifest(
+    repo_root: Path,
+    search_space: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+) -> tuple[tuple[CandidateConfiguration, ...], tuple[CalibrationRun, ...]]:
+    """Reconstruct and validate every candidate and run frozen by a manifest."""
+
+    root = repo_root.resolve()
+    validate_json(dict(manifest), root / MANIFEST_SCHEMA_PATH, "calibration manifest")
+    stage_id = str(manifest.get("stage_id"))
+    if stage_id not in _STAGE_PROFILE_IDS:
+        raise CalibrationError(f"Unknown calibration manifest stage: {stage_id!r}")
+    search_digest = sha256_file(root / SEARCH_SPACE_PATH)
+    if (
+        manifest.get("search_space_id") != search_space.get("id")
+        or manifest.get("search_space_sha256") != search_digest
+    ):
+        raise CalibrationError("Calibration manifest search-space identity is stale")
+    if manifest.get("profile_id") != stage_profile_id(stage_id):
+        raise CalibrationError("Calibration manifest has the wrong stage profile ID")
+    locked_identity = locked_spathi_identity(root)
+    if any(manifest.get(field) != value for field, value in locked_identity.items()):
+        raise CalibrationError("Calibration manifest was generated for another SPATHI build")
+
+    raw_parent = manifest.get("parent_ranking")
+    parent_path: Path | None = None
+    if raw_parent is not None:
+        parent = _mapping(raw_parent, "manifest parent ranking")
+        parent_path = root / str(parent.get("path"))
+    parents, expected_parent = load_parent_ranking(
+        root,
+        search_space,
+        stage_id,
+        parent_path,
+    )
+    if raw_parent != expected_parent:
+        raise CalibrationError("Calibration manifest parent-ranking link is stale")
+
+    if stage_id == "validation":
+        candidates = parents
+        runs = expand_validation_runs(search_space, candidates)
+        expected_role = "validation"
+    else:
+        candidates = expand_stage_candidates(search_space, stage_id, parents=parents)
+        runs = expand_stage_runs(search_space, stage_id, parents=parents)
+        expected_role = "development"
+    if manifest.get("dataset_role") != expected_role:
+        raise CalibrationError("Calibration manifest has the wrong dataset role")
+    if manifest.get("candidates") != [candidate_to_dict(item) for item in candidates]:
+        raise CalibrationError("Calibration manifest candidates differ from the search contract")
+    if manifest.get("runs") != canonical_run_records(runs):
+        raise CalibrationError("Calibration manifest runs differ from the canonical stage plan")
+    return candidates, runs
+
+
+def reconcile_summary_runs(
+    manifest: Mapping[str, Any],
+    summary_rows: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Require every summary row to originate from exactly one frozen manifest run."""
+
+    rows = list(summary_rows)
+    expected_items = manifest.get("runs")
+    if not isinstance(expected_items, list) or not expected_items:
+        raise CalibrationError("Calibration manifest contains no canonical runs")
+    expected = {
+        str(item["run_id"]): {
+            "configuration_id": item["configuration_id"],
+            "configuration_sha256": item["configuration_sha256"],
+            "algorithm_seed": item["algorithm_seed"],
+            "execution_sha256": item["execution_sha256"],
+        }
+        for item in expected_items
+        if isinstance(item, Mapping)
+    }
+    if len(expected) != len(expected_items):
+        raise CalibrationError("Calibration manifest contains invalid or duplicate run IDs")
+
+    observed: set[str] = set()
+    for index, raw in enumerate(rows):
+        row = _mapping(raw, f"summary row {index}")
+        run_id = row.get("run_id")
+        if not isinstance(run_id, str) or run_id not in expected:
+            raise CalibrationError(
+                f"Summary row {index} references unknown calibration run {run_id!r}"
+            )
+        signature = expected[run_id]
+        mismatches = {
+            field: (row.get(field), value)
+            for field, value in signature.items()
+            if row.get(field) != value
+        }
+        if mismatches:
+            raise CalibrationError(
+                f"Summary row {index} differs from manifest run {run_id!r}: {mismatches}"
+            )
+        observed.add(run_id)
+    missing = sorted(set(expected) - observed)
+    if missing:
+        raise CalibrationError(f"Summary is missing manifest runs: {missing}")
+    return rows
+
+
 def build_andrea_requests(
     runs: Sequence[CalibrationRun],
     *,
@@ -527,12 +790,15 @@ def rank_validation_candidates(
         raise CalibrationError("Validation finalists must come from the estimator stage")
     reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
     _validate_candidate_integrity(finalists, reference)
+    expected_seeds = tuple(
+        int(seed) for seed in _stage(search_space, "estimator")["algorithmic_seeds"]
+    )
     return tuple(
         _rank_balanced_rows(
             finalists,
             summary_rows,
             expected_role="validation",
-            expected_seeds=None,
+            expected_seeds=expected_seeds,
         )
     )
 
@@ -543,15 +809,30 @@ def build_calibration_ranking(
     candidates: Sequence[CandidateConfiguration],
     summary_rows: Iterable[Mapping[str, Any]],
     *,
+    profile_id: str,
+    parent_ranking: Mapping[str, Any] | None,
     search_space_sha256: str,
     calibration_manifest_sha256: str,
     benchmark_summary_sha256: str,
+    benchmark_commit: str,
     spathi_commit: str,
     spathi_build_fingerprint: str,
     spathi_image_tag: str,
 ) -> dict[str, Any]:
     """Build a self-consistent ranking artifact without changing selected-config."""
 
+    if profile_id != stage_profile_id(stage_id):
+        raise CalibrationError("Calibration ranking has the wrong stage profile ID")
+    if _GIT_COMMIT.fullmatch(benchmark_commit) is None:
+        raise CalibrationError("Calibration ranking requires a valid benchmark commit")
+    expected_parent_stage = _PARENT_STAGES[stage_id]
+    if expected_parent_stage is None:
+        if parent_ranking is not None:
+            raise CalibrationError("Convergence ranking cannot link a parent ranking")
+    else:
+        parent = _mapping(parent_ranking, "ranking parent link")
+        if parent.get("stage_id") != expected_parent_stage:
+            raise CalibrationError("Calibration ranking links the wrong parent stage")
     evidence_rows = _normalized_evidence_rows(summary_rows)
     if stage_id == "validation":
         scores = rank_validation_candidates(search_space, candidates, evidence_rows)
@@ -567,12 +848,15 @@ def build_calibration_ranking(
     payload = {
         "schema_version": "1.0",
         "artifact_type": "spathi_calibration_ranking",
+        "profile_id": profile_id,
         "search_space_id": search_space["id"],
         "search_space_sha256": search_space_sha256,
         "stage_id": stage_id,
         "dataset_role": dataset_role,
+        "parent_ranking": None if parent_ranking is None else copy.deepcopy(dict(parent_ranking)),
         "calibration_manifest_sha256": calibration_manifest_sha256,
         "benchmark_summary_sha256": benchmark_summary_sha256,
+        "benchmark_commit": benchmark_commit,
         "spathi_commit": spathi_commit,
         "spathi_build_fingerprint": spathi_build_fingerprint,
         "spathi_image_tag": spathi_image_tag,
@@ -622,6 +906,19 @@ def validate_ranking_artifact(
 
     stage_id = ranking.get("stage_id")
     role = ranking.get("dataset_role")
+    if ranking.get("profile_id") != stage_profile_id(str(stage_id)):
+        raise CalibrationError("Calibration ranking has the wrong stage profile ID")
+    if _GIT_COMMIT.fullmatch(str(ranking.get("benchmark_commit", ""))) is None:
+        raise CalibrationError("Calibration ranking has an invalid benchmark commit")
+    expected_parent_stage = _PARENT_STAGES.get(str(stage_id))
+    parent_ranking = ranking.get("parent_ranking")
+    if expected_parent_stage is None:
+        if parent_ranking is not None:
+            raise CalibrationError("Convergence ranking cannot link a parent ranking")
+    else:
+        parent = _mapping(parent_ranking, "ranking parent link")
+        if parent.get("stage_id") != expected_parent_stage:
+            raise CalibrationError("Calibration ranking links the wrong parent stage")
     if stage_id == "validation":
         if role != "validation":
             raise CalibrationError("Validation ranking has the wrong dataset role")
@@ -712,6 +1009,85 @@ def validate_ranking_artifact(
     return recomputed_scores
 
 
+def validate_ranking_chain(
+    repo_root: Path,
+    search_space: Mapping[str, Any],
+    ranking: Mapping[str, Any],
+    *,
+    expected_search_space_sha256: str,
+    _visited: frozenset[str] = frozenset(),
+) -> tuple[CandidateScore, ...]:
+    """Validate a ranking and every content-addressed predecessor back to convergence."""
+
+    root = repo_root.resolve()
+    scores = validate_ranking_artifact(
+        search_space,
+        ranking,
+        expected_search_space_sha256=expected_search_space_sha256,
+    )
+    stage_id = str(ranking["stage_id"])
+    expected_parent_stage = _PARENT_STAGES[stage_id]
+    parent_value = ranking.get("parent_ranking")
+    if expected_parent_stage is None:
+        if parent_value is not None:
+            raise CalibrationError("Convergence ranking has an unexpected parent link")
+        return scores
+    parent = _mapping(parent_value, "ranking parent link")
+    raw_path = parent.get("path")
+    if not isinstance(raw_path, str):
+        raise CalibrationError("Ranking parent link has no repository-relative path")
+    parent_path = resolve_repo_path(root, raw_path, "parent ranking evidence")
+    digest = sha256_file(parent_path)
+    if digest != parent.get("sha256"):
+        raise CalibrationError("Parent ranking hash differs from its child link")
+    if digest in _visited:
+        raise CalibrationError("Calibration ranking chain contains a cycle")
+    parent_ranking = load_json_object(parent_path, "parent ranking evidence")
+    validate_json(parent_ranking, root / RANKING_SCHEMA_PATH, "parent ranking evidence")
+    if parent_ranking.get("stage_id") != expected_parent_stage:
+        raise CalibrationError("Calibration ranking chain has an invalid stage transition")
+    if parent_ranking.get("benchmark_commit") != ranking.get("benchmark_commit"):
+        raise CalibrationError("Calibration ranking chain mixes benchmark commits")
+    locked_identity = locked_spathi_identity(root)
+    if any(parent_ranking.get(field) != value for field, value in locked_identity.items()):
+        raise CalibrationError("Calibration ranking chain mixes SPATHI builds")
+    validate_ranking_chain(
+        root,
+        search_space,
+        parent_ranking,
+        expected_search_space_sha256=expected_search_space_sha256,
+        _visited=_visited | {digest},
+    )
+    raw_selected = parent_ranking.get("selected_candidates")
+    if not isinstance(raw_selected, list) or not raw_selected:
+        raise CalibrationError("Parent ranking chain contains no selected candidates")
+    selected_parents = tuple(candidate_from_dict(item) for item in raw_selected)
+    current_candidates = tuple(score.candidate for score in scores)
+    if stage_id == "validation":
+        expected = {
+            (candidate.configuration_id, candidate.configuration_sha256)
+            for candidate in selected_parents
+        }
+        observed = {
+            (candidate.configuration_id, candidate.configuration_sha256)
+            for candidate in current_candidates
+        }
+        if observed != expected:
+            raise CalibrationError(
+                "Validation ranking finalists differ from the estimator shortlist"
+            )
+    else:
+        expected_parent_ids = {candidate.configuration_id for candidate in selected_parents}
+        observed_parent_ids = {
+            candidate.parent_configuration_id for candidate in current_candidates
+        }
+        if observed_parent_ids != expected_parent_ids:
+            raise CalibrationError(
+                f"{stage_id.capitalize()} ranking parents differ from the preceding shortlist"
+            )
+    return scores
+
+
 def build_frozen_selected_config(
     repo_root: Path,
     ranking_path: Path,
@@ -733,7 +1109,8 @@ def build_frozen_selected_config(
     if any(ranking.get(field) != value for field, value in locked_identity.items()):
         raise CalibrationError("Validation ranking was produced by a different SPATHI build")
     search_digest = sha256_file(root / SEARCH_SPACE_PATH)
-    scores = validate_ranking_artifact(
+    scores = validate_ranking_chain(
+        root,
         search,
         ranking,
         expected_search_space_sha256=search_digest,
@@ -805,7 +1182,8 @@ def reconcile_frozen_selection(
     if any(ranking.get(field) != value for field, value in locked_identity.items()):
         raise CalibrationError("Validation ranking was produced by a different SPATHI build")
     search_digest = sha256_file(root / SEARCH_SPACE_PATH)
-    scores = validate_ranking_artifact(
+    scores = validate_ranking_chain(
+        root,
         search_space,
         ranking,
         expected_search_space_sha256=search_digest,
@@ -1035,6 +1413,15 @@ def _rank_balanced_rows(
         if not isinstance(dataset_id, str) or not dataset_id:
             raise CalibrationError(f"Summary row {index} has an invalid dataset_id")
         seed = _integer(row.get("algorithm_seed"), f"summary row {index} seed", minimum=0)
+        expected_run_id = (
+            f"validation__{configuration_id}__seed_{seed}"
+            if expected_role == "validation"
+            else f"{configuration_id}__seed_{seed}"
+        )
+        if row.get("run_id") != expected_run_id:
+            raise CalibrationError(
+                f"Summary row {index} run_id differs from its configuration and seed"
+            )
         if seed in values[configuration_id][dataset_id]:
             raise CalibrationError(
                 "Duplicate calibration summary row for "

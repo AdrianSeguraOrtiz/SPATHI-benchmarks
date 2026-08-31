@@ -7,7 +7,7 @@
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
       "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
-      "reason": "Uses the common TF list and no order or regulatory prior."
+      "reason": "Uses the common TF list and no order or regulatory prior, but its undirected output is eligible only for the exploratory topology family."
     },
     {
       "tool_id": "cespgrn",
@@ -150,13 +150,12 @@
     },
     {
       "tool_id": "scregulate",
-      "disposition": "candidate",
+      "disposition": "assisted_only",
       "tf_list_handling": "not_supported",
       "routes": [
-        {"regime": "group_only", "execution_mode": "group_native", "variant": "prior_source=null", "role": "secondary", "status": "candidate"},
         {"regime": "prior_assisted", "execution_mode": "group_native", "variant": "prior_source=provided_prior", "role": "assisted", "status": "candidate"}
       ],
-      "reason": "The no-prior and provided-prior variants answer different questions."
+      "reason": "The ToolSpec requires an explicit regulatory-prior source; scRegulate has no expression-only route."
     },
     {
       "tool_id": "scsgl",

@@ -357,9 +357,7 @@ def _wilcoxon_test(
         "wins": wins,
         "ties": ties,
         "losses": losses,
-        "probability_of_superiority": (
-            (wins + 0.5 * ties) / n_total if n_total else None
-        ),
+        "probability_of_superiority": ((wins + 0.5 * ties) / n_total if n_total else None),
         "mean_difference": fmean(differences) if differences else None,
         "median_difference": float(median(differences)) if differences else None,
         "hodges_lehmann": _hodges_lehmann(differences),
@@ -446,9 +444,7 @@ def _wilcoxon_test(
         "rank_biserial": (positive_rank2 - negative_rank2) / total_rank2,
         "p_raw": p_value,
         "exact_minimum_attainable_p": min(1.0, 2.0 / (2 ** len(nonzero))),
-        "monte_carlo_resolution": (
-            1.0 / (permutations + 1) if used_seed is not None else None
-        ),
+        "monte_carlo_resolution": (1.0 / (permutations + 1) if used_seed is not None else None),
         "method": method,
         "permutations": used_permutations,
         "random_seed": used_seed,
@@ -506,11 +502,7 @@ def _tool_metadata(rows: Sequence[dict[str, str]], configuration_id: str) -> dic
     selection_roles = {row.get("selection_role", "") for row in members}
     catalog_ids = {row.get("catalog_tool_id", "") for row in members}
     configuration_hashes = {row.get("configuration_sha256", "") for row in members}
-    if (
-        len(families) > 1
-        or len(selection_roles) > 1
-        or len(configuration_hashes) != 1
-    ):
+    if len(families) > 1 or len(selection_roles) > 1 or len(configuration_hashes) != 1:
         raise BenchmarkConfigError(
             f"Configuration {configuration_id!r} has inconsistent family, selection or "
             "parameter identity metadata"
@@ -577,8 +569,7 @@ def _validate_statistics_contract(profile: dict[str, Any]) -> dict[str, Any]:
                 f"Statistics comparison {comparison['id']!r} primary level is not selected"
             )
         if comparison["comparison_role"] == "confirmatory" and (
-            comparison["primary_metric"] != "aupr"
-            or comparison["primary_level"] != "directed"
+            comparison["primary_metric"] != "aupr" or comparison["primary_level"] != "directed"
         ):
             raise BenchmarkConfigError(
                 f"Confirmatory comparison {comparison['id']!r} must use directed AUPR "
@@ -594,12 +585,10 @@ def _validate_statistics_contract(profile: dict[str, Any]) -> dict[str, Any]:
     return contract
 
 
-def _expected_strata(
-    state: dict[str, Any], comparison: dict[str, Any]
-) -> list[dict[str, str]]:
+def _expected_strata(state: dict[str, Any], comparison: dict[str, Any]) -> list[dict[str, str]]:
     strata: set[tuple[tuple[str, str], ...]] = set()
     for dataset in state.get("datasets", []):
-        if dataset.get("dataset_role") not in comparison["dataset_roles"]:
+        if not _comparison_selects_dataset(comparison, dataset):
             continue
         for level in comparison["levels"]:
             values: dict[str, str] = {}
@@ -623,12 +612,19 @@ def _matches_stratum(row: dict[str, str], stratum: dict[str, str]) -> bool:
     return all(row.get(field) == value for field, value in stratum.items())
 
 
+def _comparison_selects_dataset(comparison: dict[str, Any], dataset: dict[str, Any]) -> bool:
+    if dataset.get("dataset_role") not in comparison["dataset_roles"]:
+        return False
+    selected_jobs = comparison.get("generation_jobs")
+    return selected_jobs is None or dataset.get("generation_job") in selected_jobs
+
+
 def _expected_dataset_ids(
     state: dict[str, Any], comparison: dict[str, Any], stratum: dict[str, str]
 ) -> list[str]:
     selected: list[dict[str, Any]] = []
     for dataset in state.get("datasets", []):
-        if dataset.get("dataset_role") not in comparison["dataset_roles"]:
+        if not _comparison_selects_dataset(comparison, dataset):
             continue
         if all(
             field not in DATASET_STRATUM_FIELDS or str(dataset.get(field)) == value
@@ -672,7 +668,7 @@ def _extract_panel(
         row
         for row in rows
         if row["configuration_id"] in configurations
-        and row["dataset_role"] in comparison["dataset_roles"]
+        and _comparison_selects_dataset(comparison, row)
         and row["regime"] == comparison["regime"]
         and row["level"] in comparison["levels"]
         and row["context"].startswith("group:")
@@ -740,7 +736,9 @@ def _extract_panel(
                 for row in run_rows:
                     by_context[row["context"]].append(row)
                 duplicate_contexts = sorted(
-                    context for context, context_rows in by_context.items() if len(context_rows) != 1
+                    context
+                    for context, context_rows in by_context.items()
+                    if len(context_rows) != 1
                 )
                 if duplicate_contexts:
                     reasons.append(
@@ -826,9 +824,7 @@ def _extract_panel(
                 "contexts": sorted(contexts),
                 "executions_per_configuration": execution_counts,
                 "algorithm_seeds": {
-                    configuration_id: sorted(
-                        seeds, key=lambda seed: (-1 if seed is None else seed)
-                    )
+                    configuration_id: sorted(seeds, key=lambda seed: -1 if seed is None else seed)
                     for configuration_id, seeds in sorted(seeds_by_configuration.items())
                 },
                 "candidate_universe_by_context": {
@@ -1005,9 +1001,7 @@ def _analyze_one(
                 "control_configuration_sha256": metadata[control]["configuration_sha256"],
                 "control_tool_id": metadata[control]["tool_id"],
                 "competitor_configuration_id": competitor,
-                "competitor_configuration_sha256": metadata[competitor][
-                    "configuration_sha256"
-                ],
+                "competitor_configuration_sha256": metadata[competitor]["configuration_sha256"],
                 "competitor_tool_id": metadata[competitor]["tool_id"],
                 **result,
                 "bootstrap_ci_low": interval[0] if interval else None,
@@ -1015,9 +1009,7 @@ def _analyze_one(
                 "bootstrap_method": (
                     "paired_percentile_bootstrap_stratified_by_simulator" if interval else None
                 ),
-                "bootstrap_resamples": (
-                    int(contract["bootstrap_resamples"]) if interval else 0
-                ),
+                "bootstrap_resamples": (int(contract["bootstrap_resamples"]) if interval else 0),
                 "bootstrap_random_seed": bootstrap_seed if interval else None,
                 "bootstrap_confidence_level": (
                     1.0 - float(contract["alpha"]) if interval else None
@@ -1098,11 +1090,7 @@ def _apply_multiplicity(analyses: list[dict[str, Any]], *, alpha: float) -> None
         if analysis["analysis_role"] == "exploratory" and omnibus["p_raw"] is not None:
             omnibus["p_holm"] = None
             omnibus["reject"] = omnibus["p_raw"] <= alpha
-        gate = (
-            True
-            if analysis["n_tools"] == 2
-            else bool(omnibus["reject"])
-        )
+        gate = True if analysis["n_tools"] == 2 else bool(omnibus["reject"])
         for record in analysis["pairwise"]:
             record["reject"] = bool(record["reject"] and gate)
 
@@ -1119,18 +1107,14 @@ def _conclude(analysis: dict[str, Any], control: str) -> str:
     significant_adverse = [
         record
         for record in contrasts
-        if record["reject"]
-        and record["rank_biserial"] is not None
-        and record["rank_biserial"] < 0
+        if record["reject"] and record["rank_biserial"] is not None and record["rank_biserial"] < 0
     ]
     if significant_adverse:
         return "control_significantly_worse_in_at_least_one_contrast"
     if len(best) != 1 or best[0]["configuration_id"] != control:
         return "control_not_uniquely_top_ranked"
     if contrasts and all(
-        record["reject"]
-        and record["rank_biserial"] is not None
-        and record["rank_biserial"] > 0
+        record["reject"] and record["rank_biserial"] is not None and record["rank_biserial"] > 0
         for record in contrasts
     ):
         return "control_wins"
@@ -1222,9 +1206,7 @@ def _build_report(
         "summary": {
             "n_analyses": len(analyses),
             "n_tested": tested,
-            "n_not_testable": sum(
-                analysis["status"] == "not_testable" for analysis in analyses
-            ),
+            "n_not_testable": sum(analysis["status"] == "not_testable" for analysis in analyses),
             "n_incomplete": incomplete,
             "n_control_wins": sum(
                 analysis["conclusion"] == "control_wins" for analysis in analyses
@@ -1294,9 +1276,7 @@ def _markdown(report: dict[str, Any]) -> str:
         "",
     ]
     for analysis in report["analyses"]:
-        stratum = ", ".join(
-            f"{key}={value}" for key, value in sorted(analysis["stratum"].items())
-        )
+        stratum = ", ".join(f"{key}={value}" for key, value in sorted(analysis["stratum"].items()))
         lines.extend(
             [
                 f"## {analysis['comparison_id']} / {analysis['metric']}",
@@ -1473,11 +1453,9 @@ def analyze_statistics(
     require_status(state, "completed", "Statistical analysis")
     benchmark_environment = benchmark_host_environment()
     recorded_environment = state.get("benchmark_environment")
-    if (
-        not isinstance(recorded_environment, dict)
-        or recorded_environment.get("fingerprint")
-        != benchmark_environment.get("fingerprint")
-    ):
+    if not isinstance(recorded_environment, dict) or recorded_environment.get(
+        "fingerprint"
+    ) != benchmark_environment.get("fingerprint"):
         raise BenchmarkConfigError(
             "The SPATHI-benchmarks Python environment changed after preflight; use a new run ID"
         )
@@ -1524,14 +1502,11 @@ def analyze_statistics(
             != sha256_file(metrics_path)
             or recovered.get("inputs", {}).get("summary_json", {}).get("sha256")
             != sha256_file(summary_path)
-            or recovered.get("inputs", {}).get("benchmark_environment", {}).get(
-                "fingerprint"
-            )
+            or recovered.get("inputs", {}).get("benchmark_environment", {}).get("fingerprint")
             != benchmark_environment["fingerprint"]
             or not all(path.is_file() for path in paths)
             or any(
-                recovered.get("outputs", {}).get(path.name, {}).get("sha256")
-                != sha256_file(path)
+                recovered.get("outputs", {}).get(path.name, {}).get("sha256") != sha256_file(path)
                 for path in paths[1:]
             )
         ):

@@ -1,0 +1,250 @@
+{
+  "schema_version": "1.0",
+  "template_profile_id": "full",
+  "baseline_batches": [
+    {
+      "id": "group-only-primary",
+      "kind": "baseline",
+      "dataset_role": "test",
+      "generation_jobs": [
+        "dyngen_test_linear_baseline",
+        "dyngen_test_linear_noisy",
+        "dyngen_test_bifurcating_baseline",
+        "dyngen_test_bifurcating_noisy",
+        "scmultisim_test_dynamic_low_balanced",
+        "scmultisim_test_dynamic_high_imbalanced",
+        "sergio_test_invariant",
+        "boolode_test_invariant_clean",
+        "boolode_test_invariant_dropout",
+        "genespider2_test_invariant"
+      ],
+      "regime": "group_only",
+      "tools_params": "experiments/v1/inference/group_only/full-primary.json",
+      "run_metadata": "experiments/v1/inference/group_only/full-primary-metadata.json"
+    },
+    {
+      "id": "order-aware-simic",
+      "kind": "baseline",
+      "dataset_role": "test",
+      "generation_jobs": [
+        "dyngen_test_linear_baseline",
+        "dyngen_test_linear_noisy"
+      ],
+      "regime": "order_aware",
+      "tools_params": "experiments/v1/inference/order_aware/full-simic.json",
+      "run_metadata": "experiments/v1/inference/order_aware/full-simic-metadata.json"
+    },
+    {
+      "id": "pseudotime-aware-infercsn",
+      "kind": "baseline",
+      "dataset_role": "test",
+      "generation_jobs": [
+        "dyngen_test_linear_baseline",
+        "dyngen_test_linear_noisy",
+        "dyngen_test_bifurcating_baseline",
+        "dyngen_test_bifurcating_noisy",
+        "scmultisim_test_dynamic_low_balanced",
+        "scmultisim_test_dynamic_high_imbalanced",
+        "boolode_test_invariant_clean",
+        "boolode_test_invariant_dropout"
+      ],
+      "regime": "pseudotime_aware",
+      "tools_params": "experiments/v1/inference/pseudotime_aware/full-infercsn.json",
+      "run_metadata": "experiments/v1/inference/pseudotime_aware/full-infercsn-metadata.json"
+    }
+  ],
+  "statistics": {
+    "status": "enabled",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": [
+      {
+        "id": "full-group-only-tf-restricted",
+        "comparison_role": "confirmatory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": [
+          "test"
+        ],
+        "generation_jobs": [
+          "dyngen_test_linear_baseline",
+          "dyngen_test_linear_noisy",
+          "dyngen_test_bifurcating_baseline",
+          "dyngen_test_bifurcating_noisy",
+          "scmultisim_test_dynamic_low_balanced",
+          "scmultisim_test_dynamic_high_imbalanced",
+          "sergio_test_invariant",
+          "boolode_test_invariant_clean",
+          "boolode_test_invariant_dropout",
+          "genespider2_test_invariant"
+        ],
+        "regime": "group_only",
+        "levels": [
+          "directed"
+        ],
+        "metrics": [
+          "aupr",
+          "auroc",
+          "f1_at_truth_count",
+          "epr_at_truth_count"
+        ],
+        "primary_level": "directed",
+        "primary_metric": "aupr",
+        "configuration_ids": [
+          "selected_spathi",
+          "genie3_default",
+          "grnboost2_default",
+          "infercsn_none",
+          "pyscenic_default",
+          "scminer_custom_tf",
+          "tigress_default"
+        ],
+        "control_configuration_id": "selected_spathi",
+        "stratify_by": [
+          "dataset_role",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 20,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      },
+      {
+        "id": "full-group-only-tf-restricted-topology",
+        "comparison_role": "exploratory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": [
+          "test"
+        ],
+        "generation_jobs": [
+          "dyngen_test_linear_baseline",
+          "dyngen_test_linear_noisy",
+          "dyngen_test_bifurcating_baseline",
+          "dyngen_test_bifurcating_noisy",
+          "scmultisim_test_dynamic_low_balanced",
+          "scmultisim_test_dynamic_high_imbalanced",
+          "sergio_test_invariant",
+          "boolode_test_invariant_clean",
+          "boolode_test_invariant_dropout",
+          "genespider2_test_invariant"
+        ],
+        "regime": "group_only",
+        "levels": [
+          "topology"
+        ],
+        "metrics": [
+          "aupr",
+          "auroc",
+          "f1_at_truth_count",
+          "epr_at_truth_count"
+        ],
+        "primary_level": "topology",
+        "primary_metric": "aupr",
+        "configuration_ids": [
+          "selected_spathi",
+          "aracne3_default",
+          "genie3_default",
+          "grnboost2_default",
+          "infercsn_none",
+          "pyscenic_default",
+          "scminer_custom_tf",
+          "tigress_default"
+        ],
+        "control_configuration_id": "selected_spathi",
+        "stratify_by": [
+          "dataset_role",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 20,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      },
+      {
+        "id": "full-order-aware-tf-restricted",
+        "comparison_role": "exploratory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": [
+          "test"
+        ],
+        "generation_jobs": [
+          "dyngen_test_linear_baseline",
+          "dyngen_test_linear_noisy"
+        ],
+        "regime": "order_aware",
+        "levels": [
+          "directed",
+          "topology"
+        ],
+        "metrics": [
+          "aupr",
+          "auroc",
+          "f1_at_truth_count",
+          "epr_at_truth_count"
+        ],
+        "primary_level": "directed",
+        "primary_metric": "aupr",
+        "configuration_ids": [
+          "selected_spathi",
+          "simic_no_similarity",
+          "simic_similarity"
+        ],
+        "control_configuration_id": "selected_spathi",
+        "stratify_by": [
+          "dataset_role",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 8,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      },
+      {
+        "id": "full-pseudotime-aware-tf-restricted",
+        "comparison_role": "exploratory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": [
+          "test"
+        ],
+        "generation_jobs": [
+          "dyngen_test_linear_baseline",
+          "dyngen_test_linear_noisy",
+          "dyngen_test_bifurcating_baseline",
+          "dyngen_test_bifurcating_noisy",
+          "scmultisim_test_dynamic_low_balanced",
+          "scmultisim_test_dynamic_high_imbalanced",
+          "boolode_test_invariant_clean",
+          "boolode_test_invariant_dropout"
+        ],
+        "regime": "pseudotime_aware",
+        "levels": [
+          "directed",
+          "topology"
+        ],
+        "metrics": [
+          "aupr",
+          "auroc",
+          "f1_at_truth_count",
+          "epr_at_truth_count"
+        ],
+        "primary_level": "directed",
+        "primary_metric": "aupr",
+        "configuration_ids": [
+          "selected_spathi",
+          "infercsn_none",
+          "infercsn_entropy"
+        ],
+        "control_configuration_id": "selected_spathi",
+        "stratify_by": [
+          "dataset_role",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 8,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      }
+    ]
+  }
+}

@@ -48,6 +48,12 @@ def _summary_rows(
             "dataset_role": role,
             "dataset_id": dataset_id,
             "algorithm_seed": seed,
+            "run_id": (
+                f"validation__{candidate.configuration_id}__seed_{seed}"
+                if role == "validation"
+                else f"{candidate.configuration_id}__seed_{seed}"
+            ),
+            "execution_sha256": "1" * 64,
             "aupr_directed": aupr.get(
                 (candidate.configuration_id, dataset_id, seed),
                 0.5,

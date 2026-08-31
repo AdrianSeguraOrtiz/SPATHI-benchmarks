@@ -3,8 +3,89 @@
   "id": "full",
   "status": "planned",
   "purpose": "benchmark",
-  "description": "Publication-scale dynamic and invariant-control benchmark.",
-  "generation_jobs": [],
+  "description": "Held-out multi-simulator benchmark spanning topology, scale, noise, population imbalance, dynamic rewiring and invariant-network controls.",
+  "generation_jobs": [
+    {
+      "id": "dyngen_test_linear_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/test/linear-baseline-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "linear_baseline"
+    },
+    {
+      "id": "dyngen_test_linear_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/test/linear-noisy-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "linear_noisy"
+    },
+    {
+      "id": "dyngen_test_bifurcating_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/test/bifurcating-baseline-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "bifurcating_baseline"
+    },
+    {
+      "id": "dyngen_test_bifurcating_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/test/bifurcating-noisy-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "bifurcating_noisy"
+    },
+    {
+      "id": "scmultisim_test_dynamic_low_balanced",
+      "scenario": "experiments/v1/simulations/scmultisim/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-low-balanced-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "scmultisim_dynamic_low_balanced"
+    },
+    {
+      "id": "scmultisim_test_dynamic_high_imbalanced",
+      "scenario": "experiments/v1/simulations/scmultisim/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-high-imbalanced-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "scmultisim_dynamic_high_imbalanced"
+    },
+    {
+      "id": "sergio_test_invariant",
+      "scenario": "experiments/v1/simulations/sergio/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/sergio/test/invariant-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "sergio_invariant"
+    },
+    {
+      "id": "boolode_test_invariant_clean",
+      "scenario": "experiments/v1/simulations/boolode/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/boolode/test/invariant-clean-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "boolode_invariant_clean"
+    },
+    {
+      "id": "boolode_test_invariant_dropout",
+      "scenario": "experiments/v1/simulations/boolode/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/boolode/test/invariant-dropout-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "boolode_invariant_dropout"
+    },
+    {
+      "id": "genespider2_test_invariant",
+      "scenario": "experiments/v1/simulations/genespider2/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/genespider2/test/invariant-runs.json",
+      "dataset_role": "test",
+      "split_id": "test_v1",
+      "condition_id": "genespider2_invariant"
+    }
+  ],
   "inference_batches": [],
   "resources": {
     "generate_data": {
@@ -23,18 +104,26 @@
   "planned_design": {
     "simulators": ["dyngen", "scmultisim", "sergio", "boolode", "genespider2"],
     "replicates_per_condition": 5,
-    "regimes": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"],
+    "regimes": ["group_only", "order_aware", "pseudotime_aware"],
     "factors": [
       "topology",
-      "noise",
+      "cell_and_gene_scale",
+      "kinetics_noise",
+      "technical_noise",
       "dropout",
-      "group imbalance",
-      "small groups",
-      "rewiring"
+      "population_imbalance_and_small_groups",
+      "dynamic_rewiring",
+      "invariant_network_control"
     ],
     "notes": [
-      "Invariant-network simulators are negative controls for invented reconfiguration.",
-      "Prior-assisted results are reported separately from the primary ranking."
+      "Contains 50 held-out datasets: 20 dyngen, ten scMultiSim, five SERGIO, ten BoolODE and five GeneSPIDER2 instances.",
+      "Dyngen conditions span 200 to 500 cells and 70 to 130 genes; other simulators add distinct 80- and 100-gene geometries.",
+      "scMultiSim crosses low balanced rewiring with high rewiring, UMI noise and a 12-cell minority population.",
+      "BoolODE crosses clean and explicit dropout-processed invariant-network controls.",
+      "Test seeds are never used for calibration or finalist selection.",
+      "Prior-assisted routes stay excluded until a non-leaky, separately fingerprinted prior dataset is defined.",
+      "SERGIO, BoolODE and GeneSPIDER2 provide invariant group truth for ordinary accuracy metrics; v1 does not claim an explicit rewiring-distance endpoint.",
+      "The scMultiSim test topology is independent of development and validation and is shared only across the two predeclared test stress conditions."
     ]
   },
   "statistics": {

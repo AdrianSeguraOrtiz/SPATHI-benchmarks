@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,11 +26,13 @@ from .config import (
     BenchmarkConfigError,
     load_image_lock,
     load_json_object,
+    load_profile_file,
     load_repo_lock,
     load_run_metadata,
     validate_all_profiles,
     validate_design_contracts,
     validate_locked_repository,
+    validate_profile_references,
 )
 from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
@@ -333,11 +336,19 @@ def preflight(
     run_root: Path,
     andrea_repo: Path,
     spathi_repo: Path,
+    profile_file: Path | None = None,
 ) -> Path:
     existing = _load_existing_state(repo_root, profile_id, run_root)
     if existing is not None:
         if not status_at_least(existing, "preflighted"):
             raise BenchmarkConfigError("Existing run has not completed preflight")
+        if profile_file is not None:
+            freeze_run_inputs(
+                repo_root,
+                profile_id,
+                run_root,
+                profile_file=profile_file,
+            )
         path = run_root / "preflight" / "benchmark-preflight.json"
         if not path.is_file():
             raise BenchmarkConfigError("Preflight state exists but its report is missing")
@@ -345,9 +356,19 @@ def preflight(
 
     validate_all_profiles(repo_root)
     validate_design_contracts(repo_root, andrea_repo)
-    freeze_run_inputs(repo_root, profile_id, run_root)
+    if profile_file is not None:
+        runtime_profile = load_profile_file(
+            repo_root,
+            profile_file,
+            profile_id,
+            require_runnable=True,
+            require_runtime=True,
+        )
+        validate_profile_references(repo_root, runtime_profile)
+    freeze_run_inputs(repo_root, profile_id, run_root, profile_file=profile_file)
     frozen_root = frozen_repository_root(run_root)
     profile = frozen_profile(run_root, profile_id)
+    validate_profile_references(frozen_root, profile)
     repository_lock = load_repo_lock(frozen_root)
     repositories = {
         "andrea": _validate_andrea_repository(frozen_root, andrea_repo),
@@ -891,13 +912,12 @@ def _inference_spec(
     resources: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "dataset_artifact": dataset["dataset_artifact"]["key"],
         "dataset_id": dataset["dataset_id"],
         "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
         "andrea_environment": state["host_environment"]["fingerprint"],
         "batch_kind": batch["kind"],
-        "regime": batch["regime"],
         "run": run,
         "run_metadata": metadata,
         "custom_definition": custom_definition,
@@ -1019,6 +1039,70 @@ def _execute_inference_task(
         )
 
 
+def _batch_selects_dataset(batch: dict[str, Any], dataset: dict[str, Any]) -> bool:
+    if dataset["dataset_role"] != batch["dataset_role"]:
+        return False
+    selected_jobs = batch.get("generation_jobs")
+    return selected_jobs is None or dataset.get("generation_job") in selected_jobs
+
+
+def _execute_unique_missing_tasks(
+    prepared: list[dict[str, Any]],
+    *,
+    max_workers: int,
+    thread_name_prefix: str,
+    execute: Callable[[dict[str, Any]], Artifact],
+) -> tuple[int, ...]:
+    """Execute one representative per missing artifact key and bind every alias.
+
+    A profile may project one physical inference or evaluation into several
+    classificatory regimes.  Those logical records remain distinct downstream,
+    while this helper guarantees that their shared immutable artifact is produced
+    only once inside the current pipeline invocation.
+    """
+
+    groups: dict[ArtifactKey, list[int]] = {}
+    for index, task in enumerate(prepared):
+        if task["artifact"] is None:
+            groups.setdefault(task["key"], []).append(index)
+    if not groups:
+        return ()
+
+    representatives: list[tuple[ArtifactKey, dict[str, Any]]] = []
+    for key, indices in groups.items():
+        representative = prepared[indices[0]]
+        if any(prepared[index]["spec"] != representative["spec"] for index in indices[1:]):
+            raise BenchmarkConfigError(
+                f"Tasks sharing artifact key {key} have different execution specifications"
+            )
+        representatives.append((key, representative))
+
+    artifacts: dict[ArtifactKey, Artifact] = {}
+    workers = min(max_workers, len(representatives))
+    if workers == 1:
+        for key, task in representatives:
+            artifacts[key] = execute(task)
+    else:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=thread_name_prefix) as pool:
+            futures = {pool.submit(execute, task): key for key, task in representatives}
+            for future in as_completed(futures):
+                artifacts[futures[future]] = future.result()
+
+    reused_indices: list[int] = []
+    for key, indices in groups.items():
+        artifact = artifacts[key]
+        if artifact.key != key:
+            raise BenchmarkConfigError(
+                f"Task executor returned artifact {artifact.key} for requested key {key}"
+            )
+        for index in indices:
+            prepared[index]["artifact"] = artifact
+        for index in indices[1:]:
+            prepared[index]["cache_hit"] = True
+            reused_indices.append(index)
+    return tuple(reused_indices)
+
+
 def run_inference(
     *,
     repo_root: Path,
@@ -1053,7 +1137,7 @@ def run_inference(
     for dataset in state["datasets"]:
         dataset_manifest, _ground_truth_manifest = _validated_dataset_paths(store, dataset)
         for batch in profile["inference_batches"]:
-            if dataset["dataset_role"] != batch["dataset_role"]:
+            if not _batch_selects_dataset(batch, dataset):
                 continue
             params_path = frozen_path(run_root, batch["tools_params"], "tools params")
             params_payload = load_json_object(params_path, "tools params")
@@ -1134,39 +1218,22 @@ def run_inference(
                     }
                 )
 
-    missing = [(index, task) for index, task in enumerate(prepared) if task["artifact"] is None]
-    if missing:
-        workers = min(int(resources["max_parallel_runs"]), len(missing))
-        if workers == 1:
-            for index, task in missing:
-                prepared[index]["artifact"] = _execute_inference_task(
-                    task,
-                    store=store,
-                    repo_root=repo_root,
-                    andrea_repo=andrea_repo,
-                    run_root=run_root,
-                    resources=per_run_resources,
-                    state=state,
-                    frozen_root=frozen_root,
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="spathi-infer") as pool:
-                futures = {
-                    pool.submit(
-                        _execute_inference_task,
-                        task,
-                        store=store,
-                        repo_root=repo_root,
-                        andrea_repo=andrea_repo,
-                        run_root=run_root,
-                        resources=per_run_resources,
-                        state=state,
-                        frozen_root=frozen_root,
-                    ): index
-                    for index, task in missing
-                }
-                for future in as_completed(futures):
-                    prepared[futures[future]]["artifact"] = future.result()
+    reused_indices = _execute_unique_missing_tasks(
+        prepared,
+        max_workers=int(resources["max_parallel_runs"]),
+        thread_name_prefix="spathi-infer",
+        execute=lambda task: _execute_inference_task(
+            task,
+            store=store,
+            repo_root=repo_root,
+            andrea_repo=andrea_repo,
+            run_root=run_root,
+            resources=per_run_resources,
+            state=state,
+            frozen_root=frozen_root,
+        ),
+    )
+    inference_hits += len(reused_indices)
 
     for task in prepared:
         dataset = task["dataset"]
@@ -1348,7 +1415,9 @@ def _validate_integrated_run_report(
     integration = report.get("integration")
     tools = report.get("tools")
     if report.get("run_id") != run_id or report.get("status") != "executed":
-        raise BenchmarkConfigError("Integrated inference run report has the wrong identity or status")
+        raise BenchmarkConfigError(
+            "Integrated inference run report has the wrong identity or status"
+        )
     if (report.get("dataset") or {}).get("id") != dataset_id:
         raise BenchmarkConfigError("Integrated inference run report has the wrong dataset identity")
     if not isinstance(integration, dict) or any(
@@ -1361,7 +1430,9 @@ def _validate_integrated_run_report(
             integration.get("monolithic_execution") is not False,
         )
     ):
-        raise BenchmarkConfigError("Integrated inference run report has an invalid integration contract")
+        raise BenchmarkConfigError(
+            "Integrated inference run report has an invalid integration contract"
+        )
     if not isinstance(tools, dict) or sorted(tools.get("selected") or []) != sorted(source_run_ids):
         raise BenchmarkConfigError("Integrated inference run report has the wrong tool run IDs")
     sources = integration.get("sources")
@@ -1677,33 +1748,23 @@ def evaluate(
                 }
             )
 
-    missing = [(index, task) for index, task in enumerate(prepared) if task["artifact"] is None]
-    if missing:
-        workers = min(max_parallel_runs, len(missing))
-        if workers == 1:
-            for index, task in missing:
-                prepared[index]["artifact"] = _execute_evaluation_task(
-                    task,
-                    store=store,
-                    repo_root=repo_root,
-                    andrea_repo=andrea_repo,
-                    run_root=run_root,
-                )
+    reused_indices = _execute_unique_missing_tasks(
+        prepared,
+        max_workers=max_parallel_runs,
+        thread_name_prefix="spathi-eval",
+        execute=lambda task: _execute_evaluation_task(
+            task,
+            store=store,
+            repo_root=repo_root,
+            andrea_repo=andrea_repo,
+            run_root=run_root,
+        ),
+    )
+    for index in reused_indices:
+        if prepared[index]["scope"] == "individual":
+            evaluation_hits += 1
         else:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="spathi-eval") as pool:
-                futures = {
-                    pool.submit(
-                        _execute_evaluation_task,
-                        task,
-                        store=store,
-                        repo_root=repo_root,
-                        andrea_repo=andrea_repo,
-                        run_root=run_root,
-                    ): index
-                    for index, task in missing
-                }
-                for future in as_completed(futures):
-                    prepared[futures[future]]["artifact"] = future.result()
+            joint_evaluation_hits += 1
 
     for task in prepared:
         inference = task["inference"]
@@ -1820,7 +1881,9 @@ def _validate_analysis_bundle_artifact(artifact: Artifact) -> tuple[Path, Path]:
         raise BenchmarkConfigError(f"Invalid analysis bundle artifact: {artifact.key}")
     bundle = manifest.get("bundle")
     if not isinstance(bundle, dict) or bundle.get("id") != "analysis":
-        raise BenchmarkConfigError(f"Analysis bundle manifest has the wrong bundle ID: {artifact.key}")
+        raise BenchmarkConfigError(
+            f"Analysis bundle manifest has the wrong bundle ID: {artifact.key}"
+        )
     return archive, manifest_path
 
 
@@ -1904,7 +1967,9 @@ def _tree_file_hashes(root: Path) -> dict[str, dict[str, Any]]:
         directory_path = Path(directory)
         for name in directory_names:
             if (directory_path / name).is_symlink():
-                raise BenchmarkConfigError(f"Export tree contains a symbolic link: {directory_path / name}")
+                raise BenchmarkConfigError(
+                    f"Export tree contains a symbolic link: {directory_path / name}"
+                )
         for name in file_names:
             path = directory_path / name
             if path.is_symlink() or not path.is_file():
@@ -1933,7 +1998,9 @@ def _materialize_exports(
             relative_directory = _bundle_export_directory(bundle)
             directory_key = relative_directory.as_posix()
             if directory_key in observed_directories:
-                raise BenchmarkConfigError(f"Analysis bundle export path collision: {directory_key}")
+                raise BenchmarkConfigError(
+                    f"Analysis bundle export path collision: {directory_key}"
+                )
             observed_directories.add(directory_key)
             output_directory = staging / relative_directory
             output_directory.mkdir(parents=True)
