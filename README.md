@@ -4,28 +4,26 @@ Reproducible experiments for comparing [SPATHI](https://github.com/AdrianSeguraO
 with inference tools orchestrated by
 [ANDREA](https://github.com/AdrianSeguraOrtiz/ANDREA).
 
-This is intentionally a third repository. It owns experiment design, pinned source
-revisions, container adapters and generated reports without coupling those concerns to
-either scientific package.
+This is a third, independent repository. It owns experiment design, source and image
+locks, the ANDREA adapter, immutable intermediate artifacts and compact reports without
+coupling those concerns to either scientific package.
 
-## Current scope
+## What is runnable now
 
-Version `v1` starts with one runnable end-to-end smoke profile:
+`smoke` is the only runnable profile. It verifies the complete contract with one small
+dyngen dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mode. Each
+tool is executed and evaluated independently so its result can be reused independently.
+The smoke has no statistical power and its SPATHI configuration is not eligible for
+scientific selection.
 
-1. ANDREA simulates a small dynamic single-cell dataset with dyngen.
-2. ANDREA runs GENIE3 in `group_emulated` mode and SPATHI as a `group_native`
-   external Docker tool in the same inference plan.
-3. The benchmark validates the canonical `run_report.json` handoff.
-4. ANDREA evaluates both predictions against the same group-specific truth.
-5. A compact, provenance-enriched metrics table is written under the run directory.
+`reduced` and `full` remain explicit planned profiles. They will not run until their
+dataset partitions and complete ANDREA request matrices are committed. The bounded
+SPATHI calibration engine is implemented, but scientific calibration must wait for a
+proper `development` panel; it must never use the smoke or test panel.
 
-`reduced` and `full` are defined as planned profiles in
-[`experiments/v1/design.md`](experiments/v1/design.md); they are deliberately not
-executable until their simulator/tool matrices have been preflighted and frozen.
+## Setup and first run
 
-## Quick start
-
-The default layout is:
+The expected checkout layout is:
 
 ```text
 Salonica/
@@ -34,55 +32,147 @@ Salonica/
 └── SPATHI-benchmarks/
 ```
 
-From this repository:
+Use one Python environment for the benchmark CLI and the locked ANDREA checkout:
 
 ```bash
-python -m pip install -e '.[dev]'
-scripts/run_all.sh smoke
+python -m pip install -e ../ANDREA -e '.[dev]'
+scripts/doctor.sh
+scripts/run_all.sh smoke smoke-001
 ```
 
-The command creates an immutable run directory under `work/v1/smoke/`. To choose a
-stable identifier, pass it as the second argument:
+Experiments require all three repositories to be at their locked revisions and clean.
+The benchmark repository must also be committed and clean because every run freezes its
+orchestrator commit and all run-defining inputs.
+
+The default paths can be overridden with `ANDREA_REPO`, `SPATHI_REPO`, `WORK_ROOT` and
+`BENCH_PYTHON`. `ANDREA_PYTHON` selects the interpreter used for `python -m andrea`; it
+defaults to the interpreter running `spathi-bench`.
+
+## Resume and stage control
+
+Stages are idempotent. Repeating the same profile/run ID resumes from its recorded state
+and verifies every reused artifact. A failed inference or evaluation leaves already
+published per-tool artifacts in the shared cache, so the next attempt does not repeat
+them.
 
 ```bash
-scripts/run_all.sh smoke local-check
+scripts/run_all.sh smoke smoke-001 --resume
+scripts/run_all.sh smoke smoke-001 --from infer
+scripts/run_all.sh smoke smoke-001 --until generate
 ```
 
-Every stage can also be invoked independently with the same profile and run ID:
+Valid stage names are `preflight`, `image`, `generate`, `infer`, `validate`, `evaluate`
+and `summarize`. Individual scripts under `scripts/` expose the same stages. A per-run
+filesystem lock rejects concurrent mutation of the same run ID.
+
+Inference and evaluation misses can run concurrently. `resources.infer_network` defines
+`max_parallel_runs`; `max_cores` and `max_ram_gb` apply to each concurrent ANDREA
+invocation, so profile authors must budget their product explicitly.
+Catalog images use a host-wide lease per mutable Docker tag: matching immutable digests
+share the lease and remain parallel, while conflicting benchmark revisions wait rather
+than retagging an image underneath an active container.
+
+## What is reused after a SPATHI change
+
+Artifacts live in a shared content-addressed store under `work/v1/artifacts/`. Their
+keys include the inputs that can change their contents:
+
+| Change | Generated datasets | Catalog baselines | SPATHI inference | Evaluation |
+| --- | --- | --- | --- | --- |
+| SPATHI commit/config/image | reuse | reuse | recompute | recompute only for changed SPATHI results |
+| catalog tool image/params | reuse | recompute affected tool | reuse | recompute affected tool |
+| simulator request/image | recompute affected dataset | recompute downstream | recompute downstream | recompute downstream |
+| ANDREA commit or host environment | recompute | recompute | recompute | recompute |
+
+To benchmark a new SPATHI commit, update `repos.lock.json`, the SPATHI entry in
+`images.lock.json`, its commit-specific image tag in the custom-tool requests, and any
+changed build-input hashes. Commit those changes and start a new run ID. The pipeline
+will build the new SPATHI image but recover unchanged generated data, catalog inference
+and catalog evaluations as cache hits. It is therefore unnecessary to execute the other
+tools again merely because SPATHI changed.
+
+The run state records hit counts and the concrete SPATHI image ID. Catalog containers
+are pulled by immutable repository digest. SPATHI is passed to ANDREA by exact local
+image ID, eliminating mutable-tag ambiguity for the external tool.
+
+## SPATHI calibration
+
+The search contract in `experiments/v1/spathi/search-space.json` has three bounded
+development stages:
+
+1. convergence: 4 configurations × 5 algorithmic seeds;
+2. structure: 7 configurations × 3 seeds around one parent;
+3. estimator: at most 5 configurations × 3 seeds around at most two parents.
+
+Generate the first native ANDREA request bundle with:
 
 ```bash
-scripts/00_preflight.sh smoke local-check
-scripts/05_build_spathi_image.sh smoke local-check
-scripts/10_generate_data.sh smoke local-check
-scripts/20_run_inference.sh smoke local-check
-scripts/30_validate_handoff.sh smoke local-check
-scripts/40_evaluate.sh smoke local-check
-scripts/50_summarize.sh smoke local-check
+spathi-bench calibration-plan \
+  --repo-root . \
+  --stage convergence \
+  --output-dir experiments/v1/spathi/generated/convergence
 ```
 
-Set `ANDREA_REPO`, `SPATHI_REPO` or `WORK_ROOT` to override the sibling paths and
-work root. Stages never delete or silently overwrite an existing result.
+After adding that bundle to a committed `purpose=calibration` profile and running it,
+rank the complete balanced stage from its `reports/summary.json`:
 
-## Why there is no integration script
+```bash
+spathi-bench calibration-rank \
+  --repo-root . \
+  --stage convergence \
+  --manifest experiments/v1/spathi/generated/convergence/calibration-manifest.json \
+  --summary work/v1/<profile>/<run>/reports/summary.json \
+  --output experiments/v1/spathi/generated/convergence-shortlist.json
+```
 
-The smoke inference is deliberately hybrid: SPATHI is registered through ANDREA's
-external-tool contract and runs beside catalog tools. ANDREA therefore owns the merged
-network and canonical `run_report.json`; inventing another integration format here would
-duplicate that contract and risk dataset-identity errors. The benchmark only validates
-the handoff and enriches evaluation metrics with experiment provenance.
+Pass that shortlist to the next `calibration-plan` with `--parents`. After estimator
+ranking, use the same command with `--stage validation` and the 2–3 finalist shortlist;
+then rank that validation run with `calibration-rank --stage validation`. Freeze its
+winner explicitly, review the diff and commit both files:
 
-## Repository layout
+```bash
+spathi-bench calibration-freeze \
+  --repo-root . \
+  --ranking experiments/v1/spathi/generated/validation-ranking.json \
+  --output experiments/v1/spathi/selected-config.json
+```
+
+Selection maximizes directed group-level AUPR with equal weight per group, seed and
+dataset, followed by stability, wall time, peak memory when available, and simplicity.
+It rejects incomplete batches, unequal datasets/seeds, different evaluable group sets,
+mixed roles and all test rows. A ranking embeds the calibration rows needed to recompute
+its scores and binds them to the exact SPATHI source/build identity and local image ID.
+The frozen selection is hash-linked to that committed ranking; editing a score, winner,
+configuration or source build invalidates the test gate.
+
+Development, validation and test are separate runnable profile purposes. Test data
+cannot even be generated by a runnable profile until `selected-config.json` contains a
+fully evidenced frozen choice; a SPATHI test batch may contain only that selected
+configuration. Dataset generation tasks are content-fingerprinted globally across
+development, validation and test; identical effective tasks and shared external inputs
+cannot cross partitions. The CLI never freezes a winner as a side effect of ranking:
+`calibration-freeze` is a separate, explicit and reviewable operation.
+
+## Output layout
 
 ```text
-containers/spathi/       ANDREA `/io` adapter and reproducible image
-experiments/v1/          design, profiles and native ANDREA request JSON
-schemas/                 benchmark-owned JSON Schemas
-scripts/                 thin stage orchestrators
-src/spathi_bench/        validation, state and summarization helpers
-tests/                    unit and adapter-contract tests
-work/                     generated data and logs (ignored)
+work/v1/
+├── artifacts/                   immutable shared dataset/inference/evaluation objects
+└── <profile>/<run-id>/
+    ├── input_snapshot/          frozen committed requests, schemas and locks
+    ├── preflight/
+    ├── provenance/
+    ├── logs/
+    ├── handoff-validation.json
+    ├── state.json
+    └── reports/
+        ├── metrics.csv          raw ANDREA metrics plus benchmark provenance
+        └── summary.json         partitioned aggregates and calibration-ready rows
 ```
 
-Source revisions are fixed in `repos.lock.json`; the image base, dependencies and
-adapter-file SHA-256 digests are fixed in `images.lock.json`. Each concrete run also
-records the built local image ID.
+The benchmark reads canonical manifests rather than discovering timestamped outputs.
+There is no extra integration script: ANDREA owns `run_report.json` and the merged
+network, while this repository validates that handoff and enriches its evaluation.
+
+See [`experiments/v1/design.md`](experiments/v1/design.md) for the scientific design,
+information regimes, simulator panel and leakage controls.

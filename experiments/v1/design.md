@@ -83,7 +83,8 @@ pinned build; this does not affect the dyngen smoke.
 - dyngen, one seed, 30 cells and a small gene universe;
 - GENIE3 `group_emulated` and SPATHI `group_native`;
 - 25 trees per method;
-- full generation → inference → handoff validation → evaluation path.
+- full generation → independently cached inference → handoff validation → independently
+  cached evaluation path.
 
 This profile checks contracts, not statistical conclusions.
 At the locked seed, dyngen creates 42 genes, 35 TF candidates and seven groups, including
@@ -111,13 +112,59 @@ combination passes ANDREA preflight and its exact request JSON is committed. A p
 is never silently narrowed after failures: included, blocked and failed combinations
 must remain visible in the final provenance.
 
+## Calibration and data partitions
+
+The smoke configuration is a contract check only. Scientific SPATHI configuration uses
+three bounded development stages declared in `spathi/search-space.json`: estimator-count
+convergence, one-factor structural variants and a small estimator shortlist. Every
+candidate is repeated over predeclared algorithmic seeds. The primary objective is
+directed AUPR, averaged equally over groups, then seeds, then datasets. Ties are resolved
+by stability, wall time, peak memory when measured, and distance from the reference
+configuration.
+
+Dataset instances—not cells—are assigned once to mutually exclusive `development`,
+`validation` and `test` roles, stratified by simulator, topology and condition. Related
+datasets stay together. Search stages see development only; validation chooses one
+global finalist; test compares the frozen choice with external methods once and can
+never alter it.
+
+This separation is enforced structurally:
+
+- each runnable profile purpose maps to exactly one dataset role;
+- every inference batch names that role and is applied only to matching datasets;
+- a runnable test profile requires an evidenced, frozen `selected-config.json`;
+- a SPATHI test batch may contain only `selection_role=selected`;
+- summaries never aggregate across role, split or condition; and
+- calibration ranking rejects missing candidates, unbalanced seed/dataset panels and
+  every row outside its expected development or validation role;
+- effective simulator tasks are content-fingerprinted globally, and identical tasks or
+  shared external inputs cannot cross development, validation and test; and
+- validation rankings embed their auditable rows and exact SPATHI build provenance, while
+  a frozen winner is hash-linked to the committed ranking.
+
+The CLI materializes deterministic ANDREA request bundles and proposes bounded
+shortlists. Ranking never writes a winner. The separate `calibration-freeze` command
+materializes it explicitly; the ranking and resulting selection must be reviewed and
+committed before any test profile becomes runnable.
+
 ## Reproducibility and handoff
 
-`repos.lock.json` fixes the ANDREA and SPATHI revisions. `images.lock.json` fixes the
-SPATHI base image, source revision, Python dependencies and adapter-file SHA-256
-digests. A run records its concrete local image ID in `state.json`.
+`repos.lock.json` fixes the ANDREA and SPATHI revisions. `images.lock.json` fixes catalog
+images by repository digest and fixes the SPATHI base image, source revision, Python
+dependencies and adapter-file SHA-256 digests. A run records its concrete local SPATHI
+image ID and fingerprints the Python environment used to execute ANDREA. A changed
+orchestration environment therefore cannot silently reuse an old artifact.
 
 The benchmark consumes paths from `benchmark-manifest.json`; it never selects outputs
-with timestamp sorting. SPATHI runs through ANDREA's external-tool contract in the same
-plan as catalog methods. Consequently, ANDREA owns `merged_network_raw.csv` and
-`run_report.json`; the latter is passed unchanged to `evaluate-inference`.
+with timestamp sorting. SPATHI runs through ANDREA's external-tool contract. Catalog and
+SPATHI runs are submitted separately so each dataset/tool/configuration has an immutable,
+content-addressed result and can be invalidated independently. ANDREA still owns
+`merged_network_raw.csv` and `run_report.json`; each single-tool report is passed
+unchanged to `evaluate-inference`.
+
+The shared artifact store is keyed by the relevant simulator request and image,
+ANDREA revision/environment, dataset artifact, tool parameters, algorithmic seed and
+concrete tool image. Changing SPATHI invalidates only SPATHI inference and its downstream
+evaluation; unchanged simulated data and catalog baselines remain reusable. Cache misses
+may execute concurrently within an explicit per-profile resource limit, while state is
+published only after the deterministic ordered result set is complete.
