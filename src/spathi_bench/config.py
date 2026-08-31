@@ -267,6 +267,34 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             raise BenchmarkConfigError(
                 f"Test profile {profile['id']} cannot become runnable before SPATHI selection is frozen"
             )
+    statistics = profile["statistics"]
+    if statistics["status"] != "enabled":
+        raise BenchmarkConfigError(
+            f"Runnable profile {profile['id']} must have an enabled statistics contract"
+        )
+    comparison_ids = [str(item["id"]) for item in statistics["comparisons"]]
+    if len(set(comparison_ids)) != len(comparison_ids):
+        raise BenchmarkConfigError("Statistics contract contains duplicate comparison IDs")
+    confirmatory = [
+        item for item in statistics["comparisons"] if item["comparison_role"] == "confirmatory"
+    ]
+    if profile["purpose"] == "benchmark" and len(confirmatory) != 1:
+        raise BenchmarkConfigError(
+            "Runnable benchmark profiles require exactly one confirmatory comparison"
+        )
+    if any(item["regime"] != "group_only" for item in confirmatory):
+        raise BenchmarkConfigError("Confirmatory comparisons must use the group_only regime")
+    if any(item["candidate_space"] != "tf_restricted" for item in confirmatory):
+        raise BenchmarkConfigError("Confirmatory comparisons must use the TF-restricted space")
+    if any(
+        item["primary_metric"] != "aupr" or item["primary_level"] != "directed"
+        for item in confirmatory
+    ):
+        raise BenchmarkConfigError(
+            "Confirmatory comparisons must use directed AUPR as the primary endpoint"
+        )
+    configuration_routes: dict[str, set[tuple[str, str]]] = {}
+    configuration_families: dict[str, set[str]] = {}
     for job in profile["generation_jobs"]:
         scenario_path = resolve_repo_path(repo_root, job["scenario"], f"{job['id']} scenario")
         runs_path = resolve_repo_path(
@@ -314,6 +342,14 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             batch["run_metadata"],
             f"{batch['id']} run metadata",
         )
+        for item in metadata["runs"]:
+            configuration_id = str(item["configuration_id"])
+            configuration_routes.setdefault(configuration_id, set()).add(
+                (str(batch["dataset_role"]), str(batch["regime"]))
+            )
+            family = item.get("family")
+            if isinstance(family, str) and family:
+                configuration_families.setdefault(configuration_id, set()).add(family)
         requested_ids = {str(run["run_id"]) for run in params_payload["runs"]}
         metadata_ids = {str(run["run_id"]) for run in metadata["runs"]}
         if requested_ids != metadata_ids:
@@ -459,6 +495,37 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                     raise BenchmarkConfigError(
                         f"{batch['id']} run {run_id!r} differs from its calibration candidate"
                     )
+
+    for comparison in statistics["comparisons"]:
+        configurations = [str(item) for item in comparison["configuration_ids"]]
+        control = str(comparison["control_configuration_id"])
+        if control not in configurations:
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']} control is not in configuration_ids"
+            )
+        if configuration_families.get(control) != {"spathi"}:
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']} control must be a SPATHI configuration"
+            )
+        if comparison["primary_metric"] not in comparison["metrics"]:
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']} primary metric is not selected"
+            )
+        if comparison["primary_level"] not in comparison["levels"]:
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']} primary level is not selected"
+            )
+        expected_routes = {
+            (str(role), str(comparison["regime"])) for role in comparison["dataset_roles"]
+        }
+        for configuration_id in configurations:
+            observed_routes = configuration_routes.get(configuration_id, set())
+            if not expected_routes.issubset(observed_routes):
+                raise BenchmarkConfigError(
+                    f"Statistics comparison {comparison['id']} configuration "
+                    f"{configuration_id!r} is not predeclared for every selected "
+                    "dataset role and regime"
+                )
 
 
 def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:

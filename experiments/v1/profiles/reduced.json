@@ -26,5 +26,13 @@
     "regimes": ["group_only", "order_aware", "pseudotime_aware"],
     "factors": ["topology", "moderate noise", "group imbalance"],
     "notes": ["Freeze only after all simulator/tool combinations pass preflight."]
+  },
+  "statistics": {
+    "status": "planned",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": []
   }
 }

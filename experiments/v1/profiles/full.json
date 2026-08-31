@@ -36,5 +36,13 @@
       "Invariant-network simulators are negative controls for invented reconfiguration.",
       "Prior-assisted results are reported separately from the primary ranking."
     ]
+  },
+  "statistics": {
+    "status": "planned",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": []
   }
 }

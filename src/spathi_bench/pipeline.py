@@ -44,6 +44,7 @@ from .runtime import (
     andrea_command,
     andrea_contract_command,
     andrea_host_environment,
+    benchmark_host_environment,
     catalog_image_lease,
     catalog_image_leases,
     check_docker,
@@ -288,6 +289,7 @@ def _initial_state(
     repositories: dict[str, Any],
     catalog_images: dict[str, Any],
     host_environment: dict[str, Any],
+    benchmark_environment: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": STATE_SCHEMA_VERSION,
@@ -303,6 +305,7 @@ def _initial_state(
         },
         "catalog_images": catalog_images,
         "host_environment": host_environment,
+        "benchmark_environment": benchmark_environment,
         "artifact_store": str(_artifact_store(run_root).root.resolve()),
         "benchmarks": [],
         "datasets": [],
@@ -364,6 +367,7 @@ def preflight(
         andrea_repo=andrea_repo,
     )
     host_environment = andrea_host_environment()
+    benchmark_environment = benchmark_host_environment()
 
     preflight_dir = run_root / "preflight"
     if preflight_dir.exists():
@@ -378,6 +382,7 @@ def preflight(
             "repositories": repositories,
             "catalog_images": catalog_images,
             "host_environment": host_environment,
+            "benchmark_environment": benchmark_environment,
             "status": "passed",
         }
         if any(report.get(field) != value for field, value in expected.items()):
@@ -399,6 +404,7 @@ def preflight(
             repositories=repositories,
             catalog_images=catalog_images,
             host_environment=host_environment,
+            benchmark_environment=benchmark_environment,
         )
         write_state(run_root, state)
         return preflight_dir / "benchmark-preflight.json"
@@ -450,6 +456,7 @@ def preflight(
             "repositories": repositories,
             "catalog_images": catalog_images,
             "host_environment": host_environment,
+            "benchmark_environment": benchmark_environment,
             "status": "passed",
         }
         _write_json(temporary / "benchmark-preflight.json", report)
@@ -467,6 +474,7 @@ def preflight(
         repositories=repositories,
         catalog_images=catalog_images,
         host_environment=host_environment,
+        benchmark_environment=benchmark_environment,
     )
     write_state(run_root, state)
     return preflight_dir / "benchmark-preflight.json"

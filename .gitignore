@@ -214,6 +214,8 @@ tempCodeRunnerFile.py
 # Benchmark runtime outputs
 work/
 reports/generated/
+/comparisons/
+/evaluations/
 
 # Marimo
 marimo/_static/

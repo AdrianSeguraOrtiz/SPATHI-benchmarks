@@ -15,7 +15,9 @@ dyngen dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mod
 tool is executed and evaluated independently so its result can be reused independently.
 The pipeline also projects those immutable results into one joint ANDREA-compatible
 source per dataset and regime, evaluates that view, and exports every official
-`analysis` handoff. The smoke has no statistical power and its SPATHI configuration is
+`analysis` handoff. A final statistical stage also exercises the reporting contract,
+but correctly emits `not_testable`: seven groups from one dataset are still one
+independent block. The smoke has no statistical power and its SPATHI configuration is
 not eligible for scientific selection.
 
 `reduced` and `full` remain explicit planned profiles. They will not run until their
@@ -49,6 +51,9 @@ orchestrator commit and all run-defining inputs.
 The default paths can be overridden with `ANDREA_REPO`, `SPATHI_REPO`, `WORK_ROOT` and
 `BENCH_PYTHON`. `ANDREA_PYTHON` selects the interpreter used for `python -m andrea`; it
 defaults to the interpreter running `spathi-bench`.
+Preflight fingerprints both interpreters separately. The statistics stage refuses to
+reuse a run if the benchmark interpreter has changed, even when `ANDREA_PYTHON` points
+to a different, unchanged environment.
 
 ## Resume and stage control
 
@@ -64,8 +69,10 @@ scripts/run_all.sh smoke smoke-001 --until generate
 ```
 
 Valid stage names are `preflight`, `image`, `generate`, `infer`, `validate`, `integrate`,
-`evaluate`, `export` and `summarize`. Individual scripts under `scripts/` expose the
-same stages. A per-run filesystem lock rejects concurrent mutation of the same run ID.
+`evaluate`, `export`, `summarize` and `statistics`. Individual scripts under `scripts/`
+expose the same stages. A per-run filesystem lock rejects concurrent mutation of the
+same run ID. Use `--until summarize` to stop before statistical reporting, or run only
+the final stage with `scripts/60_statistics.sh <profile> <run-id>`.
 
 Inference and evaluation misses can run concurrently. `resources.infer_network` defines
 `max_parallel_runs`; `max_cores` and `max_ram_gb` apply to each concurrent ANDREA
@@ -121,6 +128,50 @@ joint inference ZIP for the networks and the joint evaluation ZIP for metrics; i
 likewise consumes the extracted report paths through a comparison request. The original
 individual evaluations remain the only inputs to the scientific summary, so metrics are
 not duplicated.
+
+## Statistical comparison
+
+Every runnable profile predeclares its statistical comparison families: exact
+configuration IDs, SPATHI control, dataset roles, information regime, network levels,
+metrics, stratification and minimum independent block count. This prevents a result from
+silently relabelling a comparison family or choosing configurations after seeing test
+scores. The declared candidate-space class remains a reviewed design attribute; at run
+time the benchmark additionally requires identical ANDREA candidate-universe counts for
+every paired context. Directed AUPR is the confirmatory endpoint for the primary `group_only`
+family; other requested metrics and levels are reported as exploratory analyses.
+
+The hierarchy is fixed:
+
+1. average equally over evaluable group contexts within one execution;
+2. average algorithmic-seed executions within one configuration and dataset;
+3. use each independent `dataset_id` once as a paired block.
+
+Cells, edges, groups and algorithmic seeds are never treated as independent replicates.
+Role, regime and level are mandatory strata; profiles may additionally separate splits,
+conditions, simulators or generation jobs. Two dataset IDs with the same simulator seed
+cannot become two blocks in any resulting stratum, so shared conditions must be split or
+redesigned explicitly.
+Configuration hashes may not change under one ID, duplicate algorithmic seeds are
+rejected, and deterministic or differently replicated tools are still reduced to one
+equal-weight score per dataset. Every tool must have the same contexts, candidate universe
+and complete dataset panel. Missing or
+non-evaluable values are not imputed and do not trigger pairwise deletion; the family is
+reported as `incomplete_panel`. Numerically evaluated empty networks remain valid scores.
+
+For at least three tools the omnibus test is Friedman with midranks, tie correction,
+Kendall's W and an exact or seeded within-block permutation p-value. Post-hoc contrasts
+compare the predeclared SPATHI control with every rival using a two-sided paired Wilcoxon
+signed-rank permutation test. Holm correction controls family-wise error. With two tools,
+Friedman is not applicable and the paired Wilcoxon contrast is used directly. Reports
+also include paired differences, Hodges–Lehmann estimates, rank-biserial effects,
+win/tie/loss counts and a dataset-level bootstrap interval whose confidence level follows
+the predeclared alpha. The Markdown report exposes the omnibus and post-hoc evidence as
+well as the machine-readable JSON and CSV files.
+
+`not_testable` is a successful analytical outcome, not a pipeline failure. In particular,
+the smoke always produces that status. `reduced` is intended for development; claims from
+`full` require a predeclared power analysis and enough independent datasets for the
+number of Holm-adjusted contrasts.
 
 ## SPATHI calibration
 
@@ -203,7 +254,12 @@ work/v1/
     │       └── joint/analysis.zip
     └── reports/
         ├── metrics.csv          raw ANDREA metrics plus benchmark provenance
-        └── summary.json         partitioned aggregates and calibration-ready rows
+        ├── summary.json         partitioned aggregates and calibration-ready rows
+        └── statistics/
+            ├── statistics.json methods, blocks, exclusions, tests and effects
+            ├── rankings.csv     mean score and mean rank per configuration
+            ├── pairwise.csv     Wilcoxon contrasts and Holm-adjusted p-values
+            └── report.md        compact human-readable conclusions
 ```
 
 Every ZIP has an adjacent `analysis.zip.manifest.json` with archive and member hashes.

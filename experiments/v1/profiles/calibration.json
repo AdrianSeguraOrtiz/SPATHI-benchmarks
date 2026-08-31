@@ -29,5 +29,13 @@
       "Contains development datasets only.",
       "Candidate bundles are generated from experiments/v1/spathi/search-space.json."
     ]
+  },
+  "statistics": {
+    "status": "planned",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": []
   }
 }

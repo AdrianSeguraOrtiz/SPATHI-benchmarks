@@ -53,5 +53,39 @@
     "regimes": ["group_only"],
     "factors": ["end-to-end contract"],
     "notes": ["This profile is a software smoke test, not an inferential study."]
+  },
+  "statistics": {
+    "status": "enabled",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": [
+      {
+        "id": "group_only_tf_restricted",
+        "comparison_role": "confirmatory",
+        "candidate_space": "tf_restricted",
+        "dataset_roles": ["smoke"],
+        "regime": "group_only",
+        "levels": ["directed", "topology"],
+        "metrics": ["aupr", "auroc", "f1_at_truth_count", "epr_at_truth_count"],
+        "primary_level": "directed",
+        "primary_metric": "aupr",
+        "configuration_ids": ["genie3_smoke", "spathi_smoke"],
+        "control_configuration_id": "spathi_smoke",
+        "stratify_by": [
+          "dataset_role",
+          "split_id",
+          "condition_id",
+          "simulator_id",
+          "generation_job",
+          "regime",
+          "level"
+        ],
+        "min_blocks": 8,
+        "posthoc_scope": "control_vs_rest",
+        "correction": "holm"
+      }
+    ]
   }
 }

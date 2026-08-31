@@ -39,6 +39,7 @@ from .pipeline import (
     validate_handoffs,
 )
 from .state import run_lock
+from .statistics import analyze_statistics
 from .summarize import summarize
 
 
@@ -147,6 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     summarize_parser = subparsers.add_parser("summarize", help="combine evaluation metrics")
     _add_common(summarize_parser)
+
+    statistics_parser = subparsers.add_parser(
+        "statistics",
+        help="rank predeclared tools with paired non-parametric tests",
+    )
+    _add_common(statistics_parser)
     return parser
 
 
@@ -337,6 +344,13 @@ def _dispatch(
             run_root=args.run_root,
         )
         return "Reports written", paths
+    if args.command == "statistics":
+        paths = analyze_statistics(
+            repo_root=args.repo_root,
+            profile_id=args.profile,
+            run_root=args.run_root,
+        )
+        return "Statistical reports written", paths
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

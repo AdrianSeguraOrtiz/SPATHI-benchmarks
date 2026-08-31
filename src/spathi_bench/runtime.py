@@ -283,6 +283,26 @@ print(json.dumps({
     return details
 
 
+def benchmark_host_environment() -> dict[str, Any]:
+    """Fingerprint the Python interpreter executing SPATHI-benchmarks itself."""
+
+    import platform
+
+    executable = Path(os.path.abspath(sys.executable))
+    details: dict[str, Any] = {
+        "python_executable": str(executable),
+        "python_executable_sha256": sha256_file(executable),
+        "python_prefix": sys.prefix,
+        "python_base_prefix": sys.base_prefix,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "system": platform.system(),
+        "machine": platform.machine(),
+    }
+    details["fingerprint"] = canonical_json_sha256(details)
+    return details
+
+
 def check_docker() -> None:
     if shutil.which("docker") is None:
         raise BenchmarkConfigError("Docker CLI is unavailable")

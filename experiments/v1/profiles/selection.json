@@ -29,5 +29,13 @@
       "Contains validation datasets only.",
       "Its winner must be frozen before any test profile becomes runnable."
     ]
+  },
+  "statistics": {
+    "status": "planned",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": []
   }
 }

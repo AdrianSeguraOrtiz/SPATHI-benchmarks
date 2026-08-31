@@ -29,9 +29,60 @@ tool in the locked ANDREA catalog.
 
 Metrics are computed per group against the simulator's group-specific truth. Summary
 means first average contexts within each dataset and then give datasets equal weight, so
-a simulator that emits more groups cannot dominate. Directed metrics are primary;
+a simulator that emits more groups cannot dominate. Directed evaluations are emphasized;
 topology metrics are also retained because some catalog tools are undirected. Empty
 inferred networks remain valid zero-edge predictions.
+
+The confirmatory endpoint is directed group-level AUPR in the TF-restricted
+`group_only` stratum. AUROC, F1 at the truth-edge count, EPR at the truth-edge count and
+topology analyses are explicitly exploratory unless a later version predeclares a joint
+multiplicity family before generating test data.
+
+## Statistical inference
+
+The unit of replication is an independently simulated dataset. Group contexts are
+averaged equally within an execution, and repeated algorithmic seeds are then averaged
+within a configuration and dataset. Cells, edges, groups and algorithmic seeds cannot
+increase the inferential sample size. Conditions derived from a shared simulated object
+must either be one block or remain in separately predeclared strata.
+
+Role, regime and level are mandatory strata; a profile may additionally separate split,
+condition, simulator and generation job, or combine independent simulators in one panel.
+Within any resulting stratum, distinct dataset IDs sharing the same simulator seed are
+rejected as a duplicated simulation unit. Each configuration
+ID has one immutable parameter hash, repeated seed identities are rejected, and each
+paired context must expose the same ANDREA candidate-universe counts. Different tools may
+use different numbers of algorithmic repetitions—including one deterministic run—because
+those repetitions are averaged and never increase the number of dataset blocks.
+
+Each profile freezes exact statistical families alongside its simulation and inference
+requests. A family identifies the control and competitor configuration IDs, dataset
+role, information regime, network levels, metrics, stratification and minimum block
+count. Confirmatory test profiles may contain only the globally frozen SPATHI
+configuration; calibration candidates and ablations cannot enter that ranking.
+
+Inference requires a complete paired panel and identical group-context sets for every
+configuration and algorithmic execution. No missing metric is imputed, and a failed or
+non-evaluable member invalidates the confirmatory family instead of reducing it by
+pairwise deletion. Empty inferred networks that ANDREA evaluates numerically remain
+valid observations.
+
+With three or more tools, the omnibus comparison is a tie-corrected Friedman test over
+dataset blocks. Its p-value comes from exact label permutations when feasible and from a
+predeclared seeded Monte Carlo permutation otherwise; Kendall's W accompanies the
+p-value. The post-hoc family consists of two-sided paired Wilcoxon signed-rank contrasts
+between SPATHI and each predeclared rival, followed by Holm step-down correction. With
+two tools, only the paired contrast applies. Average ranks are descriptive: SPATHI is
+called a winner only when it is uniquely top-ranked and every required directional
+contrast remains significant after correction. Otherwise the report states that it is
+top-ranked but not statistically distinguishable, or that it is not top-ranked.
+
+P-values are accompanied by median and Hodges–Lehmann paired differences,
+rank-biserial effects, win/tie/loss counts and paired dataset-level bootstrap intervals
+at confidence level `1 - alpha`.
+The smoke emits `not_testable` because it has one dataset. The final full-panel replicate
+count must be justified by simulation-based power for its predeclared Holm family; the
+nominal five-seed design is not itself a guarantee of adequate power.
 
 ## Information regimes
 

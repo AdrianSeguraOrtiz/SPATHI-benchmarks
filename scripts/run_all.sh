@@ -7,7 +7,7 @@ RUN_ID="${2:-$(date -u +%Y%m%dT%H%M%SZ)}"
 shift "$(( $# >= 2 ? 2 : $# ))"
 
 FROM_STAGE="preflight"
-UNTIL_STAGE="summarize"
+UNTIL_STAGE="statistics"
 while (( $# > 0 )); do
   case "$1" in
     --from)
@@ -28,7 +28,7 @@ while (( $# > 0 )); do
   esac
 done
 
-STAGES=(preflight image generate infer validate integrate evaluate export summarize)
+STAGES=(preflight image generate infer validate integrate evaluate export summarize statistics)
 SCRIPTS=(
   00_preflight.sh
   05_build_spathi_image.sh
@@ -39,6 +39,7 @@ SCRIPTS=(
   40_evaluate.sh
   45_export_analysis.sh
   50_summarize.sh
+  60_statistics.sh
 )
 
 FROM_INDEX=-1

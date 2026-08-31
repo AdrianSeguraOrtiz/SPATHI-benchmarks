@@ -12,7 +12,8 @@
     "generation_jobs",
     "inference_batches",
     "resources",
-    "planned_design"
+    "planned_design",
+    "statistics"
   ],
   "properties": {
     "schema_version": {"const": "1.0"},
@@ -29,7 +30,8 @@
       "items": {"$ref": "#/$defs/inference_batch"}
     },
     "resources": {"$ref": "#/$defs/resources"},
-    "planned_design": {"$ref": "#/$defs/planned_design"}
+    "planned_design": {"$ref": "#/$defs/planned_design"},
+    "statistics": {"$ref": "#/$defs/statistics"}
   },
   "allOf": [
     {
@@ -155,6 +157,120 @@
         },
         "factors": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "notes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "alpha",
+        "random_seed",
+        "permutations",
+        "bootstrap_resamples",
+        "comparisons"
+      ],
+      "properties": {
+        "status": {"enum": ["enabled", "planned"]},
+        "alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
+        "random_seed": {"type": "integer", "minimum": 0},
+        "permutations": {"type": "integer", "minimum": 9999, "maximum": 9999999},
+        "bootstrap_resamples": {"type": "integer", "minimum": 1000, "maximum": 1000000},
+        "comparisons": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/statistical_comparison"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "enabled"}}},
+          "then": {"properties": {"comparisons": {"minItems": 1}}},
+          "else": {"properties": {"comparisons": {"maxItems": 0}}}
+        }
+      ]
+    },
+    "statistical_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "comparison_role",
+        "candidate_space",
+        "dataset_roles",
+        "regime",
+        "levels",
+        "metrics",
+        "primary_level",
+        "primary_metric",
+        "configuration_ids",
+        "control_configuration_id",
+        "stratify_by",
+        "min_blocks",
+        "posthoc_scope",
+        "correction"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "comparison_role": {"enum": ["confirmatory", "exploratory"]},
+        "candidate_space": {"enum": ["tf_restricted", "all_gene"]},
+        "dataset_roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["smoke", "development", "validation", "test"]}
+        },
+        "regime": {
+          "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["directed", "topology", "signed"]}
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count"]
+          }
+        },
+        "primary_level": {"enum": ["directed", "topology", "signed"]},
+        "primary_metric": {
+          "enum": ["auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count"]
+        },
+        "configuration_ids": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "control_configuration_id": {"$ref": "#/$defs/id"},
+        "stratify_by": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "dataset_role",
+              "split_id",
+              "condition_id",
+              "simulator_id",
+              "generation_job",
+              "regime",
+              "level"
+            ]
+          },
+          "allOf": [
+            {"contains": {"const": "dataset_role"}},
+            {"contains": {"const": "regime"}},
+            {"contains": {"const": "level"}}
+          ]
+        },
+        "min_blocks": {"type": "integer", "minimum": 2},
+        "posthoc_scope": {"const": "control_vs_rest"},
+        "correction": {"const": "holm"}
       }
     }
   }
