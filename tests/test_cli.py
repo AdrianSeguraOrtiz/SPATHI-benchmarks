@@ -22,13 +22,13 @@ def _planning_repo(tmp_path: Path) -> Path:
         "schemas/calibration-ranking.schema.json",
         "schemas/profile.schema.json",
         "schemas/spathi-search-space.schema.json",
-        "experiments/v1/profiles/calibration.json",
+        "experiments/v1/profiles/calibration-full.json",
         "experiments/v1/spathi/search-space.json",
     ):
         destination = repo / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO_ROOT / relative, destination)
-    template_path = repo / "experiments/v1/profiles/calibration.json"
+    template_path = repo / "experiments/v1/profiles/calibration-full.json"
     template = json.loads(template_path.read_text(encoding="utf-8"))
     template["generation_jobs"] = [
         {
@@ -47,7 +47,7 @@ def _planning_repo(tmp_path: Path) -> Path:
 def test_calibration_plan_and_rank_are_cli_executable(tmp_path: Path) -> None:
     repo = _planning_repo(tmp_path)
     plan = repo / "experiments/v1/spathi/generated/convergence"
-    profile = repo / "experiments/v1/profiles/calibration-convergence.json"
+    profile = repo / "experiments/v1/profiles/calibration-full-convergence.json"
     assert (
         main(
             [
@@ -56,6 +56,8 @@ def test_calibration_plan_and_rank_are_cli_executable(tmp_path: Path) -> None:
                 str(repo),
                 "--stage",
                 "convergence",
+                "--calibration-budget",
+                "full",
                 "--output-dir",
                 str(plan),
                 "--profile-output",
@@ -107,7 +109,7 @@ def test_calibration_plan_and_rank_are_cli_executable(tmp_path: Path) -> None:
     summary.write_text(
         json.dumps(
             {
-                "profile_id": "calibration-convergence",
+                "profile_id": "calibration-full-convergence",
                 "purpose": "calibration",
                 "benchmark_commit": "1" * 40,
                 "calibration_rows": summary_rows,
@@ -124,6 +126,8 @@ def test_calibration_plan_and_rank_are_cli_executable(tmp_path: Path) -> None:
                 str(repo),
                 "--stage",
                 "convergence",
+                "--calibration-budget",
+                "full",
                 "--manifest",
                 str(plan / "calibration-manifest.json"),
                 "--summary",
@@ -143,13 +147,15 @@ def test_calibration_plan_and_rank_are_cli_executable(tmp_path: Path) -> None:
 def test_calibration_plan_is_idempotent_below_work(tmp_path: Path) -> None:
     repo = _planning_repo(tmp_path)
     bundle = repo / "work/calibration/convergence/requests"
-    profile = repo / "work/calibration/convergence/calibration-convergence.json"
+    profile = repo / "work/calibration/convergence/calibration-full-convergence.json"
     arguments = [
         "calibration-plan",
         "--repo-root",
         str(repo),
         "--stage",
         "convergence",
+        "--calibration-budget",
+        "full",
         "--output-dir",
         str(bundle),
         "--profile-output",
@@ -169,13 +175,15 @@ def test_calibration_plan_recovers_one_missing_materialization_member(
 ) -> None:
     repo = _planning_repo(tmp_path)
     bundle = repo / "work/calibration/convergence/requests"
-    profile = repo / "work/calibration/convergence/calibration-convergence.json"
+    profile = repo / "work/calibration/convergence/calibration-full-convergence.json"
     arguments = [
         "calibration-plan",
         "--repo-root",
         str(repo),
         "--stage",
         "convergence",
+        "--calibration-budget",
+        "full",
         "--output-dir",
         str(bundle),
         "--profile-output",
@@ -202,13 +210,15 @@ def test_calibration_plan_rejects_a_divergent_partial_materialization(
 ) -> None:
     repo = _planning_repo(tmp_path)
     bundle = repo / "work/calibration/convergence/requests"
-    profile = repo / "work/calibration/convergence/calibration-convergence.json"
+    profile = repo / "work/calibration/convergence/calibration-full-convergence.json"
     arguments = [
         "calibration-plan",
         "--repo-root",
         str(repo),
         "--stage",
         "convergence",
+        "--calibration-budget",
+        "full",
         "--output-dir",
         str(bundle),
         "--profile-output",
@@ -257,7 +267,37 @@ def test_high_level_calibrate_cli_uses_default_work_root(
         == 0
     )
     assert calls[0]["work_root"] == repo.resolve() / "work"
+    assert calls[0]["calibration_budget"] == "full"
     assert calls[0]["run_id"] is None
+
+
+def test_high_level_calibrate_cli_forwards_reduced_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli,
+        "run_calibration_workflow",
+        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
+    )
+
+    assert (
+        main(
+            [
+                "calibrate",
+                "--repo-root",
+                str(tmp_path / "repo"),
+                "--andrea-repo",
+                str(tmp_path / "ANDREA"),
+                "--spathi-repo",
+                str(tmp_path / "SPATHI"),
+                "--profile",
+                "reduced",
+            ]
+        )
+        == 0
+    )
+    assert calls[0]["calibration_budget"] == "reduced"
 
 
 def test_high_level_compare_cli_defaults_to_full(

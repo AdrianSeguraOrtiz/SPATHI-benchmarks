@@ -47,21 +47,19 @@ def _repo_relative_path(repo_root: Path, path: Path, label: str) -> str:
         raise BenchmarkConfigError(f"{label} must be inside the benchmark repository") from exc
 
 
-def _estimator_seeds(search_space: Mapping[str, Any]) -> tuple[int, ...]:
-    stages = search_space.get("stages")
-    if not isinstance(stages, list):
-        raise BenchmarkConfigError("SPATHI search space contains no stages")
-    estimator = next(
-        (
-            stage
-            for stage in stages
-            if isinstance(stage, Mapping) and stage.get("id") == "estimator"
-        ),
-        None,
-    )
-    if estimator is None or not isinstance(estimator.get("algorithmic_seeds"), list):
-        raise BenchmarkConfigError("Estimator stage contains no predeclared algorithmic seeds")
-    raw_seeds = estimator["algorithmic_seeds"]
+def _estimator_seeds(search_space: Mapping[str, Any], calibration_budget: str) -> tuple[int, ...]:
+    budgets = search_space.get("calibration_budgets")
+    if not isinstance(budgets, Mapping) or calibration_budget not in budgets:
+        raise BenchmarkConfigError(f"Unknown SPATHI calibration budget: {calibration_budget!r}")
+    budget = budgets[calibration_budget]
+    if not isinstance(budget, Mapping):
+        raise BenchmarkConfigError(f"SPATHI calibration budget {calibration_budget!r} is invalid")
+    seed_map = budget.get("algorithmic_seeds")
+    if not isinstance(seed_map, Mapping) or not isinstance(seed_map.get("estimator"), list):
+        raise BenchmarkConfigError(
+            f"SPATHI calibration budget {calibration_budget!r} has no estimator seeds"
+        )
+    raw_seeds = seed_map["estimator"]
     if not raw_seeds or not all(
         isinstance(seed, int) and not isinstance(seed, bool) and seed >= 0 for seed in raw_seeds
     ):
@@ -75,8 +73,10 @@ def _estimator_seeds(search_space: Mapping[str, Any]) -> tuple[int, ...]:
 def load_frozen_selected_candidate(
     repo_root: Path,
     selected_config_path: Path | None = None,
+    *,
+    calibration_budget: str,
 ) -> tuple[dict[str, Any], tuple[int, ...]]:
-    """Return the reconciled selected candidate and its predeclared execution seeds."""
+    """Return a frozen candidate and the seeds bound to its calibration budget."""
 
     root = repo_root.resolve()
     if selected_config_path is None:
@@ -86,6 +86,11 @@ def load_frozen_selected_candidate(
     if selected.get("status") != "selected" or selected.get("phase") != "frozen":
         raise BenchmarkConfigError(
             "Benchmark materialization requires a frozen SPATHI selected-config.json"
+        )
+    if selected.get("calibration_budget") != calibration_budget:
+        raise BenchmarkConfigError(
+            "Frozen SPATHI selection uses calibration budget "
+            f"{selected.get('calibration_budget')!r}, not {calibration_budget!r}"
         )
     candidate = selected.get("selected_candidate")
     if not isinstance(candidate, dict):
@@ -100,7 +105,7 @@ def load_frozen_selected_candidate(
         raise BenchmarkConfigError(
             "Frozen SPATHI candidate targets a different repos.lock.json commit"
         )
-    return copy.deepcopy(candidate), _estimator_seeds(search)
+    return copy.deepcopy(candidate), _estimator_seeds(search, calibration_budget)
 
 
 def build_selected_spathi_requests(
@@ -477,7 +482,11 @@ def materialize_benchmark_plan(
     selected_relative = _repo_relative_path(
         root, resolved_selected, "Selected SPATHI configuration"
     )
-    candidate, seeds = load_frozen_selected_candidate(root, selected_config_path)
+    candidate, seeds = load_frozen_selected_candidate(
+        root,
+        selected_config_path,
+        calibration_budget=template_profile_id,
+    )
     plan, plan_relative = _load_catalog_plan(
         root,
         baseline_plan_path,
@@ -514,10 +523,14 @@ def materialize_benchmark_plan(
             "sha256": sha256_file(resolved_selected),
             "candidate_id": candidate["candidate_id"],
             "configuration_sha256": candidate["configuration_sha256"],
+            "calibration_budget": template_profile_id,
         },
         **identity,
         "algorithm_seeds": {
-            "source": "experiments/v1/spathi/search-space.json#stages/estimator/algorithmic_seeds",
+            "source": (
+                "experiments/v1/spathi/search-space.json#calibration_budgets/"
+                f"{template_profile_id}/algorithmic_seeds/estimator"
+            ),
             "values": list(seeds),
         },
         "runs": [

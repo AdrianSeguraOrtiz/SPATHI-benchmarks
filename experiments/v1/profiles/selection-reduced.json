@@ -1,14 +1,15 @@
 {
   "schema_version": "1.0",
-  "id": "selection",
+  "id": "selection-reduced",
   "status": "planned",
   "purpose": "selection",
-  "description": "Validation-only comparison of at most three predeclared SPATHI finalists on seed-disjoint dyngen and scMultiSim panels.",
+  "calibration_budget": "reduced",
+  "description": "Reduced validation-only finalist selection on five datasets independent of reduced development.",
   "generation_jobs": [
     {
       "id": "dyngen_validation_linear_baseline",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-baseline-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-baseline-reduced-runs.json",
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "linear_baseline"
@@ -16,7 +17,7 @@
     {
       "id": "dyngen_validation_linear_noisy",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-noisy-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-noisy-reduced-runs.json",
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "linear_noisy"
@@ -24,7 +25,7 @@
     {
       "id": "dyngen_validation_bifurcating_baseline",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-baseline-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-baseline-reduced-runs.json",
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "bifurcating_baseline"
@@ -32,7 +33,7 @@
     {
       "id": "dyngen_validation_bifurcating_noisy",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-noisy-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-noisy-reduced-runs.json",
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "bifurcating_noisy"
@@ -40,7 +41,7 @@
     {
       "id": "scmultisim_validation_dynamic",
       "scenario": "experiments/v1/simulations/scmultisim/validation/scenario.json",
-      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/dynamic-runs.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/dynamic-reduced-runs.json",
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "scmultisim_dynamic"
@@ -63,14 +64,13 @@
   },
   "planned_design": {
     "simulators": ["dyngen", "scmultisim"],
-    "replicates_per_condition": 3,
+    "replicates_per_condition": 1,
     "regimes": ["group_only"],
     "factors": ["topology", "kinetics_noise", "bounded finalist selection"],
     "notes": [
-      "Contains 15 validation datasets: twelve dyngen and three scMultiSim instances.",
-      "Its seeds are disjoint from both development and test partitions.",
-      "Its winner must be frozen before any test profile becomes runnable.",
-      "The scMultiSim validation topology is independent of development and test."
+      "Contains five validation datasets: one instance of each of four dyngen conditions and one scMultiSim instance.",
+      "Its seeds and scMultiSim topology are disjoint from development and test.",
+      "Its winner is provisional and may feed only the reduced comparison."
     ]
   },
   "statistics": {

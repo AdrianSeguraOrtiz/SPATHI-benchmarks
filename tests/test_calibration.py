@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,12 +11,14 @@ from spathi_bench.calibration import (
     CalibrationError,
     CandidateConfiguration,
     build_andrea_requests,
+    build_stage_profile,
     expand_stage_candidates,
     expand_stage_runs,
     expand_validation_runs,
     load_search_space,
     select_stage_candidates,
     select_validation_candidate,
+    stage_profile_id,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -81,7 +84,7 @@ def test_expands_convergence_deterministically_with_all_seeds() -> None:
     search_space = load_search_space(REPO_ROOT)
 
     candidates = expand_stage_candidates(search_space, "convergence")
-    runs = expand_stage_runs(search_space, "convergence")
+    runs = expand_stage_runs(search_space, "convergence", "full")
 
     assert [candidate.variant_id for candidate in candidates] == [
         "reference",
@@ -97,9 +100,48 @@ def test_expands_convergence_deterministically_with_all_seeds() -> None:
     assert runs[0].parameters["random_seed"] == 1729
 
 
+def test_reduced_budget_changes_evidence_only_and_has_distinct_profile_ids() -> None:
+    search_space = load_search_space(REPO_ROOT)
+
+    full_candidates = expand_stage_candidates(search_space, "convergence")
+    reduced_candidates = expand_stage_candidates(search_space, "convergence")
+    reduced_runs = expand_stage_runs(search_space, "convergence", "reduced")
+
+    assert reduced_candidates == full_candidates
+    assert len(reduced_runs) == 8
+    assert [run.algorithm_seed for run in reduced_runs[:2]] == [1729, 31415]
+    assert stage_profile_id("convergence", "reduced") == "calibration-reduced-convergence"
+    assert stage_profile_id("validation", "full") == "selection-full-validation"
+    with pytest.raises(CalibrationError, match="Unknown calibration budget"):
+        expand_stage_runs(search_space, "convergence", "quick")
+
+
+def test_stage_profile_cannot_mix_budget_and_template() -> None:
+    template = json.loads(
+        (REPO_ROOT / "experiments/v1/profiles/calibration-reduced.json").read_text(encoding="utf-8")
+    )
+
+    profile = build_stage_profile(
+        template,
+        "convergence",
+        "reduced",
+        bundle_path="work/calibration/reduced/convergence/plan",
+    )
+
+    assert profile["id"] == "calibration-reduced-convergence"
+    assert profile["calibration_budget"] == "reduced"
+    with pytest.raises(CalibrationError, match="full.*template"):
+        build_stage_profile(
+            template,
+            "convergence",
+            "full",
+            bundle_path="work/calibration/full/convergence/plan",
+        )
+
+
 def test_renders_calibration_runs_as_standard_andrea_requests() -> None:
     search_space = load_search_space(REPO_ROOT)
-    runs = expand_stage_runs(search_space, "convergence")
+    runs = expand_stage_runs(search_space, "convergence", "full")
 
     tools, custom, metadata = build_andrea_requests(runs, docker_image="spathi:locked")
 
@@ -121,18 +163,30 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
     )
 
     assert len(structures) == 7
-    assert len(expand_stage_runs(search_space, "structure", parents=(convergence_parent,))) == 21
+    assert (
+        len(
+            expand_stage_runs(
+                search_space,
+                "structure",
+                "full",
+                parents=(convergence_parent,),
+            )
+        )
+        == 21
+    )
 
     first_parent = _candidate_by_variant(structures, "inherited")
     second_parent = _candidate_by_variant(structures, "group_distance")
     forward = expand_stage_runs(
         search_space,
         "estimator",
+        "full",
         parents=(first_parent, second_parent),
     )
     reversed_order = expand_stage_runs(
         search_space,
         "estimator",
+        "full",
         parents=(second_parent, first_parent),
     )
 
@@ -171,7 +225,13 @@ def test_stage_selection_uses_hierarchical_aupr_before_tie_breakers() -> None:
         peak_memory={winner.configuration_id: 1000.0},
     )
 
-    selected = select_stage_candidates(search_space, "convergence", candidates, rows)
+    selected = select_stage_candidates(
+        search_space,
+        "convergence",
+        candidates,
+        rows,
+        calibration_budget="full",
+    )
 
     assert len(selected) == 1
     assert selected[0].candidate == winner
@@ -206,6 +266,7 @@ def test_tie_breakers_apply_stability_then_cost_then_simplicity() -> None:
                 unstable.configuration_id: 1.0,
             },
         ),
+        calibration_budget="full",
     )
     assert stable_selection[0].candidate == reference
 
@@ -220,6 +281,7 @@ def test_tie_breakers_apply_stability_then_cost_then_simplicity() -> None:
             seeds=seeds,
             wall_time={cheap.configuration_id: 1.0},
         ),
+        calibration_budget="full",
     )
     assert cost_selection[0].candidate == cheap
 
@@ -228,6 +290,7 @@ def test_tie_breakers_apply_stability_then_cost_then_simplicity() -> None:
         "convergence",
         candidates,
         _summary_rows(candidates, role="development", seeds=seeds),
+        calibration_budget="full",
     )
     assert simplicity_selection[0].candidate == reference
 
@@ -240,12 +303,24 @@ def test_selection_rejects_role_mixing_and_unbalanced_rows() -> None:
     rows[0]["dataset_role"] = "test"
 
     with pytest.raises(CalibrationError, match="expected 'development'"):
-        select_stage_candidates(search_space, "convergence", candidates, rows)
+        select_stage_candidates(
+            search_space,
+            "convergence",
+            candidates,
+            rows,
+            calibration_budget="full",
+        )
 
     unbalanced = _summary_rows(candidates, role="development", seeds=seeds)
     unbalanced.pop()
     with pytest.raises(CalibrationError, match="same algorithmic seeds"):
-        select_stage_candidates(search_space, "convergence", candidates, unbalanced)
+        select_stage_candidates(
+            search_space,
+            "convergence",
+            candidates,
+            unbalanced,
+            calibration_budget="full",
+        )
 
     inconsistent_contexts = _summary_rows(candidates, role="development", seeds=seeds)
     inconsistent_contexts[0]["group_contexts"] = ["group:a"]
@@ -256,6 +331,7 @@ def test_selection_rejects_role_mixing_and_unbalanced_rows() -> None:
             "convergence",
             candidates,
             inconsistent_contexts,
+            calibration_budget="full",
         )
 
 
@@ -273,7 +349,7 @@ def test_validation_selects_only_from_bounded_estimator_finalists() -> None:
         parents=(structures[0],),
     )
     finalists = tuple(estimators[:3])
-    validation_runs = expand_validation_runs(search_space, finalists)
+    validation_runs = expand_validation_runs(search_space, finalists, "full")
     assert len(validation_runs) == 9
     assert all(run.dataset_role == "validation" for run in validation_runs)
     seeds = (1729, 31415, 104729)
@@ -288,6 +364,7 @@ def test_validation_selects_only_from_bounded_estimator_finalists() -> None:
         search_space,
         finalists,
         _summary_rows(finalists, role="validation", seeds=seeds, aupr=aupr),
+        calibration_budget="full",
     )
     assert selected.candidate == best
 
@@ -296,12 +373,14 @@ def test_validation_selects_only_from_bounded_estimator_finalists() -> None:
             search_space,
             finalists,
             _summary_rows(finalists, role="test", seeds=seeds, aupr=aupr),
+            calibration_budget="full",
         )
     with pytest.raises(CalibrationError, match="between 2 and 3"):
         select_validation_candidate(
             search_space,
             tuple(estimators[:4]),
             _summary_rows(tuple(estimators[:4]), role="validation", seeds=seeds),
+            calibration_budget="full",
         )
 
 
@@ -311,7 +390,13 @@ def test_candidate_role_cannot_be_relabelled_for_search() -> None:
     contaminated = (replace(candidates[0], dataset_role="validation"), *candidates[1:])
 
     with pytest.raises(CalibrationError, match="must use development"):
-        select_stage_candidates(search_space, "convergence", contaminated, [])
+        select_stage_candidates(
+            search_space,
+            "convergence",
+            contaminated,
+            [],
+            calibration_budget="full",
+        )
 
 
 def test_candidate_parameters_cannot_be_mutated_after_expansion() -> None:
@@ -325,4 +410,10 @@ def test_candidate_parameters_cannot_be_mutated_after_expansion() -> None:
     )
 
     with pytest.raises(CalibrationError, match="parameter digest is inconsistent"):
-        select_stage_candidates(search_space, "convergence", contaminated, [])
+        select_stage_candidates(
+            search_space,
+            "convergence",
+            contaminated,
+            [],
+            calibration_budget="full",
+        )

@@ -74,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_parser.add_argument("--andrea-repo", type=_path, required=True)
     calibrate_parser.add_argument("--spathi-repo", type=_path, required=True)
     calibrate_parser.add_argument("--work-root", type=_path)
+    calibrate_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
     calibrate_parser.add_argument("--run-id")
 
     compare_parser = subparsers.add_parser(
@@ -97,6 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("convergence", "structure", "estimator", "validation"),
         required=True,
     )
+    calibration_plan.add_argument(
+        "--calibration-budget", choices=("reduced", "full"), required=True
+    )
     calibration_plan.add_argument("--parents", type=_path)
     calibration_plan.add_argument("--output-dir", type=_path, required=True)
     calibration_plan.add_argument("--profile-output", type=_path, required=True)
@@ -110,6 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--stage",
         choices=("convergence", "structure", "estimator", "validation"),
         required=True,
+    )
+    calibration_rank.add_argument(
+        "--calibration-budget", choices=("reduced", "full"), required=True
     )
     calibration_rank.add_argument("--manifest", type=_path, required=True)
     calibration_rank.add_argument("--summary", type=_path, required=True)
@@ -185,6 +192,7 @@ def _write_calibration_plan(args: argparse.Namespace) -> tuple[Path, Path]:
     return materialize_calibration_stage(
         repo_root=args.repo_root,
         stage_id=args.stage,
+        calibration_budget=args.calibration_budget,
         parent_ranking_path=args.parents,
         output_dir=args.output_dir,
         profile_output=args.profile_output,
@@ -195,6 +203,7 @@ def _write_calibration_ranking(args: argparse.Namespace) -> Path:
     return rank_calibration_stage(
         repo_root=args.repo_root,
         stage_id=args.stage,
+        calibration_budget=args.calibration_budget,
         manifest_path=args.manifest,
         summary_path=args.summary,
         output_path=args.output,
@@ -227,6 +236,7 @@ def _dispatch(
             andrea_repo=args.andrea_repo,
             spathi_repo=args.spathi_repo,
             work_root=args.work_root or args.repo_root / "work",
+            calibration_budget=args.profile,
             run_id=args.run_id,
         )
     if args.command == "compare":

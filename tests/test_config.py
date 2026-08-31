@@ -53,15 +53,19 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
     profile_ids = {profile["id"] for profile in profiles}
     assert {
         "smoke",
-        "calibration",
-        "selection",
+        "calibration-full",
+        "selection-full",
+        "calibration-reduced",
+        "selection-reduced",
         "reduced",
         "full",
     } <= profile_ids
     status_by_id = {profile["id"]: profile["status"] for profile in profiles}
     assert status_by_id["smoke"] == "runnable"
-    assert status_by_id["calibration"] == "planned"
-    assert status_by_id["selection"] == "planned"
+    assert status_by_id["calibration-full"] == "planned"
+    assert status_by_id["selection-full"] == "planned"
+    assert status_by_id["calibration-reduced"] == "planned"
+    assert status_by_id["selection-reduced"] == "planned"
     assert status_by_id["reduced"] == "planned"
     assert status_by_id["full"] == "planned"
 

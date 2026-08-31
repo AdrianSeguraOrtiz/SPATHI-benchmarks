@@ -141,6 +141,7 @@ def _patch_frozen_selection(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None
     selected = {
         "status": "selected",
         "phase": "frozen",
+        "calibration_budget": "reduced",
         "selected_candidate": _selected_candidate(repo),
     }
 
@@ -235,14 +236,19 @@ def test_frozen_candidate_loader_rejects_unfrozen_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
-    selected = {"status": "unselected", "phase": "planned", "selected_candidate": None}
+    selected = {
+        "status": "unselected",
+        "phase": "planned",
+        "calibration_budget": None,
+        "selected_candidate": None,
+    }
     monkeypatch.setattr(
         materialization,
         "validate_calibration_contracts",
         lambda _root: (search, selected),
     )
     with pytest.raises(BenchmarkConfigError, match="requires a frozen"):
-        load_frozen_selected_candidate(REPO_ROOT)
+        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="reduced")
 
 
 def test_frozen_candidate_loader_rejects_stale_repository_commit(
@@ -250,7 +256,12 @@ def test_frozen_candidate_loader_rejects_stale_repository_commit(
 ) -> None:
     candidate = _selected_candidate(REPO_ROOT)
     candidate["spathi_commit"] = "0" * 40
-    selected = {"status": "selected", "phase": "frozen", "selected_candidate": candidate}
+    selected = {
+        "status": "selected",
+        "phase": "frozen",
+        "calibration_budget": "reduced",
+        "selected_candidate": candidate,
+    }
     search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
     monkeypatch.setattr(
         materialization,
@@ -259,7 +270,27 @@ def test_frozen_candidate_loader_rejects_stale_repository_commit(
     )
 
     with pytest.raises(BenchmarkConfigError, match="different repos.lock.json commit"):
-        load_frozen_selected_candidate(REPO_ROOT)
+        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="reduced")
+
+
+def test_frozen_candidate_loader_rejects_another_calibration_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
+    selected = {
+        "status": "selected",
+        "phase": "frozen",
+        "calibration_budget": "reduced",
+        "selected_candidate": _selected_candidate(REPO_ROOT),
+    }
+    monkeypatch.setattr(
+        materialization,
+        "validate_calibration_contracts",
+        lambda _root: (search, selected),
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="uses calibration budget"):
+        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="full")
 
 
 def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
@@ -270,7 +301,12 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
     plan_path = _catalog_plan(repo)
     search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
     candidate = _selected_candidate(repo)
-    selected = {"status": "selected", "phase": "frozen", "selected_candidate": candidate}
+    selected = {
+        "status": "selected",
+        "phase": "frozen",
+        "calibration_budget": "reduced",
+        "selected_candidate": candidate,
+    }
     monkeypatch.setattr(
         materialization,
         "validate_calibration_contracts",
@@ -297,9 +333,10 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
     tools = load_json_object(output_dir / "tools-params.json")
     manifest = load_json_object(output_dir / "benchmark-manifest.json")
     assert profile["status"] == "runnable"
-    assert len(tools["runs"]) == 3
+    assert len(tools["runs"]) == 2
     assert manifest["selected_config"]["candidate_id"] == candidate["candidate_id"]
-    assert manifest["algorithm_seeds"]["values"] == [1729, 31415, 104729]
+    assert manifest["selected_config"]["calibration_budget"] == "reduced"
+    assert manifest["algorithm_seeds"]["values"] == [1729, 31415]
 
     materialize_benchmark_plan(
         repo_root=repo,
@@ -397,7 +434,12 @@ def test_materializer_accepts_explicit_selection_and_profile_below_work(
     plan_path = _catalog_plan(repo)
     search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
     candidate = _selected_candidate(repo)
-    selected = {"status": "selected", "phase": "frozen", "selected_candidate": candidate}
+    selected = {
+        "status": "selected",
+        "phase": "frozen",
+        "calibration_budget": "reduced",
+        "selected_candidate": candidate,
+    }
 
     def selection_fixture(
         _root: Path, _path: Path | None = None
@@ -471,7 +513,12 @@ def test_committed_plan_materializes_with_a_reconciled_selection_fixture(
     repo = _copy_materialization_repo(tmp_path)
     search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
     candidate = _selected_candidate(repo)
-    selected = {"status": "selected", "phase": "frozen", "selected_candidate": candidate}
+    selected = {
+        "status": "selected",
+        "phase": "frozen",
+        "calibration_budget": template_id,
+        "selected_candidate": candidate,
+    }
 
     def selection_fixture(
         _root: Path, _path: Path | None = None

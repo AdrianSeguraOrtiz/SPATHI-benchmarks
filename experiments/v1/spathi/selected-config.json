@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "id": "spathi_selected_v1",
   "search_space": "experiments/v1/spathi/search-space.json",
+  "calibration_budget": null,
   "status": "unselected",
   "phase": "planned",
   "selected_candidate": null,

@@ -13,8 +13,10 @@ coupling those concerns to either scientific package.
 The committed `smoke` profile verifies the complete contract with one small dyngen
 dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mode. It has no
 statistical power and is never eligible for scientific selection. The scientific
-profiles are materialized automatically below `work/`: calibration begins with four
-tree-count configurations over 15 development datasets and five algorithmic seeds.
+profiles are materialized automatically below `work/`. The default `full` calibration
+begins with four tree-count configurations over 15 development datasets and five
+algorithmic seeds. A paired `reduced` budget keeps the same search and validation
+stages but uses five datasets per role and two algorithmic seeds per stage.
 
 The frozen development and validation panels each contain twelve dyngen datasets plus
 three scMultiSim datasets. scMultiSim uses a different committed regulatory network in
@@ -80,9 +82,17 @@ scripts/compare.sh
 `scripts/calibrate.sh` executes the tree-count, structure and estimator searches plus
 independent validation, then freezes one global SPATHI configuration. `scripts/compare.sh` uses that
 selection and runs the `full` held-out benchmark by default. For a cheaper development
-regression before spending the full benchmark, run
-`scripts/compare.sh --profile reduced`. This optional profile uses the development panel
-and cannot support claims about held-out performance.
+workflow before spending the full budget, use the matching reduced pair:
+
+```bash
+scripts/calibrate.sh --profile reduced
+scripts/compare.sh --profile reduced
+```
+
+The reduced calibration uses a five-dataset subset of each development/validation
+panel and two seeds in every stage. The reduced comparison uses the development panel;
+it is a regression run and cannot support claims about held-out performance. A reduced
+selection cannot be passed to the full comparison, or vice versa.
 
 Both entrypoints resume automatically. If Docker, the terminal or a tool fails, run the
 same command again; completed datasets, individual tool runs, evaluations and adaptive
@@ -90,8 +100,9 @@ rankings are verified and reused. The default calibration ID is derived from the
 repository identities. An explicit ID is useful for naming a study:
 
 ```bash
+scripts/calibrate.sh --profile reduced --run-id quick-v1
+scripts/compare.sh --profile reduced --calibration-run-id quick-v1
 scripts/calibrate.sh --run-id study-v1
-scripts/compare.sh --profile reduced --calibration-run-id study-v1
 scripts/compare.sh --calibration-run-id study-v1
 ```
 
@@ -210,12 +221,16 @@ guarantee of power.
 ## SPATHI calibration
 
 The search contract has three bounded development stages followed by one validation
-stage:
+stage. The candidate space is identical in both budgets; only the amount of evidence
+changes:
 
-1. tree-count sweep (internal stage ID `convergence`): 4 configurations × 5 algorithmic seeds × 15 datasets = 300 runs;
-2. structure: 7 configurations × 3 seeds × 15 datasets = 315 runs;
-3. estimator: at most 10 configurations × 3 seeds × 15 datasets = 450 runs;
-4. validation: at most 3 finalists × 3 seeds × 15 datasets = 135 runs.
+| Stage | `reduced` | `full` |
+| --- | ---: | ---: |
+| tree-count (`convergence`) | 4 configurations × 2 seeds × 5 datasets = 40 | 4 × 5 × 15 = 300 |
+| structure | 7 × 2 × 5 = 70 | 7 × 3 × 15 = 315 |
+| estimator (maximum) | 10 × 2 × 5 = 100 | 10 × 3 × 15 = 450 |
+| validation (maximum) | 3 finalists × 2 × 5 = 30 | 3 × 3 × 15 = 135 |
+| **Maximum total** | **240** | **1,200** |
 
 The three development stages reference exactly the same generation jobs, so simulated
 data are generated once and recovered from the content-addressed cache thereafter.
@@ -224,9 +239,11 @@ Every stage still performs normal evaluation and exports the official ANDREA
 generic Friedman/Holm stage, owns configuration selection.
 
 `scripts/calibrate.sh` performs that entire sequence, including stage materialization,
-ranking and final freezing. Adaptive request bundles, rankings and the selected
-configuration are stored together under
-`work/v1/workflows/calibration/<flow-id>/`; the workflow state hashes each transition.
+ranking and final freezing. It defaults to `--profile full`; `--profile reduced` changes
+the evidence budget without changing candidates, objective or stage order. Adaptive
+request bundles, rankings and the selected configuration are stored together under
+`work/v1/workflows/calibration/<budget>/<flow-id>/`; the workflow state hashes each
+transition and binds the selected configuration to that budget.
 Nothing from one adaptive stage has to be copied into the source tree or committed
 before the next stage can run.
 
@@ -244,7 +261,8 @@ After calibration, `scripts/compare.sh` materializes the matching selected-SPATH
 profile below `work/v1/workflows/comparison/` and executes generation, inference,
 evaluation, ANDREA-compatible exports, summarization and statistics. The default is the
 held-out `full` profile; `scripts/compare.sh --profile reduced` selects the development
-regression profile instead.
+regression profile instead. In either case it requires a completed calibration with the
+same profile name.
 
 The full primary directed family compares SPATHI with GENIE3, GRNBoost2,
 inferCSN-without-pseudotime, pySCENIC-GRN, scMINER with the common TF list and TIGRESS.
@@ -290,7 +308,8 @@ profile files; the high-level workflows enforce those links automatically.
 work/v1/
 ├── artifacts/                   immutable shared objects, including joint views and ZIPs
 ├── workflows/
-│   ├── calibration/<flow-id>/   adaptive requests, rankings and selected-config.json
+│   ├── calibration/<budget>/<flow-id>/
+│   │                           adaptive requests, rankings and selected-config.json
 │   └── comparison/<profile>/<flow-id>/
 │                               selected benchmark profile and workflow state
 └── <profile>/<run-id>/

@@ -46,6 +46,7 @@ def _runtime_profile() -> dict[str, Any]:
         "id": PROFILE_ID,
         "status": "runnable",
         "purpose": "calibration",
+        "calibration_budget": "full",
         "calibration_stage": "convergence",
         "description": "Runtime-derived calibration profile fixture.",
         "generation_jobs": [

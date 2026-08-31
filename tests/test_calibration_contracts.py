@@ -76,6 +76,7 @@ def test_schema_accepts_a_fully_evidenced_future_frozen_selection() -> None:
         {
             "status": "selected",
             "phase": "frozen",
+            "calibration_budget": "full",
             "selected_candidate": {
                 "candidate_id": "future_evidenced_candidate",
                 "spathi_commit": "a" * 40,
@@ -83,6 +84,7 @@ def test_schema_accepts_a_fully_evidenced_future_frozen_selection() -> None:
                 "parameters": search_space["reference_configuration"],
             },
             "selection_evidence": {
+                "calibration_budget": "full",
                 "validation_ranking": "experiments/v1/spathi/evidence/validation-ranking.json",
                 "validation_ranking_sha256": "c" * 64,
                 "search_space_sha256": "d" * 64,

@@ -7,6 +7,7 @@
     "schema_version",
     "id",
     "search_space",
+    "calibration_budget",
     "status",
     "phase",
     "selected_candidate",
@@ -20,6 +21,12 @@
     "search_space": {
       "type": "string",
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "calibration_budget": {
+      "anyOf": [
+        {"type": "null"},
+        {"enum": ["full", "reduced"]}
+      ]
     },
     "status": {"enum": ["unselected", "selected"]},
     "phase": {"enum": ["planned", "frozen"]},
@@ -44,6 +51,7 @@
       "then": {
         "properties": {
           "phase": {"const": "planned"},
+          "calibration_budget": {"type": "null"},
           "selected_candidate": {"type": "null"},
           "selection_evidence": {"type": "null"},
           "test_accessed_before_freeze": {"const": false}
@@ -58,9 +66,38 @@
       "then": {
         "properties": {
           "phase": {"const": "frozen"},
+          "calibration_budget": {"enum": ["full", "reduced"]},
           "selected_candidate": {"$ref": "#/$defs/selected_candidate"},
           "selection_evidence": {"$ref": "#/$defs/selection_evidence"},
           "test_accessed_before_freeze": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"calibration_budget": {"const": "full"}},
+        "required": ["calibration_budget"]
+      },
+      "then": {
+        "properties": {
+          "selection_evidence": {
+            "type": "object",
+            "properties": {"calibration_budget": {"const": "full"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"calibration_budget": {"const": "reduced"}},
+        "required": ["calibration_budget"]
+      },
+      "then": {
+        "properties": {
+          "selection_evidence": {
+            "type": "object",
+            "properties": {"calibration_budget": {"const": "reduced"}}
+          }
         }
       }
     }
@@ -140,6 +177,7 @@
       "additionalProperties": false,
       "required": [
         "validation_ranking",
+        "calibration_budget",
         "validation_ranking_sha256",
         "search_space_sha256",
         "validation_manifest_sha256",
@@ -154,6 +192,7 @@
         "frozen_at"
       ],
       "properties": {
+        "calibration_budget": {"enum": ["full", "reduced"]},
         "validation_ranking": {
           "type": "string",
           "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"

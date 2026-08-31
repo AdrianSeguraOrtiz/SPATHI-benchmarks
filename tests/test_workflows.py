@@ -36,6 +36,14 @@ def _workflow_paths(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return repo, work, andrea, spathi
 
 
+def test_default_calibration_flow_identity_is_budget_specific() -> None:
+    reduced_identity = workflows._calibration_identity(IDENTITY, "reduced")
+    full_identity = workflows._calibration_identity(IDENTITY, "full")
+
+    assert reduced_identity["fingerprint"] != full_identity["fingerprint"]
+    assert workflows._flow_id(reduced_identity, None) != workflows._flow_id(full_identity, None)
+
+
 def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -51,11 +59,13 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
         *,
         repo_root: Path,
         stage_id: str,
+        calibration_budget: str,
         parent_ranking_path: Path | None,
         output_dir: Path,
         profile_output: Path,
     ) -> tuple[Path, Path]:
         assert repo_root == repo
+        assert calibration_budget == "reduced"
         materialized.append((stage_id, parent_ranking_path))
         output_dir.mkdir(parents=True, exist_ok=True)
         _write_json(
@@ -63,7 +73,10 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
             {"stage_id": stage_id},
         )
         if not profile_output.exists():
-            _write_json(profile_output, {"id": workflows.stage_profile_id(stage_id)})
+            _write_json(
+                profile_output,
+                {"id": workflows.stage_profile_id(stage_id, calibration_budget)},
+            )
         return output_dir, profile_output
 
     def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
@@ -86,11 +99,13 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
         *,
         repo_root: Path,
         stage_id: str,
+        calibration_budget: str,
         manifest_path: Path,
         summary_path: Path,
         output_path: Path,
     ) -> Path:
         assert repo_root == repo
+        assert calibration_budget == "reduced"
         assert manifest_path.is_file()
         assert summary_path.is_file()
         ranked.append(stage_id)
@@ -116,6 +131,7 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
         andrea_repo=andrea,
         spathi_repo=spathi,
         work_root=work,
+        calibration_budget="reduced",
         run_id="calibration-test",
     )
     second = workflows.run_calibration_workflow(
@@ -123,6 +139,7 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
         andrea_repo=andrea,
         spathi_repo=spathi,
         work_root=work,
+        calibration_budget="reduced",
         run_id="calibration-test",
     )
 
@@ -134,12 +151,13 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
         assert parent.parent.name == expected_stages[index - 1]
         assert parent.name == "ranking.json"
     assert pipelines[:4] == [
-        (workflows.stage_profile_id(stage), False) for stage in expected_stages
+        (workflows.stage_profile_id(stage, "reduced"), False) for stage in expected_stages
     ]
     assert ranked[:4] == expected_stages
     assert len(frozen) == 2
     assert first == second
     assert second["status"] == "complete"
+    assert second["calibration_budget"] == "reduced"
     assert set(second["stages"]) == set(expected_stages)
     selected = repo / second["selected_config"]
     assert selected.is_file()
@@ -153,20 +171,22 @@ def test_compare_requires_a_completed_matching_calibration(
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
-    calibration_root = work / "v1/workflows/calibration/incomplete-calibration"
+    calibration_root = work / "v1/workflows/calibration/full/incomplete-calibration"
+    calibration_identity = workflows._calibration_identity(IDENTITY, "full")
     _write_json(
         calibration_root / "workflow.json",
         {
             "schema_version": "1.0",
             "workflow_type": "calibration",
             "flow_id": "incomplete-calibration",
-            "identity": IDENTITY,
+            "identity": calibration_identity,
+            "calibration_budget": "full",
             "status": "running",
             "stages": {},
         },
     )
 
-    with pytest.raises(BenchmarkConfigError, match="No completed calibration matches"):
+    with pytest.raises(BenchmarkConfigError, match="No completed full calibration matches"):
         workflows.run_comparison_workflow(
             repo_root=repo,
             andrea_repo=andrea,
@@ -183,12 +203,50 @@ def test_compare_explains_when_calibration_has_not_run(
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
 
-    with pytest.raises(BenchmarkConfigError, match=r"run scripts/calibrate\.sh first"):
+    with pytest.raises(
+        BenchmarkConfigError,
+        match=r"run scripts/calibrate\.sh --profile full first",
+    ):
         workflows.run_comparison_workflow(
             repo_root=repo,
             andrea_repo=andrea,
             spathi_repo=spathi,
             work_root=work,
+        )
+
+
+def test_compare_never_reuses_a_different_calibration_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, work, andrea, spathi = _workflow_paths(tmp_path)
+    monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
+    calibration_id = "shared-name"
+    calibration_root = work / "v1/workflows/calibration/reduced" / calibration_id
+    selected = _write_json(calibration_root / "selected-config.json", {"status": "selected"})
+    _write_json(
+        calibration_root / "workflow.json",
+        {
+            "schema_version": "1.0",
+            "workflow_type": "calibration",
+            "flow_id": calibration_id,
+            "identity": workflows._calibration_identity(IDENTITY, "reduced"),
+            "calibration_budget": "reduced",
+            "status": "complete",
+            "stages": {},
+            "selected_config": str(selected.relative_to(repo)),
+            "selected_config_sha256": sha256_file(selected),
+        },
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="No completed full calibration matches"):
+        workflows.run_comparison_workflow(
+            repo_root=repo,
+            andrea_repo=andrea,
+            spathi_repo=spathi,
+            work_root=work,
+            profile="full",
+            calibration_run_id=calibration_id,
         )
 
 
@@ -199,7 +257,8 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
     calibration_id = "complete-calibration"
-    calibration_root = work / "v1/workflows/calibration" / calibration_id
+    calibration_root = work / "v1/workflows/calibration/full" / calibration_id
+    calibration_identity = workflows._calibration_identity(IDENTITY, "full")
     selected = _write_json(
         calibration_root / "selected-config.json",
         {"status": "selected", "phase": "frozen"},
@@ -210,7 +269,8 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
             "schema_version": "1.0",
             "workflow_type": "calibration",
             "flow_id": calibration_id,
-            "identity": IDENTITY,
+            "identity": calibration_identity,
+            "calibration_budget": "full",
             "status": "complete",
             "stages": {},
             "selected_config": str(selected.relative_to(repo)),
@@ -220,7 +280,10 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
     monkeypatch.setattr(
         workflows,
         "validate_calibration_contracts",
-        lambda repo_root, selected_path: ({}, {"status": "selected"}),
+        lambda repo_root, selected_path: (
+            {},
+            {"status": "selected", "calibration_budget": "full"},
+        ),
     )
     materializations: list[dict[str, Any]] = []
 
@@ -281,6 +344,7 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
 
     assert result["status"] == "complete"
     assert result["profile"] == "full"
+    assert result["calibration_budget"] == "full"
     assert len(materializations) == 1
     request = materializations[0]
     assert request["template_profile_id"] == "full"

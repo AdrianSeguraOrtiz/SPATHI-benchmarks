@@ -8,7 +8,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo
   echo "Options:"
   echo "  --profile full|reduced    Use held-out full (default) or development reduced."
-  echo "  --calibration-run-id ID   Use a calibration created with an explicit --run-id."
+  echo "                            The calibration must use the same profile."
+  echo "  --calibration-run-id ID   Use a same-profile calibration with an explicit ID."
   echo "  -h, --help                Show this help."
   echo
   echo "Repeating the same command resumes and verifies completed work."

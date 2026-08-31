@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "id": "selection-full",
+  "status": "planned",
+  "purpose": "selection",
+  "calibration_budget": "full",
+  "description": "Full validation-only comparison of at most three predeclared SPATHI finalists on seed-disjoint dyngen and scMultiSim panels.",
+  "generation_jobs": [
+    {
+      "id": "dyngen_validation_linear_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-baseline-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "linear_baseline"
+    },
+    {
+      "id": "dyngen_validation_linear_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/linear-noisy-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "linear_noisy"
+    },
+    {
+      "id": "dyngen_validation_bifurcating_baseline",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-baseline-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "bifurcating_baseline"
+    },
+    {
+      "id": "dyngen_validation_bifurcating_noisy",
+      "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/validation/bifurcating-noisy-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "bifurcating_noisy"
+    },
+    {
+      "id": "scmultisim_validation_dynamic",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/dynamic-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_dynamic"
+    }
+  ],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {
+      "max_parallel_tasks": 2,
+      "max_cores": 8,
+      "max_ram_gb": 32
+    },
+    "infer_network": {
+      "max_parallel_runs": 2,
+      "max_cores": 4,
+      "max_ram_gb": 16,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 60
+    }
+  },
+  "planned_design": {
+    "simulators": ["dyngen", "scmultisim"],
+    "replicates_per_condition": 3,
+    "regimes": ["group_only"],
+    "factors": ["topology", "kinetics_noise", "bounded finalist selection"],
+    "notes": [
+      "Contains 15 validation datasets: twelve dyngen and three scMultiSim instances.",
+      "Its seeds are disjoint from both development and test partitions.",
+      "Its winner must be frozen before any full-calibration test profile becomes runnable.",
+      "The scMultiSim validation topology is independent of development and test."
+    ]
+  },
+  "statistics": {
+    "status": "planned",
+    "alpha": 0.05,
+    "random_seed": 1729,
+    "permutations": 99999,
+    "bootstrap_resamples": 20000,
+    "comparisons": []
+  }
+}

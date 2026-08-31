@@ -43,6 +43,7 @@ from .statistics import analyze_statistics
 from .summarize import summarize
 
 CALIBRATION_STAGES = ("convergence", "structure", "estimator", "validation")
+CALIBRATION_BUDGETS = ("reduced", "full")
 _WORKFLOW_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 
@@ -76,6 +77,15 @@ def _flow_id(identity: dict[str, str], requested: str | None) -> str:
     if not _WORKFLOW_ID.fullmatch(requested):
         raise BenchmarkConfigError(f"Invalid workflow run ID: {requested!r}")
     return requested
+
+
+def _calibration_identity(identity: dict[str, str], calibration_budget: str) -> dict[str, str]:
+    """Bind a calibration identity to its evidence budget."""
+
+    scoped = {key: value for key, value in identity.items() if key != "fingerprint"}
+    scoped["calibration_budget"] = calibration_budget
+    scoped["fingerprint"] = canonical_json_sha256(scoped)
+    return scoped
 
 
 def _adopt_workflow(
@@ -155,17 +165,20 @@ def run_calibration_workflow(
     andrea_repo: Path,
     spathi_repo: Path,
     work_root: Path,
+    calibration_budget: str = "full",
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Run or resume the complete four-stage adaptive SPATHI calibration."""
 
+    if calibration_budget not in CALIBRATION_BUDGETS:
+        raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
     root = repo_root.resolve()
     work = work_root.resolve()
     if not work.is_relative_to(root / "work"):
         raise BenchmarkConfigError("High-level workflow work root must be below repository work/")
-    identity = _workflow_identity(root)
+    identity = _calibration_identity(_workflow_identity(root), calibration_budget)
     flow_id = _flow_id(identity, run_id)
-    workflow_root = work / "v1/workflows/calibration" / flow_id
+    workflow_root = work / "v1/workflows/calibration" / calibration_budget / flow_id
     state_path = workflow_root / "workflow.json"
     with run_lock(workflow_root):
         state = _adopt_workflow(
@@ -173,11 +186,12 @@ def run_calibration_workflow(
             workflow_type="calibration",
             flow_id=flow_id,
             identity=identity,
+            extra={"calibration_budget": calibration_budget},
         )
         _write_json(state_path, state)
         parent_ranking: Path | None = None
         for stage_id in CALIBRATION_STAGES:
-            profile_id = stage_profile_id(stage_id)
+            profile_id = stage_profile_id(stage_id, calibration_budget)
             stage_root = workflow_root / "stages" / stage_id
             bundle = stage_root / "requests"
             profile_file = stage_root / f"{profile_id}.json"
@@ -186,6 +200,7 @@ def run_calibration_workflow(
             materialize_calibration_stage(
                 repo_root=root,
                 stage_id=stage_id,
+                calibration_budget=calibration_budget,
                 parent_ranking_path=parent_ranking,
                 output_dir=bundle,
                 profile_output=profile_file,
@@ -202,6 +217,7 @@ def run_calibration_workflow(
             rank_calibration_stage(
                 repo_root=root,
                 stage_id=stage_id,
+                calibration_budget=calibration_budget,
                 manifest_path=bundle / "calibration-manifest.json",
                 summary_path=run_root / "reports/summary.json",
                 output_path=ranking,
@@ -242,21 +258,29 @@ def _calibration_selection(
     repo_root: Path,
     work_root: Path,
     identity: dict[str, str],
+    calibration_budget: str,
     calibration_run_id: str | None,
 ) -> tuple[str, Path]:
-    calibration_id = _flow_id(identity, calibration_run_id)
-    workflow_root = work_root / "v1/workflows/calibration" / calibration_id
+    calibration_identity = _calibration_identity(identity, calibration_budget)
+    calibration_id = _flow_id(calibration_identity, calibration_run_id)
+    workflow_root = work_root / "v1/workflows/calibration" / calibration_budget / calibration_id
     state_path = workflow_root / "workflow.json"
     if not state_path.is_file():
         raise BenchmarkConfigError(
-            "No completed calibration matches the current SPATHI and benchmark inputs; "
-            "run scripts/calibrate.sh first"
+            f"No completed {calibration_budget} calibration matches the current SPATHI "
+            f"and benchmark inputs; run scripts/calibrate.sh --profile {calibration_budget} "
+            "first"
         )
     state = load_json_object(state_path, "calibration workflow state")
-    if state.get("status") != "complete" or state.get("identity") != identity:
+    if (
+        state.get("status") != "complete"
+        or state.get("identity") != calibration_identity
+        or state.get("calibration_budget") != calibration_budget
+    ):
         raise BenchmarkConfigError(
-            "No completed calibration matches the current SPATHI and benchmark inputs; "
-            "run scripts/calibrate.sh first"
+            f"No completed {calibration_budget} calibration matches the current SPATHI "
+            f"and benchmark inputs; run scripts/calibrate.sh --profile {calibration_budget} "
+            "first"
         )
     raw_selected = state.get("selected_config")
     if not isinstance(raw_selected, str):
@@ -266,7 +290,12 @@ def _calibration_selection(
         raise BenchmarkConfigError("Calibration selected configuration escapes its workflow")
     if sha256_file(selected) != state.get("selected_config_sha256"):
         raise BenchmarkConfigError("Calibration selected configuration changed after freezing")
-    validate_calibration_contracts(repo_root, selected)
+    _search, selection = validate_calibration_contracts(repo_root, selected)
+    if selection.get("calibration_budget") != calibration_budget:
+        raise BenchmarkConfigError(
+            f"Calibration {calibration_id!r} uses budget "
+            f"{selection.get('calibration_budget')!r}, not {calibration_budget!r}"
+        )
     return calibration_id, selected
 
 
@@ -292,6 +321,7 @@ def run_comparison_workflow(
         repo_root=root,
         work_root=work,
         identity=identity,
+        calibration_budget=profile,
         calibration_run_id=calibration_run_id,
     )
     flow_id = f"{profile}-{calibration_id}"
@@ -304,7 +334,11 @@ def run_comparison_workflow(
             workflow_type="comparison",
             flow_id=flow_id,
             identity=identity,
-            extra={"profile": profile, "calibration_flow_id": calibration_id},
+            extra={
+                "profile": profile,
+                "calibration_budget": profile,
+                "calibration_flow_id": calibration_id,
+            },
         )
         _write_json(state_path, state)
         bundle = workflow_root / "requests"

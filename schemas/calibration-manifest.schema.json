@@ -6,6 +6,7 @@
   "required": [
     "schema_version",
     "profile_id",
+    "calibration_budget",
     "search_space_id",
     "search_space_sha256",
     "stage_id",
@@ -20,13 +21,10 @@
   "properties": {
     "schema_version": {"const": "1.0"},
     "profile_id": {
-      "enum": [
-        "calibration-convergence",
-        "calibration-structure",
-        "calibration-estimator",
-        "selection-validation"
-      ]
+      "type": "string",
+      "pattern": "^(?:calibration-(?:full|reduced)-(?:convergence|structure|estimator)|selection-(?:full|reduced)-validation)$"
     },
+    "calibration_budget": {"enum": ["full", "reduced"]},
     "search_space_id": {"const": "spathi_calibration_v1"},
     "search_space_sha256": {"$ref": "#/$defs/sha256"},
     "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
@@ -40,11 +38,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "sha256", "stage_id"],
+          "required": ["path", "sha256", "stage_id", "calibration_budget"],
           "properties": {
             "path": {"$ref": "#/$defs/relative_path"},
             "sha256": {"$ref": "#/$defs/sha256"},
-            "stage_id": {"enum": ["convergence", "structure", "estimator"]}
+            "stage_id": {"enum": ["convergence", "structure", "estimator"]},
+            "calibration_budget": {"enum": ["full", "reduced"]}
           }
         }
       ]
@@ -112,7 +111,9 @@
       "if": {"properties": {"stage_id": {"const": "validation"}}},
       "then": {
         "properties": {
-          "profile_id": {"const": "selection-validation"},
+          "profile_id": {
+            "pattern": "^selection-(?:full|reduced)-validation$"
+          },
           "dataset_role": {"const": "validation"},
           "parent_ranking": {
             "type": "object",
@@ -128,7 +129,9 @@
       "if": {"properties": {"stage_id": {"const": "convergence"}}},
       "then": {
         "properties": {
-          "profile_id": {"const": "calibration-convergence"},
+          "profile_id": {
+            "pattern": "^calibration-(?:full|reduced)-convergence$"
+          },
           "parent_ranking": {"type": "null"}
         }
       }
@@ -137,7 +140,9 @@
       "if": {"properties": {"stage_id": {"const": "structure"}}},
       "then": {
         "properties": {
-          "profile_id": {"const": "calibration-structure"},
+          "profile_id": {
+            "pattern": "^calibration-(?:full|reduced)-structure$"
+          },
           "parent_ranking": {
             "type": "object",
             "properties": {"stage_id": {"const": "convergence"}}
@@ -149,10 +154,46 @@
       "if": {"properties": {"stage_id": {"const": "estimator"}}},
       "then": {
         "properties": {
-          "profile_id": {"const": "calibration-estimator"},
+          "profile_id": {
+            "pattern": "^calibration-(?:full|reduced)-estimator$"
+          },
           "parent_ranking": {
             "type": "object",
             "properties": {"stage_id": {"const": "structure"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"calibration_budget": {"const": "full"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"pattern": "^(?:calibration-full-|selection-full-)"},
+          "parent_ranking": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "properties": {"calibration_budget": {"const": "full"}}
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"calibration_budget": {"const": "reduced"}}},
+      "then": {
+        "properties": {
+          "profile_id": {"pattern": "^(?:calibration-reduced-|selection-reduced-)"},
+          "parent_ranking": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "properties": {"calibration_budget": {"const": "reduced"}}
+              }
+            ]
           }
         }
       }

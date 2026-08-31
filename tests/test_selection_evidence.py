@@ -82,7 +82,8 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             seeds=(1729, 2718, 31415, 57721, 104729),
             spathi_identity=spathi_identity,
         ),
-        profile_id="calibration-convergence",
+        calibration_budget="full",
+        profile_id="calibration-full-convergence",
         parent_ranking=None,
         benchmark_commit="1" * 40,
         search_space_sha256=search_hash,
@@ -96,6 +97,7 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
         "path": convergence_path.relative_to(repo).as_posix(),
         "sha256": sha256_file(convergence_path),
         "stage_id": "convergence",
+        "calibration_budget": "full",
     }
 
     structures = expand_stage_candidates(
@@ -115,7 +117,8 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             seeds=(1729, 31415, 104729),
             spathi_identity=spathi_identity,
         ),
-        profile_id="calibration-structure",
+        calibration_budget="full",
+        profile_id="calibration-full-structure",
         parent_ranking=convergence_link,
         benchmark_commit="1" * 40,
         search_space_sha256=search_hash,
@@ -129,6 +132,7 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
         "path": structure_path.relative_to(repo).as_posix(),
         "sha256": sha256_file(structure_path),
         "stage_id": "structure",
+        "calibration_budget": "full",
     }
 
     estimators = expand_stage_candidates(
@@ -148,7 +152,8 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             seeds=(1729, 31415, 104729),
             spathi_identity=spathi_identity,
         ),
-        profile_id="calibration-estimator",
+        calibration_budget="full",
+        profile_id="calibration-full-estimator",
         parent_ranking=structure_link,
         benchmark_commit="1" * 40,
         search_space_sha256=search_hash,
@@ -162,6 +167,7 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
         "path": estimator_path.relative_to(repo).as_posix(),
         "sha256": sha256_file(estimator_path),
         "stage_id": "estimator",
+        "calibration_budget": "full",
     }
     finalists = tuple(
         candidate_from_dict(item) for item in estimator_ranking["selected_candidates"]
@@ -177,7 +183,8 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             spathi_identity=spathi_identity,
             preferred=finalists[1],
         ),
-        profile_id="selection-validation",
+        calibration_budget="full",
+        profile_id="selection-full-validation",
         parent_ranking=estimator_link,
         benchmark_commit="1" * 40,
         search_space_sha256=search_hash,
@@ -265,7 +272,8 @@ def test_ranking_chain_rejects_finalists_outside_parent_shortlist(tmp_path: Path
             seeds=(1729, 31415, 104729),
             spathi_identity=identity,
         ),
-        profile_id="selection-validation",
+        calibration_budget="full",
+        profile_id="selection-full-validation",
         parent_ranking=valid["parent_ranking"],
         benchmark_commit="1" * 40,
         search_space_sha256=sha256_file(REPO_ROOT / "experiments/v1/spathi/search-space.json"),
@@ -305,6 +313,23 @@ def test_ranking_chain_rejects_mixed_benchmark_commits(tmp_path: Path) -> None:
         )
 
 
+def test_ranking_chain_rejects_mixed_calibration_budgets(tmp_path: Path) -> None:
+    repo, ranking_path, _selected_path = _repository_with_ranking(tmp_path)
+    ranking = json.loads(ranking_path.read_text(encoding="utf-8"))
+    ranking["parent_ranking"]["calibration_budget"] = "reduced"
+
+    with pytest.raises(BenchmarkConfigError, match="different calibration budget"):
+        validate_ranking_chain(
+            repo,
+            load_search_space(REPO_ROOT),
+            ranking,
+            expected_search_space_sha256=sha256_file(
+                REPO_ROOT / "experiments/v1/spathi/search-space.json"
+            ),
+            expected_calibration_budget="full",
+        )
+
+
 def test_freeze_cli_generates_a_reconciled_selected_config(tmp_path: Path) -> None:
     repo, ranking_path, selected_path = _repository_with_ranking(tmp_path)
 
@@ -324,6 +349,8 @@ def test_freeze_cli_generates_a_reconciled_selected_config(tmp_path: Path) -> No
     )
     _search, selected = validate_calibration_contracts(repo)
     assert selected["status"] == "selected"
+    assert selected["calibration_budget"] == "full"
+    assert selected["selection_evidence"]["calibration_budget"] == "full"
     assert selected["selection_evidence"]["validation_ranking_sha256"] == sha256_file(ranking_path)
 
 

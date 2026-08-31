@@ -3,12 +3,13 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: scripts/calibrate.sh [--run-id ID]"
+  echo "Usage: scripts/calibrate.sh [--profile full|reduced] [--run-id ID]"
   echo "Runs or resumes the tree-count, structure, estimator and validation stages."
   echo
   echo "Options:"
-  echo "  --run-id ID  Name this calibration; the default is derived from locked inputs."
-  echo "  -h, --help   Show this help."
+  echo "  --profile full|reduced  Use the full (default) or reduced evidence budget."
+  echo "  --run-id ID             Name this calibration; the default uses locked inputs."
+  echo "  -h, --help              Show this help."
   echo
   echo "Repeating the same command resumes and verifies completed work."
   exit 0

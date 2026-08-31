@@ -1,14 +1,15 @@
 {
   "schema_version": "1.0",
-  "id": "calibration",
+  "id": "calibration-reduced",
   "status": "planned",
   "purpose": "calibration",
-  "description": "Development-only staged SPATHI configuration search on frozen dyngen and scMultiSim panels.",
+  "calibration_budget": "reduced",
+  "description": "Reduced development-only staged SPATHI configuration search for provisional, lower-cost selection.",
   "generation_jobs": [
     {
       "id": "dyngen_development_linear_baseline",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-baseline-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-baseline-reduced-runs.json",
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "linear_baseline"
@@ -16,7 +17,7 @@
     {
       "id": "dyngen_development_linear_noisy",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-noisy-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/linear-noisy-reduced-runs.json",
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "linear_noisy"
@@ -24,7 +25,7 @@
     {
       "id": "dyngen_development_bifurcating_baseline",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-baseline-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-baseline-reduced-runs.json",
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "bifurcating_baseline"
@@ -32,7 +33,7 @@
     {
       "id": "dyngen_development_bifurcating_noisy",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-noisy-runs.json",
+      "simulator_runs": "experiments/v1/simulations/dyngen/development/bifurcating-noisy-reduced-runs.json",
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "bifurcating_noisy"
@@ -40,7 +41,7 @@
     {
       "id": "scmultisim_development_dynamic",
       "scenario": "experiments/v1/simulations/scmultisim/development/scenario.json",
-      "simulator_runs": "experiments/v1/simulations/scmultisim/development/dynamic-runs.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/development/dynamic-reduced-runs.json",
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "scmultisim_dynamic"
@@ -63,13 +64,13 @@
   },
   "planned_design": {
     "simulators": ["dyngen", "scmultisim"],
-    "replicates_per_condition": 3,
+    "replicates_per_condition": 1,
     "regimes": ["group_only"],
     "factors": ["topology", "kinetics_noise", "convergence", "structure", "estimator"],
     "notes": [
-      "Contains 15 development datasets: twelve dyngen and three scMultiSim instances.",
-      "Candidate bundles are generated from experiments/v1/spathi/search-space.json.",
-      "The scMultiSim development topology is not reused by validation or test."
+      "Contains five development datasets: one instance of each of four dyngen conditions and one scMultiSim instance.",
+      "Uses the same candidate space as the full calibration with the reduced algorithmic-seed budget.",
+      "Its selected configuration is provisional and cannot support the full benchmark."
     ]
   },
   "statistics": {

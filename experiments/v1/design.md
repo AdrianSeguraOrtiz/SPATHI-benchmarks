@@ -198,8 +198,9 @@ The smoke configuration is a contract check only. Scientific SPATHI configuratio
 three bounded development stages declared in `spathi/search-space.json`: a tree-count
 sweep (historically identified as `convergence`), one-factor structural variants and a
 small estimator shortlist. The first stage tunes `n_estimators`; it is not interpreted as
-a formal plateau or one-standard-error convergence test. Every
-candidate is repeated over predeclared algorithmic seeds. The primary objective is
+a formal plateau or one-standard-error convergence test. The `full` and `reduced`
+budgets use exactly the same candidates, objective and stage order. Every candidate is
+repeated over the algorithmic seeds predeclared for its budget. The primary objective is
 directed AUPR, averaged equally over groups, then seeds, then datasets. Ties are resolved
 by stability, wall time, peak memory when measured, and distance from the reference
 configuration.
@@ -218,12 +219,23 @@ The frozen v1 panel is:
 | validation | 4 conditions × 3 | 1 topology × 3 | 0 | 15 |
 | test | 4 conditions × 5 | 1 topology × 2 stress conditions × 5 | SERGIO/GeneSPIDER2 × 5 plus BoolODE × 2 conditions × 5 | 50 |
 
-`scripts/calibrate.sh` materializes every executable stage profile below `work/`. Later
+Full calibration uses all 15 development and all 15 validation datasets. Reduced
+calibration uses one replicate from each of the four dyngen conditions plus one
+scMultiSim dataset in each role (five per role), and two algorithmic seeds in every
+stage. Its maximum execution count is 240 rather than 1,200. It is intended for rapid
+operational feedback; only the full selection followed by the held-out full comparison
+supports the primary scientific analysis.
+
+`scripts/calibrate.sh --profile full|reduced` materializes every executable stage
+profile below `work/`. Later
 profiles appear only after the preceding content-linked ranking has been validated. The
 profiles, request bundles, rankings and frozen selection are copied into each run's
 immutable input snapshot, so adaptive calibration needs no intermediate Git commits.
 The generic Friedman/Holm phase is marked not applicable to calibration and selection
 profiles; their authoritative selector is `calibration-rank`.
+The frozen selection, manifests, ranking chain and workflow path all record the chosen
+budget. `compare.sh` accepts only the calibration with the same profile, preventing a
+reduced selection from being presented as a full result.
 
 This separation is enforced structurally:
 

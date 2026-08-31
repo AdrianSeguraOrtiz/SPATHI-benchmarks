@@ -96,6 +96,24 @@
     "max_depth": null,
     "bootstrap": null
   },
+  "calibration_budgets": {
+    "full": {
+      "algorithmic_seeds": {
+        "convergence": [1729, 2718, 31415, 57721, 104729],
+        "structure": [1729, 31415, 104729],
+        "estimator": [1729, 31415, 104729],
+        "validation": [1729, 31415, 104729]
+      }
+    },
+    "reduced": {
+      "algorithmic_seeds": {
+        "convergence": [1729, 31415],
+        "structure": [1729, 31415],
+        "estimator": [1729, 31415],
+        "validation": [1729, 31415]
+      }
+    }
+  },
   "stages": [
     {
       "id": "convergence",
@@ -107,7 +125,6 @@
       "include_inherited_configuration": true,
       "maximum_parent_configurations": 1,
       "candidate_budget_per_parent": 4,
-      "algorithmic_seeds": [1729, 2718, 31415, 57721, 104729],
       "candidates": [
         {
           "id": "trees_100",
@@ -137,7 +154,6 @@
       "include_inherited_configuration": true,
       "maximum_parent_configurations": 1,
       "candidate_budget_per_parent": 7,
-      "algorithmic_seeds": [1729, 31415, 104729],
       "candidates": [
         {
           "id": "cell_distance",
@@ -182,7 +198,6 @@
       "include_inherited_configuration": true,
       "maximum_parent_configurations": 2,
       "candidate_budget_per_parent": 5,
-      "algorithmic_seeds": [1729, 31415, 104729],
       "candidates": [
         {
           "id": "random_forest",

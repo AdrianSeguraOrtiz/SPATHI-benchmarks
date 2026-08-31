@@ -20,6 +20,7 @@
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
     "purpose": {"enum": ["smoke", "calibration", "selection", "regression", "benchmark"]},
+    "calibration_budget": {"enum": ["full", "reduced"]},
     "calibration_stage": {
       "enum": ["convergence", "structure", "estimator", "validation"]
     },
@@ -47,6 +48,14 @@
           "inference_batches": {"minItems": 1}
         }
       }
+    },
+    {
+      "if": {
+        "properties": {"purpose": {"enum": ["calibration", "selection"]}},
+        "required": ["purpose"]
+      },
+      "then": {"required": ["calibration_budget"]},
+      "else": {"not": {"required": ["calibration_budget"]}}
     },
     {
       "if": {

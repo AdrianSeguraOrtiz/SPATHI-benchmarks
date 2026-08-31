@@ -118,6 +118,7 @@ def materialize_calibration_stage(
     *,
     repo_root: Path,
     stage_id: str,
+    calibration_budget: str,
     parent_ranking_path: Path | None,
     output_dir: Path,
     profile_output: Path,
@@ -131,30 +132,43 @@ def materialize_calibration_stage(
         root,
         search,
         stage_id,
+        calibration_budget,
         parent_ranking_path,
     )
     if stage_id == "validation":
         candidates = parents
-        runs = expand_validation_runs(search, candidates)
+        runs = expand_validation_runs(search, candidates, calibration_budget)
         dataset_role = "validation"
     else:
         candidates = expand_stage_candidates(search, stage_id, parents=parents)
-        runs = expand_stage_runs(search, stage_id, parents=parents)
+        runs = expand_stage_runs(
+            search,
+            stage_id,
+            calibration_budget,
+            parents=parents,
+        )
         dataset_role = "development"
     image_tag = load_image_lock(root)["images"]["spathi"]["tag"]
     tools, custom, metadata = build_andrea_requests(runs, docker_image=image_tag)
     bundle_path = _repo_relative_path(root, output_dir, "Calibration plan output")
-    profile_id = stage_profile_id(stage_id)
+    profile_id = stage_profile_id(stage_id, calibration_budget)
     _valid_profile_destination(root, profile_output, profile_id)
-    template_name = "selection.json" if stage_id == "validation" else "calibration.json"
+    template_prefix = "selection" if stage_id == "validation" else "calibration"
+    template_name = f"{template_prefix}-{calibration_budget}.json"
     template = load_json_object(
         root / "experiments" / "v1" / "profiles" / template_name,
         f"{stage_id} profile template",
     )
-    profile = build_stage_profile(template, stage_id, bundle_path=bundle_path)
+    profile = build_stage_profile(
+        template,
+        stage_id,
+        calibration_budget,
+        bundle_path=bundle_path,
+    )
     manifest = {
         "schema_version": "1.0",
         "profile_id": profile_id,
+        "calibration_budget": calibration_budget,
         "search_space_id": search["id"],
         "search_space_sha256": sha256_file(root / "experiments/v1/spathi/search-space.json"),
         "stage_id": stage_id,
@@ -206,6 +220,7 @@ def rank_calibration_stage(
     *,
     repo_root: Path,
     stage_id: str,
+    calibration_budget: str,
     manifest_path: Path,
     summary_path: Path,
     output_path: Path,
@@ -215,7 +230,11 @@ def rank_calibration_stage(
     root = repo_root.resolve()
     search = load_search_space(root)
     manifest = load_json_object(manifest_path, "calibration manifest")
-    if manifest.get("search_space_id") != search["id"] or manifest.get("stage_id") != stage_id:
+    if (
+        manifest.get("search_space_id") != search["id"]
+        or manifest.get("stage_id") != stage_id
+        or manifest.get("calibration_budget") != calibration_budget
+    ):
         raise BenchmarkConfigError("Calibration manifest identity differs from the requested stage")
     candidates, _runs = validate_calibration_manifest(root, search, manifest)
     summary = load_json_object(summary_path, "benchmark summary")
@@ -237,6 +256,7 @@ def rank_calibration_stage(
         stage_id,
         candidates,
         reconciled_rows,
+        calibration_budget=calibration_budget,
         profile_id=str(manifest["profile_id"]),
         parent_ranking=manifest["parent_ranking"],
         search_space_sha256=sha256_file(root / "experiments/v1/spathi/search-space.json"),

@@ -602,6 +602,10 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest belongs to another profile"
                 )
+            if manifest.get("calibration_budget") != profile.get("calibration_budget"):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest uses another evidence budget"
+                )
             if manifest.get("stage_id") != profile.get("calibration_stage"):
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest has the wrong profile stage"
@@ -670,18 +674,174 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 )
 
 
+CALIBRATION_BUDGET_PROFILE_CONTRACT = {
+    "full": {
+        "replicates_per_condition": 3,
+        "dataset_count_per_role": 15,
+    },
+    "reduced": {
+        "replicates_per_condition": 1,
+        "dataset_count_per_role": 5,
+    },
+}
+
+
+def _calibration_profile_runs(
+    repo_root: Path,
+    profile: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    runs: list[dict[str, Any]] = []
+    for job in profile["generation_jobs"]:
+        payload = load_json_object(
+            resolve_repo_path(
+                repo_root,
+                str(job["simulator_runs"]),
+                f"{profile['id']}:{job['id']} simulator runs",
+            )
+        )
+        raw_runs = payload.get("runs")
+        if (
+            not isinstance(raw_runs, list)
+            or not raw_runs
+            or not all(isinstance(run, dict) for run in raw_runs)
+        ):
+            raise BenchmarkConfigError(
+                f"Calibration profile {profile['id']} has an invalid simulator-runs request"
+            )
+        runs.extend(raw_runs)
+    return tuple(runs)
+
+
+def _validate_calibration_budget_profiles(
+    repo_root: Path,
+    profiles_by_id: dict[str, dict[str, Any]],
+) -> None:
+    expected_conditions = {
+        "linear_baseline",
+        "linear_noisy",
+        "bifurcating_baseline",
+        "bifurcating_noisy",
+        "scmultisim_dynamic",
+    }
+    for budget, contract in CALIBRATION_BUDGET_PROFILE_CONTRACT.items():
+        for purpose, role, prefix in (
+            ("calibration", "development", "calibration"),
+            ("selection", "validation", "selection"),
+        ):
+            profile_id = f"{prefix}-{budget}"
+            profile = profiles_by_id[profile_id]
+            if profile.get("purpose") != purpose or profile.get("calibration_budget") != budget:
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} must bind purpose={purpose!r} and "
+                    f"calibration_budget={budget!r}"
+                )
+            jobs = profile["generation_jobs"]
+            if len(jobs) != len(expected_conditions):
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} must contain exactly five calibration conditions"
+                )
+            if {str(job["dataset_role"]) for job in jobs} != {role}:
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} must contain only {role} datasets"
+                )
+            if {str(job["condition_id"]) for job in jobs} != expected_conditions:
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} does not cover the frozen calibration conditions"
+                )
+            expected_replicates = int(contract["replicates_per_condition"])
+            if profile["planned_design"]["replicates_per_condition"] != expected_replicates:
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} declares the wrong replicate budget"
+                )
+            runs = _calibration_profile_runs(repo_root, profile)
+            replicate_counts = [run.get("replicates") for run in runs]
+            if not replicate_counts or any(
+                isinstance(count, bool) or count != expected_replicates
+                for count in replicate_counts
+            ):
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} simulator requests differ from its replicate budget"
+                )
+            if sum(int(count) for count in replicate_counts) != int(
+                contract["dataset_count_per_role"]
+            ):
+                raise BenchmarkConfigError(
+                    f"Profile {profile_id} has the wrong total dataset budget"
+                )
+
+    for purpose, prefix in (("calibration", "calibration"), ("selection", "selection")):
+        full_profile = profiles_by_id[f"{prefix}-full"]
+        reduced_profile = profiles_by_id[f"{prefix}-reduced"]
+        full_jobs = {str(job["id"]): job for job in full_profile["generation_jobs"]}
+        reduced_jobs = {str(job["id"]): job for job in reduced_profile["generation_jobs"]}
+        if full_jobs.keys() != reduced_jobs.keys():
+            raise BenchmarkConfigError(
+                f"Full and reduced {purpose} profiles must cover the same generation jobs"
+            )
+        for job_id, full_job in full_jobs.items():
+            reduced_job = reduced_jobs[job_id]
+            for field in ("scenario", "dataset_role", "split_id", "condition_id"):
+                if full_job[field] != reduced_job[field]:
+                    raise BenchmarkConfigError(
+                        f"Full and reduced {purpose} job {job_id} differ in {field}"
+                    )
+            full_runs = load_json_object(
+                resolve_repo_path(
+                    repo_root,
+                    str(full_job["simulator_runs"]),
+                    f"full {purpose} job {job_id}",
+                )
+            )["runs"]
+            reduced_runs = load_json_object(
+                resolve_repo_path(
+                    repo_root,
+                    str(reduced_job["simulator_runs"]),
+                    f"reduced {purpose} job {job_id}",
+                )
+            )["runs"]
+
+            def without_budget_fields(run: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    key: value for key, value in run.items() if key not in {"replicates", "notes"}
+                }
+
+            if [without_budget_fields(run) for run in full_runs] != [
+                without_budget_fields(run) for run in reduced_runs
+            ]:
+                raise BenchmarkConfigError(
+                    f"Reduced {purpose} job {job_id} is not a one-replicate subset of full"
+                )
+
+
 def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
     profiles = []
     for path in sorted((repo_root / "experiments" / "v1" / "profiles").glob("*.json")):
         profile = load_profile(repo_root, path.stem)
         validate_profile_references(repo_root, profile)
         profiles.append(profile)
-    required_profiles = {"smoke", "reduced", "full"}
+    required_profiles = {
+        "smoke",
+        "reduced",
+        "full",
+        "calibration-full",
+        "selection-full",
+        "calibration-reduced",
+        "selection-reduced",
+    }
     profile_ids = {profile["id"] for profile in profiles}
+    legacy_profiles = {"calibration", "selection"} & profile_ids
+    if legacy_profiles:
+        raise BenchmarkConfigError(
+            f"Legacy unbudgeted calibration profiles are not allowed: {sorted(legacy_profiles)}"
+        )
     if not required_profiles.issubset(profile_ids):
         raise BenchmarkConfigError(
             f"Required profiles are missing: {sorted(required_profiles - profile_ids)}"
         )
+    _validate_calibration_budget_profiles(
+        repo_root,
+        {str(profile["id"]): profile for profile in profiles},
+    )
     from .dataset_partitions import validate_dataset_partition_exclusivity
 
     validate_dataset_partition_exclusivity(repo_root, profiles)
