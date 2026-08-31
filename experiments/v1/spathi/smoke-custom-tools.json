@@ -1,8 +1,8 @@
 {
   "tools": [
     {
-      "run_id": "spathi_primary",
-      "name": "SPATHI",
+      "run_id": "spathi_smoke",
+      "name": "SPATHI smoke",
       "docker_image": "spathi-benchmarks/spathi:8e79cad3",
       "execution_mode": "group_native",
       "extra_inputs": ["groups", "tf_list"],

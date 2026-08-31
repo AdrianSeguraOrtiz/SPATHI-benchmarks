@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "spathi_smoke",
+      "configuration_id": "spathi_smoke",
+      "selection_role": "smoke",
+      "algorithm_seed": 1729,
+      "algorithm_seed_parameter": "random_seed",
+      "family": "spathi"
+    }
+  ]
+}

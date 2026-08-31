@@ -7,6 +7,7 @@
     "schema_version",
     "id",
     "status",
+    "purpose",
     "description",
     "generation_jobs",
     "inference_batches",
@@ -17,6 +18,7 @@
     "schema_version": {"const": "1.0"},
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
+    "purpose": {"enum": ["smoke", "calibration", "selection", "regression", "benchmark"]},
     "description": {"type": "string", "minLength": 1},
     "generation_jobs": {
       "type": "array",
@@ -50,25 +52,53 @@
     "generation_job": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "scenario", "simulator_runs"],
+      "required": [
+        "id",
+        "scenario",
+        "simulator_runs",
+        "dataset_role",
+        "split_id",
+        "condition_id"
+      ],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "scenario": {"$ref": "#/$defs/relative_path"},
-        "simulator_runs": {"$ref": "#/$defs/relative_path"}
+        "simulator_runs": {"$ref": "#/$defs/relative_path"},
+        "dataset_role": {"enum": ["smoke", "development", "validation", "test"]},
+        "split_id": {"$ref": "#/$defs/id"},
+        "condition_id": {"$ref": "#/$defs/id"}
       }
     },
     "inference_batch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "regime", "tools_params"],
+      "required": [
+        "id",
+        "kind",
+        "dataset_role",
+        "regime",
+        "tools_params",
+        "run_metadata"
+      ],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["baseline", "spathi"]},
+        "dataset_role": {"enum": ["smoke", "development", "validation", "test"]},
         "regime": {
           "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
         },
         "tools_params": {"$ref": "#/$defs/relative_path"},
-        "custom_tools": {"$ref": "#/$defs/relative_path"}
-      }
+        "custom_tools": {"$ref": "#/$defs/relative_path"},
+        "calibration_manifest": {"$ref": "#/$defs/relative_path"},
+        "run_metadata": {"$ref": "#/$defs/relative_path"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "spathi"}}},
+          "then": {"required": ["custom_tools"]},
+          "else": {"not": {"required": ["custom_tools"]}}
+        }
+      ]
     },
     "resources": {
       "type": "object",
@@ -88,8 +118,15 @@
         "infer_network": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["max_cores", "max_ram_gb", "planner", "planner_time_limit_seconds"],
+          "required": [
+            "max_parallel_runs",
+            "max_cores",
+            "max_ram_gb",
+            "planner",
+            "planner_time_limit_seconds"
+          ],
           "properties": {
+            "max_parallel_runs": {"type": "integer", "minimum": 1},
             "max_cores": {"type": "integer", "minimum": 1},
             "max_ram_gb": {"type": "number", "minimum": 1},
             "planner": {"enum": ["auto", "cp_sat", "heuristic"]},

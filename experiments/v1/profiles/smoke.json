@@ -2,20 +2,35 @@
   "schema_version": "1.0",
   "id": "smoke",
   "status": "runnable",
+  "purpose": "smoke",
   "description": "Contract-level dyngen benchmark with GENIE3 and SPATHI.",
   "generation_jobs": [
     {
       "id": "dyngen_smoke",
       "scenario": "experiments/v1/simulations/dyngen/scenario.json",
-      "simulator_runs": "experiments/v1/simulations/dyngen/smoke-runs.json"
+      "simulator_runs": "experiments/v1/simulations/dyngen/smoke-runs.json",
+      "dataset_role": "smoke",
+      "split_id": "smoke",
+      "condition_id": "contract"
     }
   ],
   "inference_batches": [
     {
-      "id": "group_only",
+      "id": "group_only_baseline",
+      "kind": "baseline",
+      "dataset_role": "smoke",
       "regime": "group_only",
-      "tools_params": "experiments/v1/inference/group_only/smoke-tools-params.json",
-      "custom_tools": "experiments/v1/spathi/custom-tools.json"
+      "tools_params": "experiments/v1/inference/group_only/smoke-baselines.json",
+      "run_metadata": "experiments/v1/inference/group_only/smoke-baselines-metadata.json"
+    },
+    {
+      "id": "group_only_spathi_smoke",
+      "kind": "spathi",
+      "dataset_role": "smoke",
+      "regime": "group_only",
+      "tools_params": "experiments/v1/spathi/smoke-tools-params.json",
+      "custom_tools": "experiments/v1/spathi/smoke-custom-tools.json",
+      "run_metadata": "experiments/v1/spathi/smoke-run-metadata.json"
     }
   ],
   "resources": {
@@ -25,6 +40,7 @@
       "max_ram_gb": 8
     },
     "infer_network": {
+      "max_parallel_runs": 1,
       "max_cores": 2,
       "max_ram_gb": 8,
       "planner": "heuristic",

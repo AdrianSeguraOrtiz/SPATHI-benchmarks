@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/calibration-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "search_space_id",
+    "stage_id",
+    "dataset_role",
+    "spathi_commit",
+    "spathi_build_fingerprint",
+    "spathi_image_tag",
+    "candidates",
+    "run_ids"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "search_space_id": {"const": "spathi_calibration_v1"},
+    "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
+    "dataset_role": {"enum": ["development", "validation"]},
+    "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "spathi_build_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "spathi_image_tag": {"type": "string", "minLength": 1},
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configuration_id",
+          "configuration_sha256",
+          "stage_id",
+          "dataset_role",
+          "parent_configuration_id",
+          "variant_id",
+          "parameters",
+          "nonreference_parameter_changes"
+        ],
+        "properties": {
+          "configuration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+          "configuration_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "stage_id": {"enum": ["convergence", "structure", "estimator"]},
+          "dataset_role": {"const": "development"},
+          "parent_configuration_id": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}
+            ]
+          },
+          "variant_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+          "parameters": {"type": "object", "minProperties": 1},
+          "nonreference_parameter_changes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "run_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"stage_id": {"const": "validation"}}},
+      "then": {"properties": {"dataset_role": {"const": "validation"}}},
+      "else": {"properties": {"dataset_role": {"const": "development"}}}
+    }
+  ]
+}

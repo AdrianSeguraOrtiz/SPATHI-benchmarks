@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/calibration-ranking.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "search_space_id",
+    "search_space_sha256",
+    "stage_id",
+    "dataset_role",
+    "calibration_manifest_sha256",
+    "benchmark_summary_sha256",
+    "spathi_commit",
+    "spathi_build_fingerprint",
+    "spathi_image_tag",
+    "spathi_image_ids",
+    "primary_metric",
+    "tie_breakers",
+    "calibration_rows",
+    "ranking",
+    "selected_candidates",
+    "winner",
+    "test_data_accessed"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_calibration_ranking"},
+    "search_space_id": {"const": "spathi_calibration_v1"},
+    "search_space_sha256": {"$ref": "#/$defs/sha256"},
+    "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
+    "dataset_role": {"enum": ["development", "validation"]},
+    "calibration_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "benchmark_summary_sha256": {"$ref": "#/$defs/sha256"},
+    "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "spathi_build_fingerprint": {"$ref": "#/$defs/sha256"},
+    "spathi_image_tag": {"type": "string", "minLength": 1},
+    "spathi_image_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    },
+    "primary_metric": {"const": "aupr_directed"},
+    "tie_breakers": {"const": ["stability", "cost", "simplicity"]},
+    "calibration_rows": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/calibration_row"}
+    },
+    "ranking": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/score"}
+    },
+    "selected_candidates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/candidate"}
+    },
+    "winner": {
+      "anyOf": [{"type": "null"}, {"$ref": "#/$defs/winner"}]
+    },
+    "test_data_accessed": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"stage_id": {"const": "validation"}}},
+      "then": {
+        "properties": {
+          "dataset_role": {"const": "validation"},
+          "ranking": {"minItems": 2, "maxItems": 3},
+          "selected_candidates": {"minItems": 1, "maxItems": 1},
+          "winner": {"$ref": "#/$defs/winner"}
+        }
+      },
+      "else": {
+        "properties": {
+          "dataset_role": {"const": "development"},
+          "winner": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "calibration_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration_id",
+        "configuration_sha256",
+        "dataset_role",
+        "dataset_id",
+        "algorithm_seed",
+        "aupr_directed",
+        "wall_time_seconds",
+        "peak_memory_mb",
+        "n_group_contexts",
+        "group_contexts",
+        "spathi_commit",
+        "spathi_build_fingerprint",
+        "spathi_image_id"
+      ],
+      "properties": {
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "dataset_role": {"enum": ["development", "validation"]},
+        "dataset_id": {"type": "string", "minLength": 1},
+        "algorithm_seed": {"type": "integer", "minimum": 0},
+        "aupr_directed": {"type": "number", "minimum": 0, "maximum": 1},
+        "wall_time_seconds": {"type": "number", "minimum": 0},
+        "peak_memory_mb": {
+          "anyOf": [{"type": "null"}, {"type": "number", "minimum": 0}]
+        },
+        "n_group_contexts": {"type": "integer", "minimum": 1},
+        "group_contexts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^group:.+$"}
+        },
+        "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "spathi_build_fingerprint": {"$ref": "#/$defs/sha256"},
+        "spathi_image_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "run_id": {"type": "string", "minLength": 1},
+        "execution_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration_id",
+        "configuration_sha256",
+        "stage_id",
+        "dataset_role",
+        "parent_configuration_id",
+        "variant_id",
+        "parameters",
+        "nonreference_parameter_changes"
+      ],
+      "properties": {
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "stage_id": {"enum": ["convergence", "structure", "estimator"]},
+        "dataset_role": {"const": "development"},
+        "parent_configuration_id": {
+          "anyOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]
+        },
+        "variant_id": {"$ref": "#/$defs/id"},
+        "parameters": {"type": "object", "minProperties": 1},
+        "nonreference_parameter_changes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "score": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate",
+        "hierarchical_aupr",
+        "stability",
+        "median_wall_time_seconds",
+        "median_peak_memory_mb",
+        "simplicity",
+        "dataset_count",
+        "algorithm_seed_count"
+      ],
+      "properties": {
+        "candidate": {"$ref": "#/$defs/candidate"},
+        "hierarchical_aupr": {"type": "number", "minimum": 0, "maximum": 1},
+        "stability": {"type": "number", "minimum": 0},
+        "median_wall_time_seconds": {"type": "number", "minimum": 0},
+        "median_peak_memory_mb": {
+          "anyOf": [{"type": "null"}, {"type": "number", "minimum": 0}]
+        },
+        "simplicity": {"type": "integer", "minimum": 0},
+        "dataset_count": {"type": "integer", "minimum": 1},
+        "algorithm_seed_count": {"type": "integer", "minimum": 2}
+      }
+    },
+    "winner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "configuration_sha256", "hierarchical_score"],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "hierarchical_score": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

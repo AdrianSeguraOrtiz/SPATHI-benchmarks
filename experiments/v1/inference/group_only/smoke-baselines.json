@@ -1,0 +1,17 @@
+{
+  "runs": [
+    {
+      "run_id": "genie3_smoke",
+      "tool_id": "genie3",
+      "params": {
+        "regressor_type": "RF",
+        "regressor_kwargs": {
+          "n_estimators": 25,
+          "max_features": "sqrt"
+        },
+        "seed": 1729
+      },
+      "execution": {"mode": "group_emulated"}
+    }
+  ]
+}

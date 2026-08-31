@@ -1,21 +1,8 @@
 {
   "runs": [
     {
-      "run_id": "genie3_group_emulated",
-      "tool_id": "genie3",
-      "params": {
-        "regressor_type": "RF",
-        "regressor_kwargs": {
-          "n_estimators": 25,
-          "max_features": "sqrt"
-        },
-        "seed": 1729
-      },
-      "execution": {"mode": "group_emulated"}
-    },
-    {
-      "run_id": "spathi_primary",
-      "tool_id": "custom_spathi_primary",
+      "run_id": "spathi_smoke",
+      "tool_id": "custom_spathi_smoke",
       "params": {
         "weight_mode": "cell-distance-group-anchored",
         "distance_space": "pca",
@@ -30,6 +17,8 @@
         "n_estimators": 25,
         "max_features": 1.0,
         "min_samples_leaf": 1,
+        "max_depth": null,
+        "bootstrap": null,
         "random_seed": 1729
       },
       "execution": {"mode": "group_native"}

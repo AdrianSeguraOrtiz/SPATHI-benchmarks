@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/spathi-search-space.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "status",
+    "smoke_contract",
+    "dataset_partition",
+    "objective",
+    "reference_configuration",
+    "stages",
+    "selection_protocol"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"$ref": "#/$defs/id"},
+    "status": {"const": "planned"},
+    "smoke_contract": {"$ref": "#/$defs/smoke_contract"},
+    "dataset_partition": {"$ref": "#/$defs/dataset_partition"},
+    "objective": {"$ref": "#/$defs/objective"},
+    "reference_configuration": {"$ref": "#/$defs/complete_parameters"},
+    "stages": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"$ref": "#/$defs/convergence_stage"},
+        {"$ref": "#/$defs/structure_stage"},
+        {"$ref": "#/$defs/estimator_stage"}
+      ],
+      "items": false
+    },
+    "selection_protocol": {"$ref": "#/$defs/selection_protocol"}
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "nonempty_string": {"type": "string", "minLength": 1},
+    "smoke_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration_id",
+        "current_orchestration_run_id",
+        "role",
+        "eligible_for_scientific_selection",
+        "reason"
+      ],
+      "properties": {
+        "configuration_id": {"const": "spathi_smoke"},
+        "current_orchestration_run_id": {"const": "spathi_smoke"},
+        "role": {"const": "contract_only"},
+        "eligible_for_scientific_selection": {"const": false},
+        "reason": {"$ref": "#/$defs/nonempty_string"}
+      }
+    },
+    "dataset_partition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assignment_unit", "stratify_by", "roles", "constraints"],
+      "properties": {
+        "assignment_unit": {"const": "dataset_instance"},
+        "stratify_by": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["simulator", "topology_id", "generation_seed", "condition_id"]
+          }
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"$ref": "#/$defs/development_role"},
+            {"$ref": "#/$defs/validation_role"},
+            {"$ref": "#/$defs/test_role"}
+          ],
+          "items": false
+        },
+        "constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mutually_exclusive",
+            "assign_before_inference",
+            "keep_related_datasets_together",
+            "test_access"
+          ],
+          "properties": {
+            "mutually_exclusive": {"const": true},
+            "assign_before_inference": {"const": true},
+            "keep_related_datasets_together": {"const": true},
+            "test_access": {"const": "only_after_configuration_freeze"}
+          }
+        }
+      }
+    },
+    "development_role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "purpose", "permitted_uses"],
+      "properties": {
+        "id": {"const": "development"},
+        "purpose": {"$ref": "#/$defs/nonempty_string"},
+        "permitted_uses": {
+          "const": ["convergence", "structure_search", "estimator_search"]
+        }
+      }
+    },
+    "validation_role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "purpose", "permitted_uses"],
+      "properties": {
+        "id": {"const": "validation"},
+        "purpose": {"$ref": "#/$defs/nonempty_string"},
+        "permitted_uses": {"const": ["finalist_selection"]}
+      }
+    },
+    "test_role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "purpose", "permitted_uses"],
+      "properties": {
+        "id": {"const": "test"},
+        "purpose": {"$ref": "#/$defs/nonempty_string"},
+        "permitted_uses": {"const": ["frozen_benchmark_only"]}
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_metric",
+        "edge_semantics",
+        "direction",
+        "aggregation",
+        "tie_breakers",
+        "forbidden_shortcuts"
+      ],
+      "properties": {
+        "primary_metric": {"const": "aupr_directed"},
+        "edge_semantics": {"const": "directed_unsigned"},
+        "direction": {"const": "maximize"},
+        "aggregation": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["level", "operation", "scope"],
+              "properties": {
+                "level": {"const": "group"},
+                "operation": {"const": "equal_weight_mean"},
+                "scope": {"const": "within_dataset"}
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["level", "operation", "scope"],
+              "properties": {
+                "level": {"const": "dataset"},
+                "operation": {"const": "equal_weight_mean"},
+                "scope": {"const": "within_dataset_role"}
+              }
+            }
+          ],
+          "items": false
+        },
+        "tie_breakers": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"$ref": "#/$defs/stability_tie_breaker"},
+            {"$ref": "#/$defs/cost_tie_breaker"},
+            {"$ref": "#/$defs/simplicity_tie_breaker"}
+          ],
+          "items": false
+        },
+        "forbidden_shortcuts": {
+          "const": [
+            "pool_edges_across_groups",
+            "split_cells_from_one_dataset_across_roles",
+            "select_a_different_configuration_per_dataset",
+            "use_test_results_for_selection"
+          ]
+        }
+      }
+    },
+    "stability_tie_breaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priority", "id", "direction", "measure"],
+      "properties": {
+        "priority": {"const": 1},
+        "id": {"const": "stability"},
+        "direction": {"const": "minimize"},
+        "measure": {"const": "aupr_dispersion_across_algorithmic_seeds"}
+      }
+    },
+    "cost_tie_breaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priority", "id", "direction", "measure"],
+      "properties": {
+        "priority": {"const": 2},
+        "id": {"const": "cost"},
+        "direction": {"const": "minimize"},
+        "measure": {"const": "median_wall_time_then_peak_memory"}
+      }
+    },
+    "simplicity_tie_breaker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priority", "id", "direction", "measure"],
+      "properties": {
+        "priority": {"const": 3},
+        "id": {"const": "simplicity"},
+        "direction": {"const": "minimize"},
+        "measure": {"const": "nonreference_parameter_changes"}
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weight_mode": {
+          "enum": ["cell-distance", "cell-distance-group-anchored", "group-distance"]
+        },
+        "distance_space": {"enum": ["pca", "expression"]},
+        "n_components": {"type": "integer", "minimum": 1},
+        "distance_standardization": {"enum": ["none", "standard"]},
+        "pca_svd_solver": {"enum": ["auto", "randomized", "full"]},
+        "distance_metric": {"enum": ["euclidean", "cosine"]},
+        "kernel": {"enum": ["gaussian", "exponential"]},
+        "bandwidth": {
+          "anyOf": [
+            {"const": "auto"},
+            {"type": "number", "exclusiveMinimum": 0}
+          ]
+        },
+        "group_size_correction": {"enum": ["none", "cap-to-target"]},
+        "tree_method": {"enum": ["extra-trees", "random-forest"]},
+        "n_estimators": {"type": "integer", "minimum": 1},
+        "max_features": {
+          "anyOf": [
+            {"enum": ["sqrt", "log2"]},
+            {"type": "integer", "minimum": 1},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+          ]
+        },
+        "min_samples_leaf": {"type": "integer", "minimum": 1},
+        "max_depth": {
+          "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+        },
+        "bootstrap": {"type": ["boolean", "null"]}
+      }
+    },
+    "complete_parameters": {
+      "allOf": [
+        {"$ref": "#/$defs/parameters"},
+        {
+          "required": [
+            "weight_mode",
+            "distance_space",
+            "n_components",
+            "distance_standardization",
+            "pca_svd_solver",
+            "distance_metric",
+            "kernel",
+            "bandwidth",
+            "group_size_correction",
+            "tree_method",
+            "n_estimators",
+            "max_features",
+            "min_samples_leaf",
+            "max_depth",
+            "bootstrap"
+          ]
+        }
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parameter_overrides", "rationale"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "parameter_overrides": {
+          "allOf": [
+            {"$ref": "#/$defs/parameters"},
+            {"minProperties": 1}
+          ]
+        },
+        "rationale": {"$ref": "#/$defs/nonempty_string"}
+      }
+    },
+    "stage_common": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "order",
+        "dataset_role",
+        "purpose",
+        "inherits_from",
+        "strategy",
+        "include_inherited_configuration",
+        "maximum_parent_configurations",
+        "candidate_budget_per_parent",
+        "algorithmic_seeds",
+        "candidates",
+        "advance_limit"
+      ],
+      "properties": {
+        "id": {"enum": ["convergence", "structure", "estimator"]},
+        "order": {"type": "integer", "minimum": 1, "maximum": 3},
+        "dataset_role": {"const": "development"},
+        "purpose": {"$ref": "#/$defs/nonempty_string"},
+        "inherits_from": {
+          "enum": [
+            "reference_configuration",
+            "selected:convergence",
+            "shortlist:structure"
+          ]
+        },
+        "strategy": {"enum": ["one_factor_at_a_time", "bounded_shortlist_expansion"]},
+        "include_inherited_configuration": {"const": true},
+        "maximum_parent_configurations": {"type": "integer", "minimum": 1, "maximum": 2},
+        "candidate_budget_per_parent": {"type": "integer", "minimum": 2, "maximum": 8},
+        "algorithmic_seeds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "items": {"$ref": "#/$defs/candidate"}
+        },
+        "advance_limit": {"type": "integer", "minimum": 1, "maximum": 3}
+      }
+    },
+    "convergence_stage": {
+      "allOf": [
+        {"$ref": "#/$defs/stage_common"},
+        {
+          "properties": {
+            "id": {"const": "convergence"},
+            "order": {"const": 1},
+            "inherits_from": {"const": "reference_configuration"},
+            "strategy": {"const": "one_factor_at_a_time"},
+            "maximum_parent_configurations": {"const": 1},
+            "advance_limit": {"const": 1}
+          }
+        }
+      ]
+    },
+    "structure_stage": {
+      "allOf": [
+        {"$ref": "#/$defs/stage_common"},
+        {
+          "properties": {
+            "id": {"const": "structure"},
+            "order": {"const": 2},
+            "inherits_from": {"const": "selected:convergence"},
+            "strategy": {"const": "one_factor_at_a_time"},
+            "maximum_parent_configurations": {"const": 1},
+            "advance_limit": {"const": 2}
+          }
+        }
+      ]
+    },
+    "estimator_stage": {
+      "allOf": [
+        {"$ref": "#/$defs/stage_common"},
+        {
+          "properties": {
+            "id": {"const": "estimator"},
+            "order": {"const": 3},
+            "inherits_from": {"const": "shortlist:structure"},
+            "strategy": {"const": "bounded_shortlist_expansion"},
+            "maximum_parent_configurations": {"const": 2},
+            "advance_limit": {"const": 3}
+          }
+        }
+      ]
+    },
+    "selection_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "development_role",
+        "validation_role",
+        "test_role",
+        "maximum_validation_finalists",
+        "freeze_before_test",
+        "single_global_configuration",
+        "test_results_can_change_selection"
+      ],
+      "properties": {
+        "development_role": {"const": "search_and_shortlist"},
+        "validation_role": {"const": "select_one_finalist"},
+        "test_role": {"const": "compare_frozen_configuration"},
+        "maximum_validation_finalists": {"type": "integer", "minimum": 2, "maximum": 3},
+        "freeze_before_test": {"const": true},
+        "single_global_configuration": {"const": true},
+        "test_results_can_change_selection": {"const": false}
+      }
+    }
+  }
+}

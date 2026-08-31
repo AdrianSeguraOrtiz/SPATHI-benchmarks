@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "id": "calibration",
+  "status": "planned",
+  "purpose": "calibration",
+  "description": "Development-only staged SPATHI configuration search; datasets are not frozen yet.",
+  "generation_jobs": [],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {
+      "max_parallel_tasks": 2,
+      "max_cores": 8,
+      "max_ram_gb": 32
+    },
+    "infer_network": {
+      "max_parallel_runs": 2,
+      "max_cores": 4,
+      "max_ram_gb": 16,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 60
+    }
+  },
+  "planned_design": {
+    "simulators": ["dyngen", "scmultisim"],
+    "replicates_per_condition": 3,
+    "regimes": ["group_only"],
+    "factors": ["convergence", "structure", "estimator"],
+    "notes": [
+      "Contains development datasets only.",
+      "Candidate bundles are generated from experiments/v1/spathi/search-space.json."
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "genie3_smoke",
+      "configuration_id": "genie3_smoke",
+      "selection_role": "baseline",
+      "algorithm_seed": 1729,
+      "algorithm_seed_parameter": "seed",
+      "family": "catalog_baseline"
+    }
+  ]
+}

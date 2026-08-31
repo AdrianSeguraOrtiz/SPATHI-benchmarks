@@ -1,5 +1,15 @@
 {
   "schema_version": "1.0",
+  "catalog_images": {
+    "simulator:dyngen": {
+      "tag": "adriansegura99/simulator_dyngen:1.0.0",
+      "repo_digest": "adriansegura99/simulator_dyngen@sha256:01be5a207a98e2edc3c082daf431a4b3901ed4f74db0035ce26e3bd6b26d159a"
+    },
+    "tool:genie3": {
+      "tag": "adriansegura99/inference-tools_genie3:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_genie3@sha256:3e1333f4852c7e6872935f4e8b6b49d4ced58a34778eb036c3ec8aabf13e28d0"
+    }
+  },
   "images": {
     "spathi": {
       "tag": "spathi-benchmarks/spathi:8e79cad3",
@@ -7,9 +17,9 @@
       "source_repository": "spathi",
       "source_commit": "8e79cad3adeadcaa9a5f8f3a774d222325507ed5",
       "build_inputs": {
-        "containers/spathi/Dockerfile": "9a5329e4e38de4c800071e4fa7b59525846ed2df3ad75f1947f49ba2cdc7cb0f",
+        "containers/spathi/Dockerfile": "9dc82e649c2e08e7e8aeda354fca65160eeb16fb1128d79ba7b4e94a9978c93b",
         "containers/spathi/constraints.txt": "126c6303c0e86c1d4ebee6c96dfbaf9d0d154181e447e779ece7c9779d4581da",
-        "containers/spathi/run_tool.py": "065a7943f85d3eac902c4f1f3eebd772128e1c8bba9e368a8d3b059e6e28a962"
+        "containers/spathi/run_tool.py": "af3dda7c67c7943950c39e77f0ef6b54d10dc16212d19e5538a5fc0796ed2e91"
       },
       "python_dependencies": {
         "joblib": "1.5.3",

@@ -10,6 +10,8 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from .artifacts import canonical_json_sha256
+
 
 class BenchmarkConfigError(ValueError):
     """Raised when a committed benchmark contract is invalid."""
@@ -106,7 +108,39 @@ def load_image_lock(repo_root: Path) -> dict[str, Any]:
     dependencies = spathi.get("python_dependencies")
     if not isinstance(dependencies, dict) or not dependencies:
         raise BenchmarkConfigError("images.spathi.python_dependencies must be non-empty")
+    catalog_images = lock.get("catalog_images")
+    if not isinstance(catalog_images, dict):
+        raise BenchmarkConfigError("images.lock.json must define catalog_images")
+    for image_id, image in catalog_images.items():
+        if not isinstance(image_id, str) or not re.fullmatch(
+            r"(?:simulator|tool):[a-z0-9][a-z0-9_-]*", image_id
+        ):
+            raise BenchmarkConfigError(f"Invalid catalog image identifier: {image_id!r}")
+        if not isinstance(image, dict):
+            raise BenchmarkConfigError(f"catalog_images.{image_id} must be an object")
+        if not isinstance(image.get("tag"), str) or not image["tag"]:
+            raise BenchmarkConfigError(f"catalog_images.{image_id}.tag must be non-empty")
+        if not isinstance(image.get("repo_digest"), str) or not re.fullmatch(
+            r"[^@\s]+@sha256:[0-9a-f]{64}", image["repo_digest"]
+        ):
+            raise BenchmarkConfigError(
+                f"catalog_images.{image_id}.repo_digest must pin a sha256 repository digest"
+            )
     return lock
+
+
+def load_run_metadata(repo_root: Path, raw_path: str, label: str) -> dict[str, Any]:
+    path = resolve_repo_path(repo_root, raw_path, label)
+    metadata = load_json_object(path, label)
+    validate_json(
+        metadata,
+        repo_root / "schemas" / "run-metadata.schema.json",
+        label,
+    )
+    run_ids = [item["run_id"] for item in metadata["runs"]]
+    if len(set(run_ids)) != len(run_ids):
+        raise BenchmarkConfigError(f"{label} contains duplicate run IDs")
+    return metadata
 
 
 def _canonical_remote(value: str) -> str:
@@ -214,6 +248,25 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         raise BenchmarkConfigError("Profile contains duplicate inference batch IDs")
     if profile.get("status") != "runnable":
         return
+    generation_roles = {str(job["dataset_role"]) for job in profile["generation_jobs"]}
+    expected_roles = {
+        "smoke": {"smoke"},
+        "calibration": {"development"},
+        "selection": {"validation"},
+        "regression": {"development"},
+        "benchmark": {"test"},
+    }[str(profile["purpose"])]
+    if generation_roles != expected_roles:
+        raise BenchmarkConfigError(
+            f"Runnable {profile['purpose']} profile {profile['id']} must contain exactly "
+            f"dataset roles {sorted(expected_roles)}, found {sorted(generation_roles)}"
+        )
+    if "test" in generation_roles:
+        _search, selected = validate_calibration_contracts(repo_root)
+        if selected["status"] != "selected" or selected["phase"] != "frozen":
+            raise BenchmarkConfigError(
+                f"Test profile {profile['id']} cannot become runnable before SPATHI selection is frozen"
+            )
     for job in profile["generation_jobs"]:
         scenario_path = resolve_repo_path(repo_root, job["scenario"], f"{job['id']} scenario")
         runs_path = resolve_repo_path(
@@ -227,6 +280,11 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             raise BenchmarkConfigError(f"Invalid ANDREA simulator-runs contract: {runs_path}")
 
     for batch in profile["inference_batches"]:
+        if batch["dataset_role"] not in generation_roles:
+            raise BenchmarkConfigError(
+                f"Inference batch {batch['id']} selects dataset role "
+                f"{batch['dataset_role']!r}, but no generation job provides it"
+            )
         params_path = resolve_repo_path(
             repo_root, batch["tools_params"], f"{batch['id']} tools params"
         )
@@ -241,19 +299,166 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             definitions = custom_payload.get("tools")
             if isinstance(definitions, list):
                 for definition in definitions:
-                    if (
-                        isinstance(definition, dict)
-                        and definition.get("run_id") == "spathi_primary"
-                        and definition.get("docker_image") != image_tag
-                    ):
+                    if isinstance(definition, dict) and definition.get("docker_image") != image_tag:
                         raise BenchmarkConfigError(
                             "SPATHI custom tool image differs from images.lock.json"
                         )
+        params_payload = load_json_object(params_path)
         _validate_run_identity(
-            tools_params=load_json_object(params_path),
+            tools_params=params_payload,
             custom_tools=custom_payload,
             label=str(params_path),
         )
+        metadata = load_run_metadata(
+            repo_root,
+            batch["run_metadata"],
+            f"{batch['id']} run metadata",
+        )
+        requested_ids = {str(run["run_id"]) for run in params_payload["runs"]}
+        metadata_ids = {str(run["run_id"]) for run in metadata["runs"]}
+        if requested_ids != metadata_ids:
+            raise BenchmarkConfigError(
+                f"{batch['id']} run metadata mismatch: "
+                f"requested={sorted(requested_ids)}, metadata={sorted(metadata_ids)}"
+            )
+        params_by_run = {str(run["run_id"]): run.get("params") for run in params_payload["runs"]}
+        for item in metadata["runs"]:
+            run_id = str(item["run_id"])
+            params = params_by_run[run_id]
+            if not isinstance(params, dict):
+                raise BenchmarkConfigError(f"{batch['id']} run {run_id!r} has invalid params")
+            seed_parameter = item["algorithm_seed_parameter"]
+            if seed_parameter is not None and params.get(seed_parameter) != item["algorithm_seed"]:
+                raise BenchmarkConfigError(
+                    f"{batch['id']} run {run_id!r} declares algorithm seed "
+                    f"{item['algorithm_seed']!r} in {seed_parameter!r}, but params contain "
+                    f"{params.get(seed_parameter)!r}"
+                )
+        custom_ids = {
+            str(run["run_id"])
+            for run in params_payload["runs"]
+            if str(run.get("tool_id", "")).startswith("custom_")
+        }
+        if batch["kind"] == "baseline" and custom_ids:
+            raise BenchmarkConfigError(f"Baseline batch {batch['id']} contains custom tools")
+        if batch["kind"] == "baseline" and batch.get("calibration_manifest"):
+            raise BenchmarkConfigError(
+                f"Baseline batch {batch['id']} cannot use a calibration manifest"
+            )
+        if batch["kind"] == "spathi" and custom_ids != requested_ids:
+            raise BenchmarkConfigError(f"SPATHI batch {batch['id']} must contain only custom tools")
+        metadata_roles = {str(item["selection_role"]) for item in metadata["runs"]}
+        if batch["kind"] == "baseline" and metadata_roles != {"baseline"}:
+            raise BenchmarkConfigError(
+                f"Baseline batch {batch['id']} must use selection_role=baseline"
+            )
+        if batch["kind"] == "spathi" and "baseline" in metadata_roles:
+            raise BenchmarkConfigError(
+                f"SPATHI batch {batch['id']} cannot use selection_role=baseline"
+            )
+        if batch["dataset_role"] == "test" and batch["kind"] == "spathi":
+            if metadata_roles != {"selected"}:
+                raise BenchmarkConfigError(
+                    f"Test batch {batch['id']} may execute only a frozen selected "
+                    "SPATHI configuration"
+                )
+            _search, selected = validate_calibration_contracts(repo_root)
+            if selected["status"] != "selected" or selected["phase"] != "frozen":
+                raise BenchmarkConfigError(
+                    f"Test batch {batch['id']} requires a frozen selected-config.json"
+                )
+            selected_candidate = selected["selected_candidate"]
+            selected_parameters = selected_candidate["parameters"]
+            selected_digest = canonical_json_sha256(selected_parameters)
+            if (
+                selected_candidate["spathi_commit"]
+                != load_repo_lock(repo_root)["repositories"]["spathi"]["commit"]
+                or selected_candidate["configuration_sha256"] != selected_digest
+            ):
+                raise BenchmarkConfigError(
+                    f"Test batch {batch['id']} selected configuration has stale provenance"
+                )
+            if {str(item["configuration_id"]) for item in metadata["runs"]} != {
+                str(selected_candidate["candidate_id"])
+            }:
+                raise BenchmarkConfigError(
+                    f"Test batch {batch['id']} does not request the frozen SPATHI candidate"
+                )
+            for item in metadata["runs"]:
+                params = dict(params_by_run[str(item["run_id"])])
+                seed_parameter = item["algorithm_seed_parameter"]
+                if seed_parameter is not None:
+                    params.pop(seed_parameter)
+                if params != selected_parameters:
+                    raise BenchmarkConfigError(
+                        f"Test batch {batch['id']} parameters differ from the frozen selection"
+                    )
+        if profile["purpose"] in {"calibration", "selection"} and batch["kind"] == "spathi":
+            raw_manifest = batch.get("calibration_manifest")
+            if not isinstance(raw_manifest, str):
+                raise BenchmarkConfigError(
+                    f"SPATHI batch {batch['id']} requires calibration_manifest"
+                )
+            manifest = load_json_object(
+                resolve_repo_path(
+                    repo_root,
+                    raw_manifest,
+                    f"{batch['id']} calibration manifest",
+                ),
+                f"{batch['id']} calibration manifest",
+            )
+            validate_json(
+                manifest,
+                repo_root / "schemas" / "calibration-manifest.schema.json",
+                f"{batch['id']} calibration manifest",
+            )
+            from .calibration import locked_spathi_identity
+
+            spathi_identity = locked_spathi_identity(repo_root)
+            if any(manifest.get(field) != value for field, value in spathi_identity.items()):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest targets another SPATHI build"
+                )
+            expected_role = "development" if profile["purpose"] == "calibration" else "validation"
+            if manifest.get("dataset_role") != expected_role:
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest has the wrong dataset role"
+                )
+            manifest_run_ids = manifest.get("run_ids")
+            if (
+                not isinstance(manifest_run_ids, list)
+                or not all(isinstance(run_id, str) for run_id in manifest_run_ids)
+                or len(set(manifest_run_ids)) != len(manifest_run_ids)
+                or set(manifest_run_ids) != requested_ids
+            ):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest run IDs differ from its request"
+                )
+            raw_candidates = manifest.get("candidates")
+            if not isinstance(raw_candidates, list):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest contains no candidates"
+                )
+            candidate_digests = {
+                str(candidate.get("configuration_id")): candidate.get("configuration_sha256")
+                for candidate in raw_candidates
+                if isinstance(candidate, dict)
+            }
+            if len(candidate_digests) != len(raw_candidates):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest contains invalid or duplicate candidates"
+                )
+            for item in metadata["runs"]:
+                run_id = str(item["run_id"])
+                configuration_id = str(item["configuration_id"])
+                params = dict(params_by_run[run_id])
+                seed_parameter = item["algorithm_seed_parameter"]
+                if seed_parameter is not None:
+                    params.pop(seed_parameter)
+                if candidate_digests.get(configuration_id) != canonical_json_sha256(params):
+                    raise BenchmarkConfigError(
+                        f"{batch['id']} run {run_id!r} differs from its calibration candidate"
+                    )
 
 
 def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
@@ -262,15 +467,53 @@ def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
         profile = load_profile(repo_root, path.stem)
         validate_profile_references(repo_root, profile)
         profiles.append(profile)
-    if {profile["id"] for profile in profiles} != {"smoke", "reduced", "full"}:
-        raise BenchmarkConfigError("Exactly smoke, reduced and full profiles must be defined")
+    required_profiles = {"smoke", "reduced", "full"}
+    profile_ids = {profile["id"] for profile in profiles}
+    if not required_profiles.issubset(profile_ids):
+        raise BenchmarkConfigError(
+            f"Required profiles are missing: {sorted(required_profiles - profile_ids)}"
+        )
+    from .dataset_partitions import validate_dataset_partition_exclusivity
+
+    validate_dataset_partition_exclusivity(repo_root, profiles)
     return profiles
 
 
 REGIME_IDS = {"group_only", "order_aware", "pseudotime_aware", "prior_assisted"}
 
 
+def validate_calibration_contracts(repo_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate the bounded SPATHI search and its frozen-selection record."""
+
+    search_path = repo_root / "experiments" / "v1" / "spathi" / "search-space.json"
+    selected_path = repo_root / "experiments" / "v1" / "spathi" / "selected-config.json"
+    search = load_json_object(search_path, "SPATHI search space")
+    selected = load_json_object(selected_path, "SPATHI selected configuration")
+    validate_json(
+        search,
+        repo_root / "schemas" / "spathi-search-space.schema.json",
+        "SPATHI search space",
+    )
+    validate_json(
+        selected,
+        repo_root / "schemas" / "spathi-selected-config.schema.json",
+        "SPATHI selected configuration",
+    )
+    expected_search = search_path.relative_to(repo_root).as_posix()
+    if selected["search_space"] != expected_search:
+        raise BenchmarkConfigError(
+            "SPATHI selected configuration points to a different search space: "
+            f"{selected['search_space']!r}"
+        )
+    if selected["status"] == "selected":
+        from .calibration import reconcile_frozen_selection
+
+        reconcile_frozen_selection(repo_root, search, selected)
+    return search, selected
+
+
 def validate_design_contracts(repo_root: Path, andrea_repo: Path | None = None) -> None:
+    validate_calibration_contracts(repo_root)
     regimes: dict[str, dict[str, Any]] = {}
     regime_root = repo_root / "experiments" / "v1" / "inference" / "regimes"
     for path in sorted(regime_root.glob("*.json")):

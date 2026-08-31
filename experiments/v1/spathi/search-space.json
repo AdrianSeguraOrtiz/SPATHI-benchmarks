@@ -1,0 +1,223 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_calibration_v1",
+  "status": "planned",
+  "smoke_contract": {
+    "configuration_id": "spathi_smoke",
+    "current_orchestration_run_id": "spathi_smoke",
+    "role": "contract_only",
+    "eligible_for_scientific_selection": false,
+    "reason": "The 25-tree smoke configuration verifies the execution contract only; it is not the scientific primary configuration."
+  },
+  "dataset_partition": {
+    "assignment_unit": "dataset_instance",
+    "stratify_by": ["simulator", "topology_id", "condition_id"],
+    "roles": [
+      {
+        "id": "development",
+        "purpose": "Explore convergence and construct a bounded shortlist without accessing validation or test datasets.",
+        "permitted_uses": ["convergence", "structure_search", "estimator_search"]
+      },
+      {
+        "id": "validation",
+        "purpose": "Choose one global configuration from the predeclared finalists.",
+        "permitted_uses": ["finalist_selection"]
+      },
+      {
+        "id": "test",
+        "purpose": "Compare the frozen SPATHI configuration with external tools exactly once.",
+        "permitted_uses": ["frozen_benchmark_only"]
+      }
+    ],
+    "constraints": {
+      "mutually_exclusive": true,
+      "assign_before_inference": true,
+      "keep_related_datasets_together": true,
+      "test_access": "only_after_configuration_freeze"
+    }
+  },
+  "objective": {
+    "primary_metric": "aupr_directed",
+    "edge_semantics": "directed_unsigned",
+    "direction": "maximize",
+    "aggregation": [
+      {
+        "level": "group",
+        "operation": "equal_weight_mean",
+        "scope": "within_dataset"
+      },
+      {
+        "level": "dataset",
+        "operation": "equal_weight_mean",
+        "scope": "within_dataset_role"
+      }
+    ],
+    "tie_breakers": [
+      {
+        "priority": 1,
+        "id": "stability",
+        "direction": "minimize",
+        "measure": "aupr_dispersion_across_algorithmic_seeds"
+      },
+      {
+        "priority": 2,
+        "id": "cost",
+        "direction": "minimize",
+        "measure": "median_wall_time_then_peak_memory"
+      },
+      {
+        "priority": 3,
+        "id": "simplicity",
+        "direction": "minimize",
+        "measure": "nonreference_parameter_changes"
+      }
+    ],
+    "forbidden_shortcuts": [
+      "pool_edges_across_groups",
+      "split_cells_from_one_dataset_across_roles",
+      "select_a_different_configuration_per_dataset",
+      "use_test_results_for_selection"
+    ]
+  },
+  "reference_configuration": {
+    "weight_mode": "cell-distance-group-anchored",
+    "distance_space": "pca",
+    "n_components": 50,
+    "distance_standardization": "none",
+    "pca_svd_solver": "auto",
+    "distance_metric": "euclidean",
+    "kernel": "gaussian",
+    "bandwidth": "auto",
+    "group_size_correction": "cap-to-target",
+    "tree_method": "extra-trees",
+    "n_estimators": 500,
+    "max_features": 1.0,
+    "min_samples_leaf": 1,
+    "max_depth": null,
+    "bootstrap": null
+  },
+  "stages": [
+    {
+      "id": "convergence",
+      "order": 1,
+      "dataset_role": "development",
+      "purpose": "Compare a bounded tree-count sweep using directed AUPR, seed dispersion and the predeclared cost and simplicity tie breakers.",
+      "inherits_from": "reference_configuration",
+      "strategy": "one_factor_at_a_time",
+      "include_inherited_configuration": true,
+      "maximum_parent_configurations": 1,
+      "candidate_budget_per_parent": 4,
+      "algorithmic_seeds": [1729, 2718, 31415, 57721, 104729],
+      "candidates": [
+        {
+          "id": "trees_100",
+          "parameter_overrides": {"n_estimators": 100},
+          "rationale": "Low-cost convergence boundary."
+        },
+        {
+          "id": "trees_250",
+          "parameter_overrides": {"n_estimators": 250},
+          "rationale": "Intermediate convergence point below the reference."
+        },
+        {
+          "id": "trees_1000",
+          "parameter_overrides": {"n_estimators": 1000},
+          "rationale": "High-tree reference for detecting residual Monte Carlo variation."
+        }
+      ],
+      "advance_limit": 1
+    },
+    {
+      "id": "structure",
+      "order": 2,
+      "dataset_role": "development",
+      "purpose": "Test modelling assumptions individually around the converged tree count and retain at most two structures.",
+      "inherits_from": "selected:convergence",
+      "strategy": "one_factor_at_a_time",
+      "include_inherited_configuration": true,
+      "maximum_parent_configurations": 1,
+      "candidate_budget_per_parent": 7,
+      "algorithmic_seeds": [1729, 31415, 104729],
+      "candidates": [
+        {
+          "id": "cell_distance",
+          "parameter_overrides": {"weight_mode": "cell-distance"},
+          "rationale": "Remove the group anchor while preserving cell-level distances."
+        },
+        {
+          "id": "group_distance",
+          "parameter_overrides": {"weight_mode": "group-distance"},
+          "rationale": "Test group-centroid distances instead of cell-level distances."
+        },
+        {
+          "id": "no_group_size_correction",
+          "parameter_overrides": {"group_size_correction": "none"},
+          "rationale": "Measure the contribution of target-group size correction."
+        },
+        {
+          "id": "expression_space",
+          "parameter_overrides": {"distance_space": "expression"},
+          "rationale": "Test distances without PCA projection."
+        },
+        {
+          "id": "cosine_distance",
+          "parameter_overrides": {"distance_metric": "cosine"},
+          "rationale": "Test angular rather than Euclidean similarity."
+        },
+        {
+          "id": "exponential_kernel",
+          "parameter_overrides": {"kernel": "exponential"},
+          "rationale": "Test the alternative supported distance kernel."
+        }
+      ],
+      "advance_limit": 2
+    },
+    {
+      "id": "estimator",
+      "order": 3,
+      "dataset_role": "development",
+      "purpose": "Apply a small explicit estimator shortlist to no more than two retained structures.",
+      "inherits_from": "shortlist:structure",
+      "strategy": "bounded_shortlist_expansion",
+      "include_inherited_configuration": true,
+      "maximum_parent_configurations": 2,
+      "candidate_budget_per_parent": 5,
+      "algorithmic_seeds": [1729, 31415, 104729],
+      "candidates": [
+        {
+          "id": "random_forest",
+          "parameter_overrides": {"tree_method": "random-forest"},
+          "rationale": "Compare the two supported ensemble families."
+        },
+        {
+          "id": "sqrt_features",
+          "parameter_overrides": {"max_features": "sqrt"},
+          "rationale": "Reduce feature correlation and estimator cost."
+        },
+        {
+          "id": "leaf_2",
+          "parameter_overrides": {"min_samples_leaf": 2},
+          "rationale": "Introduce mild tree regularization."
+        },
+        {
+          "id": "random_forest_sqrt",
+          "parameter_overrides": {
+            "tree_method": "random-forest",
+            "max_features": "sqrt"
+          },
+          "rationale": "Retain one predeclared estimator-feature interaction without a factorial search."
+        }
+      ],
+      "advance_limit": 3
+    }
+  ],
+  "selection_protocol": {
+    "development_role": "search_and_shortlist",
+    "validation_role": "select_one_finalist",
+    "test_role": "compare_frozen_configuration",
+    "maximum_validation_finalists": 3,
+    "freeze_before_test": true,
+    "single_global_configuration": true,
+    "test_results_can_change_selection": false
+  }
+}

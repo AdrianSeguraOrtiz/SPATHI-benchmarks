@@ -28,7 +28,7 @@ bench_init() {
 }
 
 bench_cli() {
-  python3 -m spathi_bench.cli "$@" \
+  "${BENCH_PYTHON:-python3}" -m spathi_bench.cli "$@" \
     --repo-root "$BENCH_REPO_ROOT" \
     --profile "$BENCH_PROFILE" \
     --run-root "$BENCH_RUN_ROOT"

@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "id": "full",
   "status": "planned",
+  "purpose": "benchmark",
   "description": "Publication-scale dynamic and invariant-control benchmark.",
   "generation_jobs": [],
   "inference_batches": [],
@@ -12,6 +13,7 @@
       "max_ram_gb": 128
     },
     "infer_network": {
+      "max_parallel_runs": 4,
       "max_cores": 32,
       "max_ram_gb": 128,
       "planner": "auto",

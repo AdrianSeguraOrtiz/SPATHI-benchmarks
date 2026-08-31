@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/spathi-selected-config.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "search_space",
+    "status",
+    "phase",
+    "selected_candidate",
+    "selection_evidence",
+    "test_accessed_before_freeze",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "search_space": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "status": {"enum": ["unselected", "selected"]},
+    "phase": {"enum": ["planned", "frozen"]},
+    "selected_candidate": {
+      "anyOf": [{"type": "null"}, {"$ref": "#/$defs/selected_candidate"}]
+    },
+    "selection_evidence": {
+      "anyOf": [{"type": "null"}, {"$ref": "#/$defs/selection_evidence"}]
+    },
+    "test_accessed_before_freeze": {"type": "boolean"},
+    "notes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "unselected"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "phase": {"const": "planned"},
+          "selected_candidate": {"type": "null"},
+          "selection_evidence": {"type": "null"},
+          "test_accessed_before_freeze": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "selected"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "phase": {"const": "frozen"},
+          "selected_candidate": {"$ref": "#/$defs/selected_candidate"},
+          "selection_evidence": {"$ref": "#/$defs/selection_evidence"},
+          "test_accessed_before_freeze": {"const": false}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "weight_mode",
+        "distance_space",
+        "n_components",
+        "distance_standardization",
+        "pca_svd_solver",
+        "distance_metric",
+        "kernel",
+        "bandwidth",
+        "group_size_correction",
+        "tree_method",
+        "n_estimators",
+        "max_features",
+        "min_samples_leaf",
+        "max_depth",
+        "bootstrap"
+      ],
+      "properties": {
+        "weight_mode": {
+          "enum": ["cell-distance", "cell-distance-group-anchored", "group-distance"]
+        },
+        "distance_space": {"enum": ["pca", "expression"]},
+        "n_components": {"type": "integer", "minimum": 1},
+        "distance_standardization": {"enum": ["none", "standard"]},
+        "pca_svd_solver": {"enum": ["auto", "randomized", "full"]},
+        "distance_metric": {"enum": ["euclidean", "cosine"]},
+        "kernel": {"enum": ["gaussian", "exponential"]},
+        "bandwidth": {
+          "anyOf": [
+            {"const": "auto"},
+            {"type": "number", "exclusiveMinimum": 0}
+          ]
+        },
+        "group_size_correction": {"enum": ["none", "cap-to-target"]},
+        "tree_method": {"enum": ["extra-trees", "random-forest"]},
+        "n_estimators": {"type": "integer", "minimum": 1},
+        "max_features": {
+          "anyOf": [
+            {"enum": ["sqrt", "log2"]},
+            {"type": "integer", "minimum": 1},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+          ]
+        },
+        "min_samples_leaf": {"type": "integer", "minimum": 1},
+        "max_depth": {
+          "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+        },
+        "bootstrap": {"type": ["boolean", "null"]}
+      }
+    },
+    "selected_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "spathi_commit",
+        "configuration_sha256",
+        "parameters"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+        "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "configuration_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "parameters": {"$ref": "#/$defs/parameters"}
+      }
+    },
+    "selection_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "validation_ranking",
+        "validation_ranking_sha256",
+        "search_space_sha256",
+        "validation_manifest_sha256",
+        "benchmark_summary_sha256",
+        "spathi_build_fingerprint",
+        "spathi_image_id",
+        "primary_metric",
+        "hierarchical_score",
+        "winner_candidate_id",
+        "winner_configuration_sha256",
+        "tie_breakers_applied",
+        "frozen_at"
+      ],
+      "properties": {
+        "validation_ranking": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+        },
+        "validation_ranking_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "search_space_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "validation_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "benchmark_summary_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "spathi_build_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "spathi_image_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "primary_metric": {"const": "aupr_directed"},
+        "hierarchical_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "winner_candidate_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "winner_configuration_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "tie_breakers_applied": {"const": ["stability", "cost", "simplicity"]},
+        "frozen_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

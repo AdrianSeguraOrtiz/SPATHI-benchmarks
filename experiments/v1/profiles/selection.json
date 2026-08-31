@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "id": "selection",
+  "status": "planned",
+  "purpose": "selection",
+  "description": "Validation-only comparison of at most three predeclared SPATHI finalists.",
+  "generation_jobs": [],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {
+      "max_parallel_tasks": 2,
+      "max_cores": 8,
+      "max_ram_gb": 32
+    },
+    "infer_network": {
+      "max_parallel_runs": 2,
+      "max_cores": 4,
+      "max_ram_gb": 16,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 60
+    }
+  },
+  "planned_design": {
+    "simulators": ["dyngen", "scmultisim"],
+    "replicates_per_condition": 3,
+    "regimes": ["group_only"],
+    "factors": ["bounded finalist selection"],
+    "notes": [
+      "Contains validation datasets only.",
+      "Its winner must be frozen before any test profile becomes runnable."
+    ]
+  }
+}

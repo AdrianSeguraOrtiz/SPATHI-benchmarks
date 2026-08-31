@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "id": "reduced",
   "status": "planned",
+  "purpose": "regression",
   "description": "Development-scale dynamic benchmark; request files are not frozen yet.",
   "generation_jobs": [],
   "inference_batches": [],
@@ -12,6 +13,7 @@
       "max_ram_gb": 32
     },
     "infer_network": {
+      "max_parallel_runs": 2,
       "max_cores": 8,
       "max_ram_gb": 32,
       "planner": "auto",
