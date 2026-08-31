@@ -84,7 +84,8 @@ pinned build; this does not affect the dyngen smoke.
 - GENIE3 `group_emulated` and SPATHI `group_native`;
 - 25 trees per method;
 - full generation → independently cached inference → handoff validation → independently
-  cached evaluation path.
+  cached joint projection → individual and joint evaluation → official ANDREA analysis
+  exports.
 
 This profile checks contracts, not statistical conclusions.
 At the locked seed, dyngen creates 42 genes, 35 TF candidates and seven groups, including
@@ -165,6 +166,10 @@ unchanged to `evaluate-inference`.
 The shared artifact store is keyed by the relevant simulator request and image,
 ANDREA revision/environment, dataset artifact, tool parameters, algorithmic seed and
 concrete tool image. Changing SPATHI invalidates only SPATHI inference and its downstream
-evaluation; unchanged simulated data and catalog baselines remain reusable. Cache misses
-may execute concurrently within an explicit per-profile resource limit, while state is
-published only after the deterministic ordered result set is complete.
+evaluation; unchanged simulated data and catalog baselines remain reusable. A joint
+inference view is keyed by the ordered source-artifact identities within one dataset and
+information regime, so only that view, its joint evaluation and dependent analysis ZIPs
+are invalidated. The view preserves source network rows, records source hashes and never
+claims to be a monolithic execution. Cache misses may execute concurrently within an
+explicit per-profile resource limit, while state is published only after the
+deterministic ordered result set is complete.

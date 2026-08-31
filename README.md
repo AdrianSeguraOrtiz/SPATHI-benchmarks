@@ -13,8 +13,10 @@ coupling those concerns to either scientific package.
 `smoke` is the only runnable profile. It verifies the complete contract with one small
 dyngen dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mode. Each
 tool is executed and evaluated independently so its result can be reused independently.
-The smoke has no statistical power and its SPATHI configuration is not eligible for
-scientific selection.
+The pipeline also projects those immutable results into one joint ANDREA-compatible
+source per dataset and regime, evaluates that view, and exports every official
+`analysis` handoff. The smoke has no statistical power and its SPATHI configuration is
+not eligible for scientific selection.
 
 `reduced` and `full` remain explicit planned profiles. They will not run until their
 dataset partitions and complete ANDREA request matrices are committed. The bounded
@@ -61,9 +63,9 @@ scripts/run_all.sh smoke smoke-001 --from infer
 scripts/run_all.sh smoke smoke-001 --until generate
 ```
 
-Valid stage names are `preflight`, `image`, `generate`, `infer`, `validate`, `evaluate`
-and `summarize`. Individual scripts under `scripts/` expose the same stages. A per-run
-filesystem lock rejects concurrent mutation of the same run ID.
+Valid stage names are `preflight`, `image`, `generate`, `infer`, `validate`, `integrate`,
+`evaluate`, `export` and `summarize`. Individual scripts under `scripts/` expose the
+same stages. A per-run filesystem lock rejects concurrent mutation of the same run ID.
 
 Inference and evaluation misses can run concurrently. `resources.infer_network` defines
 `max_parallel_runs`; `max_cores` and `max_ram_gb` apply to each concurrent ANDREA
@@ -77,10 +79,10 @@ than retagging an image underneath an active container.
 Artifacts live in a shared content-addressed store under `work/v1/artifacts/`. Their
 keys include the inputs that can change their contents:
 
-| Change | Generated datasets | Catalog baselines | SPATHI inference | Evaluation |
+| Change | Generated datasets | Catalog runs | SPATHI runs | Joint view/evaluation/exports |
 | --- | --- | --- | --- | --- |
-| SPATHI commit/config/image | reuse | reuse | recompute | recompute only for changed SPATHI results |
-| catalog tool image/params | reuse | recompute affected tool | reuse | recompute affected tool |
+| SPATHI commit/config/image | reuse | reuse | recompute | recompute affected dataset/regime |
+| catalog tool image/params | reuse | recompute affected tool | reuse | recompute affected dataset/regime |
 | simulator request/image | recompute affected dataset | recompute downstream | recompute downstream | recompute downstream |
 | ANDREA commit or host environment | recompute | recompute | recompute | recompute |
 
@@ -94,6 +96,27 @@ tools again merely because SPATHI changed.
 The run state records hit counts and the concrete SPATHI image ID. Catalog containers
 are pulled by immutable repository digest. SPATHI is passed to ANDREA by exact local
 image ID, eliminating mutable-tag ambiguity for the external tool.
+
+## ANDREA-compatible handoffs
+
+`scripts/run_all.sh ... --until export` produces deterministic `analysis.zip` files
+whose member lists and virtual paths come from the locked ANDREA checkout's official
+resolvers. SPATHI-benchmarks serializes them, but does not redefine their contracts.
+
+For each dataset there is a generate-data truth bundle. For every individual inference
+and evaluation there is a corresponding bundle, and each dataset/regime also has a
+joint inference and joint evaluation bundle. The joint inference report contains all
+tool IDs in one source, which is what allows ANDREA `compare-networks` to calculate
+GENIE3↔SPATHI distances. It records its source reports and hashes and explicitly marks
+`integration.monolithic_execution=false`.
+
+The ANDREA GUI can upload the inference `analysis.zip` directly to
+`evaluate-inference`; CLI users extract it and pass `run_report.json`. An evaluation
+`analysis.zip` contains the evaluation report. The compare-networks GUI accepts the
+joint inference ZIP for the networks and the joint evaluation ZIP for metrics; its CLI
+likewise consumes the extracted report paths through a comparison request. The original
+individual evaluations remain the only inputs to the scientific summary, so metrics are
+not duplicated.
 
 ## SPATHI calibration
 
@@ -157,7 +180,7 @@ cannot cross partitions. The CLI never freezes a winner as a side effect of rank
 
 ```text
 work/v1/
-├── artifacts/                   immutable shared dataset/inference/evaluation objects
+├── artifacts/                   immutable shared objects, including joint views and ZIPs
 └── <profile>/<run-id>/
     ├── input_snapshot/          frozen committed requests, schemas and locks
     ├── preflight/
@@ -165,14 +188,25 @@ work/v1/
     ├── logs/
     ├── handoff-validation.json
     ├── state.json
+    ├── exports/
+    │   ├── manifest.json
+    │   ├── datasets/<dataset>/analysis.zip
+    │   ├── inference/<dataset>/<regime>/
+    │   │   ├── individual/<run-id>/analysis.zip
+    │   │   └── joint/analysis.zip
+    │   └── evaluation/<dataset>/<regime>/
+    │       ├── individual/<run-id>/analysis.zip
+    │       └── joint/analysis.zip
     └── reports/
         ├── metrics.csv          raw ANDREA metrics plus benchmark provenance
         └── summary.json         partitioned aggregates and calibration-ready rows
 ```
 
+Every ZIP has an adjacent `analysis.zip.manifest.json` with archive and member hashes.
 The benchmark reads canonical manifests rather than discovering timestamped outputs.
-There is no extra integration script: ANDREA owns `run_report.json` and the merged
-network, while this repository validates that handoff and enriches its evaluation.
+ANDREA owns the individual `run_report.json` files and merged networks;
+SPATHI-benchmarks owns only the explicitly identified joint projection and validates it
+against ANDREA before publication.
 
 See [`experiments/v1/design.md`](experiments/v1/design.md) for the scientific design,
 information regimes, simulator panel and leakage controls.
