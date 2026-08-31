@@ -226,7 +226,7 @@ def summarize(
     state = load_state(run_root, profile_id)
     if status_at_least(state, "completed"):
         return _existing_reports(state, run_root)
-    require_status(state, "evaluated", "Summarization")
+    require_status(state, "exported", "Summarization")
     reports_dir = run_root / "reports"
     if reports_dir.exists():
         return _recover_published_reports(

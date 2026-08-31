@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from .config import (
     validate_design_contracts,
     validate_locked_repository,
 )
+from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
 from .provenance import (
     freeze_run_inputs,
@@ -40,6 +42,7 @@ from .provenance import (
 )
 from .runtime import (
     andrea_command,
+    andrea_contract_command,
     andrea_host_environment,
     catalog_image_lease,
     catalog_image_leases,
@@ -289,8 +292,18 @@ def _initial_state(
         "benchmarks": [],
         "datasets": [],
         "inference_runs": [],
+        "integrated_inference_runs": [],
         "evaluations": [],
-        "cache": {"dataset_hits": 0, "inference_hits": 0, "evaluation_hits": 0},
+        "joint_evaluations": [],
+        "analysis_bundles": [],
+        "cache": {
+            "dataset_hits": 0,
+            "inference_hits": 0,
+            "integration_hits": 0,
+            "evaluation_hits": 0,
+            "joint_evaluation_hits": 0,
+            "bundle_hits": 0,
+        },
         "status": "preflighted",
     }
 
@@ -766,9 +779,10 @@ def _validate_single_run_report(
     tools = report.get("tools") or {}
     selected = tools.get("selected")
     status_by_tool = tools.get("status_by_tool") or {}
-    if report.get("status") != "executed" or selected != [run_id]:
+    if report.get("run_id") != run_id or report.get("status") != "executed" or selected != [run_id]:
         raise BenchmarkConfigError(
-            f"Inference artifact did not execute exactly {run_id!r}: status={report.get('status')!r}, "
+            f"Inference artifact did not execute exactly {run_id!r}: "
+            f"report_run_id={report.get('run_id')!r}, status={report.get('status')!r}, "
             f"selected={selected!r}"
         )
     if status_by_tool.get(run_id) not in {"completed", "completed_with_warnings"}:
@@ -1266,6 +1280,243 @@ def validate_handoffs(
     return report_path
 
 
+def _integration_spec(
+    *,
+    state: dict[str, Any],
+    dataset: dict[str, Any],
+    regime: str,
+    inference_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    artifact_keys = sorted(str(run["artifact"]["key"]) for run in inference_runs)
+    fingerprints = {canonical_json_sha256(run["dataset_fingerprint"]) for run in inference_runs}
+    if len(fingerprints) != 1:
+        raise BenchmarkConfigError(
+            f"Inference runs for {dataset['dataset_id']!r}/{regime!r} have different "
+            "dataset fingerprints"
+        )
+    return {
+        "schema_version": "1.0",
+        "integration_contract": "joint-inference-view-v1",
+        "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
+        "andrea_environment": state["host_environment"]["fingerprint"],
+        "dataset_artifact": dataset["dataset_artifact"]["key"],
+        "dataset_id": dataset["dataset_id"],
+        "dataset_fingerprint": inference_runs[0]["dataset_fingerprint"],
+        "regime": regime,
+        "inference_artifacts": artifact_keys,
+    }
+
+
+def _joint_run_id(dataset_id: str, regime: str) -> str:
+    return f"joint-{_log_token(dataset_id)}-{_log_token(regime)}"
+
+
+def _validate_integrated_run_report(
+    report_path: Path,
+    *,
+    dataset_id: str,
+    regime: str,
+    run_id: str,
+    source_run_ids: list[str],
+) -> dict[str, Any]:
+    report = load_json_object(report_path, "integrated inference run report")
+    integration = report.get("integration")
+    tools = report.get("tools")
+    if report.get("run_id") != run_id or report.get("status") != "executed":
+        raise BenchmarkConfigError("Integrated inference run report has the wrong identity or status")
+    if (report.get("dataset") or {}).get("id") != dataset_id:
+        raise BenchmarkConfigError("Integrated inference run report has the wrong dataset identity")
+    if not isinstance(integration, dict) or any(
+        (
+            integration.get("schema_version") != "1.0",
+            integration.get("kind") != "joint-inference-view",
+            integration.get("producer") != "spathi-benchmarks",
+            integration.get("regime") != regime,
+            integration.get("monolithic_execution") is not False,
+        )
+    ):
+        raise BenchmarkConfigError("Integrated inference run report has an invalid integration contract")
+    if not isinstance(tools, dict) or sorted(tools.get("selected") or []) != sorted(source_run_ids):
+        raise BenchmarkConfigError("Integrated inference run report has the wrong tool run IDs")
+    sources = integration.get("sources")
+    observed_source_ids = (
+        sorted(str(source.get("source_run_id")) for source in sources if isinstance(source, dict))
+        if isinstance(sources, list)
+        else []
+    )
+    if observed_source_ids != sorted(source_run_ids):
+        raise BenchmarkConfigError("Integrated inference provenance has the wrong source run IDs")
+    return report
+
+
+def _execute_integration_task(
+    task: dict[str, Any],
+    *,
+    store: ArtifactStore,
+    repo_root: Path,
+    andrea_repo: Path,
+    run_root: Path,
+) -> Artifact:
+    dataset_id = str(task["dataset"]["dataset_id"])
+    regime = str(task["regime"])
+    with store.staging_directory(task["key"]) as staging:
+        output_root = staging / "output"
+
+        def validate_contract(report_path: Path) -> None:
+            andrea_contract_command(
+                [
+                    "validate-inference",
+                    "--andrea-repo",
+                    str(andrea_repo),
+                    "--run-report",
+                    str(report_path),
+                ],
+                repo_root=repo_root,
+                andrea_repo=andrea_repo,
+                log_path=run_root
+                / "logs"
+                / f"35-{_log_token(dataset_id)}-{_log_token(regime)}.log",
+            )
+
+        integrate_inference_runs(
+            run_report_paths=task["run_report_paths"],
+            output_dir=output_root,
+            combined_run_id=task["run_id"],
+            regime=regime,
+            contract_validator=validate_contract,
+        )
+        return store.publish_from_temp(
+            staging,
+            kind="joint-inference",
+            spec=task["spec"],
+        )
+
+
+def integrate_inference(
+    *,
+    repo_root: Path,
+    profile_id: str,
+    run_root: Path,
+    andrea_repo: Path,
+) -> Path:
+    """Build one ANDREA-compatible joint inference view per dataset and regime."""
+
+    state = _load_existing_state(repo_root, profile_id, run_root)
+    if state is None:
+        raise BenchmarkConfigError("Inference integration requires validated inference")
+    store = _artifact_store(run_root)
+    if status_at_least(state, "integrated"):
+        for integrated in state["integrated_inference_runs"]:
+            artifact = _artifact_from_ref(store, integrated["artifact"])
+            report_path = _artifact_member_from_state(
+                artifact,
+                integrated.get("run_report"),
+                "integrated inference run report",
+            )
+            _validate_integrated_run_report(
+                report_path,
+                dataset_id=integrated["dataset_id"],
+                regime=integrated["regime"],
+                run_id=integrated["run_id"],
+                source_run_ids=integrated["source_run_ids"],
+            )
+        return state_path(run_root)
+    require_status(state, "validated", "Inference integration")
+    frozen_root = frozen_repository_root(run_root)
+    observed_andrea = _validate_andrea_repository(frozen_root, andrea_repo)
+    _validate_state_andrea(state, observed_andrea)
+    _validate_host_environment(state, andrea_host_environment())
+
+    datasets = {item["dataset_id"]: item for item in state["datasets"]}
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for inference in state["inference_runs"]:
+        dataset_id = str(inference["dataset_id"])
+        regime = str(inference["regime"])
+        if dataset_id not in datasets:
+            raise BenchmarkConfigError(
+                f"Inference run references an unknown benchmark dataset: {dataset_id!r}"
+            )
+        grouped[(dataset_id, regime)].append(inference)
+    if not grouped:
+        raise BenchmarkConfigError("Inference integration found no dataset/regime groups")
+
+    integrated_runs: list[dict[str, Any]] = []
+    integration_hits = 0
+    for (dataset_id, regime), inference_runs in sorted(grouped.items()):
+        ordered_runs = sorted(inference_runs, key=lambda item: str(item["run_id"]))
+        source_run_ids = [str(item["run_id"]) for item in ordered_runs]
+        if len(set(source_run_ids)) != len(source_run_ids):
+            raise BenchmarkConfigError(
+                f"Duplicate inference run IDs in {dataset_id!r}/{regime!r}: {source_run_ids}"
+            )
+        report_paths: list[Path] = []
+        for inference in ordered_runs:
+            artifact = _artifact_from_ref(store, inference["artifact"])
+            report_paths.append(
+                _artifact_member_from_state(
+                    artifact,
+                    inference.get("run_report"),
+                    "inference run report",
+                )
+            )
+        dataset = datasets[dataset_id]
+        spec = _integration_spec(
+            state=state,
+            dataset=dataset,
+            regime=regime,
+            inference_runs=ordered_runs,
+        )
+        key = store.key_for("joint-inference", spec)
+        artifact = store.lookup(key)
+        cache_hit = artifact is not None
+        run_id = _joint_run_id(dataset_id, regime)
+        if artifact is None:
+            artifact = _execute_integration_task(
+                {
+                    "key": key,
+                    "spec": spec,
+                    "dataset": dataset,
+                    "regime": regime,
+                    "run_id": run_id,
+                    "run_report_paths": report_paths,
+                },
+                store=store,
+                repo_root=repo_root,
+                andrea_repo=andrea_repo,
+                run_root=run_root,
+            )
+        else:
+            integration_hits += 1
+        report_path = artifact.file("output/run_report.json").resolve()
+        report = _validate_integrated_run_report(
+            report_path,
+            dataset_id=dataset_id,
+            regime=regime,
+            run_id=run_id,
+            source_run_ids=source_run_ids,
+        )
+        integrated_runs.append(
+            {
+                "dataset_id": dataset_id,
+                "regime": regime,
+                "run_id": run_id,
+                "source_run_ids": source_run_ids,
+                "source_inference_artifacts": [
+                    str(item["artifact"]["key"]) for item in ordered_runs
+                ],
+                "dataset_fingerprint": (report.get("dataset") or {}).get("fingerprint"),
+                "run_report": str(report_path),
+                "artifact": _artifact_ref(artifact, cache_hit=cache_hit),
+            }
+        )
+
+    state["integrated_inference_runs"] = integrated_runs
+    state["cache"]["integration_hits"] = integration_hits
+    state["status"] = "integrated"
+    state["updated_at"] = _utc_now()
+    return write_state(run_root, state)
+
+
 def _evaluation_spec(
     *,
     state: dict[str, Any],
@@ -1310,7 +1561,10 @@ def _execute_evaluation_task(
             andrea_repo=andrea_repo,
             log_path=run_root
             / "logs"
-            / f"40-{_log_token(dataset['dataset_id'])}-{_log_token(inference['run_id'])}.log",
+            / (
+                f"50-{_log_token(dataset['dataset_id'])}-{_log_token(task['scope'])}-"
+                f"{_log_token(inference['run_id'])}.log"
+            ),
         )
         unique_direct_manifest(output_root, "evaluation_report.json")
         return store.publish_from_temp(
@@ -1329,13 +1583,19 @@ def evaluate(
 ) -> Path:
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
-        raise BenchmarkConfigError("Evaluation requires validated inference")
+        raise BenchmarkConfigError("Evaluation requires integrated inference")
     if status_at_least(state, "evaluated"):
         store = _artifact_store(run_root)
-        for evaluation in state["evaluations"]:
-            _artifact_from_ref(store, evaluation["artifact"])
+        for collection in (state["evaluations"], state["joint_evaluations"]):
+            for evaluation in collection:
+                artifact = _artifact_from_ref(store, evaluation["artifact"])
+                _artifact_member_from_state(
+                    artifact,
+                    evaluation.get("evaluation_report"),
+                    "evaluation report",
+                )
         return state_path(run_root)
-    require_status(state, "validated", "Evaluation")
+    require_status(state, "integrated", "Evaluation")
     frozen_root = frozen_repository_root(run_root)
     observed_andrea = _validate_andrea_repository(frozen_root, andrea_repo)
     _validate_state_andrea(state, observed_andrea)
@@ -1345,36 +1605,46 @@ def evaluate(
     max_parallel_runs = int(profile["resources"]["infer_network"]["max_parallel_runs"])
     datasets = {item["dataset_id"]: item for item in state["datasets"]}
     evaluations: list[dict[str, Any]] = []
+    joint_evaluations: list[dict[str, Any]] = []
     evaluation_hits = 0
+    joint_evaluation_hits = 0
     prepared: list[dict[str, Any]] = []
 
-    for inference in state["inference_runs"]:
-        inference_artifact = _artifact_from_ref(store, inference["artifact"])
-        dataset = datasets[inference["dataset_id"]]
-        _dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
-        run_report = _artifact_member_from_state(
-            inference_artifact,
-            inference.get("run_report"),
-            "inference run report",
-        )
-        spec = _evaluation_spec(state=state, dataset=dataset, inference=inference)
-        key = store.key_for("evaluation", spec)
-        artifact = store.lookup(key)
-        cache_hit = artifact is not None
-        if artifact is not None:
-            evaluation_hits += 1
-        prepared.append(
-            {
-                "inference": inference,
-                "dataset": dataset,
-                "run_report": run_report,
-                "ground_truth_manifest": ground_truth_manifest,
-                "spec": spec,
-                "key": key,
-                "artifact": artifact,
-                "cache_hit": cache_hit,
-            }
-        )
+    for scope, inference_collection in (
+        ("individual", state["inference_runs"]),
+        ("joint", state["integrated_inference_runs"]),
+    ):
+        for inference in inference_collection:
+            inference_artifact = _artifact_from_ref(store, inference["artifact"])
+            dataset = datasets[inference["dataset_id"]]
+            _dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
+            run_report = _artifact_member_from_state(
+                inference_artifact,
+                inference.get("run_report"),
+                "inference run report",
+            )
+            spec = _evaluation_spec(state=state, dataset=dataset, inference=inference)
+            key = store.key_for("evaluation", spec)
+            artifact = store.lookup(key)
+            cache_hit = artifact is not None
+            if artifact is not None:
+                if scope == "individual":
+                    evaluation_hits += 1
+                else:
+                    joint_evaluation_hits += 1
+            prepared.append(
+                {
+                    "scope": scope,
+                    "inference": inference,
+                    "dataset": dataset,
+                    "run_report": run_report,
+                    "ground_truth_manifest": ground_truth_manifest,
+                    "spec": spec,
+                    "key": key,
+                    "artifact": artifact,
+                    "cache_hit": cache_hit,
+                }
+            )
 
     missing = [(index, task) for index, task in enumerate(prepared) if task["artifact"] is None]
     if missing:
@@ -1413,37 +1683,434 @@ def evaluate(
             artifact.path / "output",
             "evaluation_report.json",
         )
-        evaluations.append(
+        common = {
+            "run_report": inference["run_report"],
+            "evaluation_report": str(evaluation_report),
+            "inference_artifact": inference["artifact"],
+            "artifact": _artifact_ref(artifact, cache_hit=bool(task["cache_hit"])),
+        }
+        if task["scope"] == "individual":
+            evaluations.append(
+                {
+                    **{
+                        key: inference[key]
+                        for key in (
+                            "dataset_id",
+                            "batch_id",
+                            "batch_kind",
+                            "regime",
+                            "run_id",
+                            "tool_id",
+                            "tool_origin",
+                            "configuration_id",
+                            "selection_role",
+                            "algorithm_seed",
+                            "algorithm_seed_parameter",
+                            "family",
+                            "configuration_sha256",
+                            "execution_sha256",
+                            "tool_image",
+                        )
+                    },
+                    **common,
+                }
+            )
+        else:
+            joint_evaluations.append(
+                {
+                    **{
+                        key: inference[key]
+                        for key in (
+                            "dataset_id",
+                            "regime",
+                            "run_id",
+                            "source_run_ids",
+                            "source_inference_artifacts",
+                            "dataset_fingerprint",
+                        )
+                    },
+                    **common,
+                }
+            )
+
+    state["evaluations"] = evaluations
+    state["joint_evaluations"] = joint_evaluations
+    state["cache"]["evaluation_hits"] = evaluation_hits
+    state["cache"]["joint_evaluation_hits"] = joint_evaluation_hits
+    state["status"] = "evaluated"
+    state["updated_at"] = _utc_now()
+    return write_state(run_root, state)
+
+
+def _analysis_bundle_spec(
+    *,
+    state: dict[str, Any],
+    source_artifact: dict[str, Any],
+    producer_command: str,
+    dataset_id: str,
+    scope: str,
+    regime: str | None,
+    run_id: str | None,
+) -> dict[str, Any]:
+    identity: dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "scope": scope,
+    }
+    if regime is not None:
+        identity["regime"] = regime
+    if run_id is not None:
+        identity["run_id"] = run_id
+    return {
+        "schema_version": "1.0",
+        "bundle_contract": "andrea-analysis-v1",
+        "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
+        "andrea_environment": state["host_environment"]["fingerprint"],
+        "producer_command": producer_command,
+        "source_artifact": source_artifact["key"],
+        "identity": identity,
+    }
+
+
+def _validate_analysis_bundle_artifact(artifact: Artifact) -> tuple[Path, Path]:
+    archive = artifact.file("analysis.zip").resolve()
+    manifest_path = artifact.file("analysis.zip.manifest.json").resolve()
+    manifest = load_json_object(manifest_path, "analysis bundle manifest")
+    archive_entry = manifest.get("archive")
+    if (
+        manifest.get("schema_version") != "1.0"
+        or manifest.get("status") != "complete"
+        or not isinstance(archive_entry, dict)
+        or archive_entry.get("filename") != "analysis.zip"
+        or archive_entry.get("sha256") != sha256_file(archive)
+        or archive_entry.get("size") != archive.stat().st_size
+    ):
+        raise BenchmarkConfigError(f"Invalid analysis bundle artifact: {artifact.key}")
+    bundle = manifest.get("bundle")
+    if not isinstance(bundle, dict) or bundle.get("id") != "analysis":
+        raise BenchmarkConfigError(f"Analysis bundle manifest has the wrong bundle ID: {artifact.key}")
+    return archive, manifest_path
+
+
+def _execute_analysis_export_task(
+    task: dict[str, Any],
+    *,
+    store: ArtifactStore,
+    repo_root: Path,
+    andrea_repo: Path,
+    run_root: Path,
+) -> Artifact:
+    with store.staging_directory(task["key"]) as staging:
+        arguments = [
+            "export-analysis",
+            "--andrea-repo",
+            str(andrea_repo),
+            "--producer-command",
+            task["producer_command"],
+            "--root",
+            str(task["source_root"]),
+            "--dataset-id",
+            task["dataset_id"],
+            "--output",
+            str(staging / "analysis.zip"),
+        ]
+        andrea_contract_command(
+            arguments,
+            repo_root=repo_root,
+            andrea_repo=andrea_repo,
+            log_path=run_root
+            / "logs"
+            / (
+                f"60-{_log_token(task['producer_command'])}-{_log_token(task['dataset_id'])}-"
+                f"{_log_token(task['scope'])}-{_log_token(task.get('run_id') or 'dataset')}.log"
+            ),
+        )
+        artifact = store.publish_from_temp(
+            staging,
+            kind="analysis-bundle",
+            spec=task["spec"],
+        )
+    _validate_analysis_bundle_artifact(artifact)
+    return artifact
+
+
+def _export_component(value: Any, label: str) -> str:
+    component = str(value)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", component) is None:
+        raise BenchmarkConfigError(f"{label} is not a portable export path component: {value!r}")
+    return component
+
+
+def _bundle_export_directory(bundle: dict[str, Any]) -> Path:
+    dataset_id = _export_component(bundle["dataset_id"], "dataset_id")
+    producer = bundle["producer_command"]
+    if producer == "generate-data":
+        if bundle["scope"] != "dataset":
+            raise BenchmarkConfigError("generate-data analysis bundles must have dataset scope")
+        return Path("datasets") / dataset_id
+    category = {
+        "infer-network": "inference",
+        "evaluate-inference": "evaluation",
+    }.get(producer)
+    if category is None:
+        raise BenchmarkConfigError(f"Unknown analysis bundle producer: {producer!r}")
+    regime = _export_component(bundle.get("regime"), "regime")
+    scope = bundle.get("scope")
+    if scope == "joint":
+        return Path(category) / dataset_id / regime / "joint"
+    if scope == "individual":
+        run_id = _export_component(bundle.get("run_id"), "run_id")
+        return Path(category) / dataset_id / regime / "individual" / run_id
+    raise BenchmarkConfigError(f"Invalid analysis bundle scope: {scope!r}")
+
+
+def _tree_file_hashes(root: Path) -> dict[str, dict[str, Any]]:
+    if root.is_symlink() or not root.is_dir():
+        raise BenchmarkConfigError(f"Export tree is missing or invalid: {root}")
+    files: dict[str, dict[str, Any]] = {}
+    for directory, directory_names, file_names in os.walk(root, followlinks=False):
+        directory_path = Path(directory)
+        for name in directory_names:
+            if (directory_path / name).is_symlink():
+                raise BenchmarkConfigError(f"Export tree contains a symbolic link: {directory_path / name}")
+        for name in file_names:
+            path = directory_path / name
+            if path.is_symlink() or not path.is_file():
+                raise BenchmarkConfigError(f"Export tree contains a non-regular file: {path}")
+            relative = path.relative_to(root).as_posix()
+            files[relative] = {"sha256": sha256_file(path), "size": path.stat().st_size}
+    return files
+
+
+def _materialize_exports(
+    *,
+    run_root: Path,
+    profile_id: str,
+    bundles: list[dict[str, Any]],
+    store: ArtifactStore,
+) -> Path:
+    destination = run_root / "exports"
+    staging = Path(tempfile.mkdtemp(prefix=".exports-", dir=run_root))
+    try:
+        manifest_entries: list[dict[str, Any]] = []
+        observed_directories: set[str] = set()
+        for bundle in bundles:
+            source_artifact = _artifact_from_ref(store, bundle["source_artifact"])
+            bundle_artifact = _artifact_from_ref(store, bundle["artifact"])
+            archive, sidecar = _validate_analysis_bundle_artifact(bundle_artifact)
+            relative_directory = _bundle_export_directory(bundle)
+            directory_key = relative_directory.as_posix()
+            if directory_key in observed_directories:
+                raise BenchmarkConfigError(f"Analysis bundle export path collision: {directory_key}")
+            observed_directories.add(directory_key)
+            output_directory = staging / relative_directory
+            output_directory.mkdir(parents=True)
+            output_archive = output_directory / "analysis.zip"
+            output_sidecar = output_directory / "analysis.zip.manifest.json"
+            shutil.copyfile(archive, output_archive)
+            shutil.copyfile(sidecar, output_sidecar)
+            entry = {
+                "producer_command": bundle["producer_command"],
+                "scope": bundle["scope"],
+                "dataset_id": bundle["dataset_id"],
+                "analysis_zip": output_archive.relative_to(staging).as_posix(),
+                "analysis_manifest": output_sidecar.relative_to(staging).as_posix(),
+                "archive_sha256": sha256_file(output_archive),
+                "manifest_sha256": sha256_file(output_sidecar),
+                "source_artifact": source_artifact.key.value,
+                "bundle_artifact": bundle_artifact.key.value,
+            }
+            if bundle.get("regime") is not None:
+                entry["regime"] = bundle["regime"]
+            if bundle.get("run_id") is not None:
+                entry["run_id"] = bundle["run_id"]
+            manifest_entries.append(entry)
+        export_manifest = {
+            "schema_version": "1.0",
+            "status": "complete",
+            "profile_id": profile_id,
+            "bundles": manifest_entries,
+        }
+        _write_json(staging / "manifest.json", export_manifest)
+        expected_files = _tree_file_hashes(staging)
+        if destination.exists():
+            if _tree_file_hashes(destination) != expected_files:
+                raise BenchmarkConfigError(
+                    f"Existing exports directory differs from the immutable bundle set: {destination}"
+                )
+        else:
+            os.rename(staging, destination)
+        for bundle, manifest_entry in zip(bundles, manifest_entries, strict=True):
+            bundle["export_zip"] = str((destination / manifest_entry["analysis_zip"]).resolve())
+            bundle["export_manifest"] = str(
+                (destination / manifest_entry["analysis_manifest"]).resolve()
+            )
+        return (destination / "manifest.json").resolve()
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def export_analysis(
+    *,
+    repo_root: Path,
+    profile_id: str,
+    run_root: Path,
+    andrea_repo: Path,
+) -> Path:
+    """Export official ANDREA analysis ZIPs for every pipeline handoff."""
+
+    state = _load_existing_state(repo_root, profile_id, run_root)
+    if state is None:
+        raise BenchmarkConfigError("Analysis export requires completed evaluations")
+    store = _artifact_store(run_root)
+    if status_at_least(state, "exported"):
+        state["exports_manifest"] = str(
+            _materialize_exports(
+                run_root=run_root,
+                profile_id=profile_id,
+                bundles=state["analysis_bundles"],
+                store=store,
+            )
+        )
+        return state_path(run_root)
+    require_status(state, "evaluated", "Analysis export")
+    frozen_root = frozen_repository_root(run_root)
+    observed_andrea = _validate_andrea_repository(frozen_root, andrea_repo)
+    _validate_state_andrea(state, observed_andrea)
+    _validate_host_environment(state, andrea_host_environment())
+
+    datasets = {item["dataset_id"]: item for item in state["datasets"]}
+    tasks: list[dict[str, Any]] = []
+
+    def add_task(
+        *,
+        producer_command: str,
+        scope: str,
+        dataset_id: str,
+        source_reference: dict[str, Any],
+        source_root: Path,
+        regime: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        spec = _analysis_bundle_spec(
+            state=state,
+            source_artifact=source_reference,
+            producer_command=producer_command,
+            dataset_id=dataset_id,
+            scope=scope,
+            regime=regime,
+            run_id=run_id,
+        )
+        key = store.key_for("analysis-bundle", spec)
+        artifact = store.lookup(key)
+        tasks.append(
             {
-                **{
-                    key: inference[key]
-                    for key in (
-                        "dataset_id",
-                        "batch_id",
-                        "batch_kind",
-                        "regime",
-                        "run_id",
-                        "tool_id",
-                        "tool_origin",
-                        "configuration_id",
-                        "selection_role",
-                        "algorithm_seed",
-                        "algorithm_seed_parameter",
-                        "family",
-                        "configuration_sha256",
-                        "execution_sha256",
-                        "tool_image",
-                    )
-                },
-                "run_report": inference["run_report"],
-                "evaluation_report": str(evaluation_report),
-                "inference_artifact": inference["artifact"],
-                "artifact": _artifact_ref(artifact, cache_hit=bool(task["cache_hit"])),
+                "producer_command": producer_command,
+                "scope": scope,
+                "dataset_id": dataset_id,
+                "regime": regime,
+                "run_id": run_id,
+                "source_artifact": source_reference,
+                "source_root": source_root,
+                "spec": spec,
+                "key": key,
+                "artifact": artifact,
+                "cache_hit": artifact is not None,
             }
         )
 
-    state["evaluations"] = evaluations
-    state["cache"]["evaluation_hits"] = evaluation_hits
-    state["status"] = "evaluated"
+    for dataset_id, dataset in sorted(datasets.items()):
+        dataset_manifest, _truth = _validated_dataset_paths(store, dataset)
+        add_task(
+            producer_command="generate-data",
+            scope="dataset",
+            dataset_id=dataset_id,
+            source_reference=dataset["dataset_artifact"],
+            source_root=dataset_manifest.parent.parent.parent,
+        )
+    for scope, collection in (
+        ("individual", state["inference_runs"]),
+        ("joint", state["integrated_inference_runs"]),
+    ):
+        for inference in collection:
+            artifact = _artifact_from_ref(store, inference["artifact"])
+            report = _artifact_member_from_state(
+                artifact,
+                inference.get("run_report"),
+                "inference run report",
+            )
+            add_task(
+                producer_command="infer-network",
+                scope=scope,
+                dataset_id=inference["dataset_id"],
+                regime=inference["regime"],
+                run_id=inference["run_id"] if scope == "individual" else None,
+                source_reference=inference["artifact"],
+                source_root=report.parent,
+            )
+    for scope, collection in (
+        ("individual", state["evaluations"]),
+        ("joint", state["joint_evaluations"]),
+    ):
+        for evaluation in collection:
+            artifact = _artifact_from_ref(store, evaluation["artifact"])
+            report = _artifact_member_from_state(
+                artifact,
+                evaluation.get("evaluation_report"),
+                "evaluation report",
+            )
+            add_task(
+                producer_command="evaluate-inference",
+                scope=scope,
+                dataset_id=evaluation["dataset_id"],
+                regime=evaluation["regime"],
+                run_id=evaluation["run_id"] if scope == "individual" else None,
+                source_reference=evaluation["artifact"],
+                source_root=report.parent,
+            )
+
+    bundle_hits = 0
+    analysis_bundles: list[dict[str, Any]] = []
+    for task in tasks:
+        artifact = task["artifact"]
+        if artifact is None:
+            artifact = _execute_analysis_export_task(
+                task,
+                store=store,
+                repo_root=repo_root,
+                andrea_repo=andrea_repo,
+                run_root=run_root,
+            )
+        else:
+            bundle_hits += 1
+            _validate_analysis_bundle_artifact(artifact)
+        if not isinstance(artifact, Artifact):
+            raise RuntimeError("Analysis export task completed without an artifact")
+        archive, manifest = _validate_analysis_bundle_artifact(artifact)
+        record = {
+            "producer_command": task["producer_command"],
+            "scope": task["scope"],
+            "dataset_id": task["dataset_id"],
+            "source_artifact": task["source_artifact"],
+            "analysis_zip": str(archive),
+            "analysis_manifest": str(manifest),
+            "artifact": _artifact_ref(artifact, cache_hit=bool(task["cache_hit"])),
+        }
+        if task["regime"] is not None:
+            record["regime"] = task["regime"]
+        if task["run_id"] is not None:
+            record["run_id"] = task["run_id"]
+        analysis_bundles.append(record)
+
+    exports_manifest = _materialize_exports(
+        run_root=run_root,
+        profile_id=profile_id,
+        bundles=analysis_bundles,
+        store=store,
+    )
+    state["analysis_bundles"] = analysis_bundles
+    state["exports_manifest"] = str(exports_manifest)
+    state["cache"]["bundle_hits"] = bundle_hits
+    state["status"] = "exported"
     state["updated_at"] = _utc_now()
     return write_state(run_root, state)

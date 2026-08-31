@@ -11,10 +11,12 @@ import spathi_bench.pipeline as pipeline
 from spathi_bench.artifacts import ArtifactKey
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.pipeline import (
+    _analysis_bundle_spec,
     _artifact_store,
     _evaluation_spec,
     _generation_spec,
     _inference_spec,
+    _integration_spec,
     _spathi_build_fingerprint,
     build_spathi_image,
 )
@@ -172,6 +174,98 @@ def test_spathi_change_invalidates_only_spathi_inference_and_evaluation() -> Non
     ) != ArtifactKey.from_spec(
         "evaluation",
         _evaluation_spec(state=state, dataset=dataset, inference=new_spathi_inference),
+    )
+
+    baseline_for_joint = {
+        **baseline_inference,
+        "run_id": "genie3",
+    }
+    old_spathi_for_joint = {
+        **old_spathi_inference,
+        "run_id": "spathi_candidate",
+    }
+    new_spathi_for_joint = {
+        **new_spathi_inference,
+        "run_id": "spathi_candidate",
+    }
+    old_joint_spec = _integration_spec(
+        state=state,
+        dataset=dataset,
+        regime="group_only",
+        inference_runs=[baseline_for_joint, old_spathi_for_joint],
+    )
+    new_joint_spec = _integration_spec(
+        state=state,
+        dataset=dataset,
+        regime="group_only",
+        inference_runs=[baseline_for_joint, new_spathi_for_joint],
+    )
+    old_joint_key = ArtifactKey.from_spec("joint-inference", old_joint_spec)
+    new_joint_key = ArtifactKey.from_spec("joint-inference", new_joint_spec)
+    assert old_joint_key != new_joint_key
+
+    old_joint = {
+        "artifact": {"key": old_joint_key.value},
+        "dataset_fingerprint": baseline_inference["dataset_fingerprint"],
+    }
+    new_joint = {
+        "artifact": {"key": new_joint_key.value},
+        "dataset_fingerprint": baseline_inference["dataset_fingerprint"],
+    }
+    assert ArtifactKey.from_spec(
+        "evaluation",
+        _evaluation_spec(state=state, dataset=dataset, inference=old_joint),
+    ) != ArtifactKey.from_spec(
+        "evaluation",
+        _evaluation_spec(state=state, dataset=dataset, inference=new_joint),
+    )
+
+    baseline_bundle = ArtifactKey.from_spec(
+        "analysis-bundle",
+        _analysis_bundle_spec(
+            state=state,
+            source_artifact=baseline_inference["artifact"],
+            producer_command="infer-network",
+            dataset_id="dataset_a",
+            scope="individual",
+            regime="group_only",
+            run_id="genie3",
+        ),
+    )
+    assert baseline_bundle == ArtifactKey.from_spec(
+        "analysis-bundle",
+        _analysis_bundle_spec(
+            state=state,
+            source_artifact=deepcopy(baseline_inference["artifact"]),
+            producer_command="infer-network",
+            dataset_id="dataset_a",
+            scope="individual",
+            regime="group_only",
+            run_id="genie3",
+        ),
+    )
+    assert ArtifactKey.from_spec(
+        "analysis-bundle",
+        _analysis_bundle_spec(
+            state=state,
+            source_artifact=old_joint["artifact"],
+            producer_command="infer-network",
+            dataset_id="dataset_a",
+            scope="joint",
+            regime="group_only",
+            run_id=None,
+        ),
+    ) != ArtifactKey.from_spec(
+        "analysis-bundle",
+        _analysis_bundle_spec(
+            state=state,
+            source_artifact=new_joint["artifact"],
+            producer_command="infer-network",
+            dataset_id="dataset_a",
+            scope="joint",
+            regime="group_only",
+            run_id=None,
+        ),
     )
 
 

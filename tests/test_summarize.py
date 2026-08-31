@@ -213,10 +213,10 @@ def _evaluated_run(
     write_state(
         run_root,
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "profile_id": "smoke",
             "purpose": "smoke",
-            "status": "evaluated",
+            "status": "exported",
             "artifact_store": str(store.root),
             "datasets": [_dataset("dyngen-1729", 1729)],
             "evaluations": evaluations,
@@ -277,20 +277,20 @@ def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path)
     }
 
 
-def test_summarize_requires_evaluated_state_and_is_idempotent(tmp_path: Path) -> None:
+def test_summarize_requires_exported_state_and_is_idempotent(tmp_path: Path) -> None:
     repo_root = tmp_path / "benchmark-repository"
     repo_root.mkdir()
     run_root = tmp_path / "incomplete"
     write_state(
         run_root,
         {
-            "schema_version": "2.0",
+            "schema_version": "3.0",
             "profile_id": "smoke",
             "status": "inferred",
             "evaluations": [],
         },
     )
-    with pytest.raises(BenchmarkConfigError, match="requires benchmark status 'evaluated'"):
+    with pytest.raises(BenchmarkConfigError, match="requires benchmark status 'exported'"):
         summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
 
     repo_root, evaluated = _evaluated_run(tmp_path / "second")

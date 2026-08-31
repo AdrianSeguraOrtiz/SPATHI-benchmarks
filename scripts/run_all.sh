@@ -28,14 +28,16 @@ while (( $# > 0 )); do
   esac
 done
 
-STAGES=(preflight image generate infer validate evaluate summarize)
+STAGES=(preflight image generate infer validate integrate evaluate export summarize)
 SCRIPTS=(
   00_preflight.sh
   05_build_spathi_image.sh
   10_generate_data.sh
   20_run_inference.sh
   30_validate_handoff.sh
+  35_integrate_inference.sh
   40_evaluate.sh
+  45_export_analysis.sh
   50_summarize.sh
 )
 

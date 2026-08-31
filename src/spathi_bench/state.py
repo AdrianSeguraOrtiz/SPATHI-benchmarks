@@ -12,15 +12,17 @@ from typing import Any
 
 from .config import BenchmarkConfigError, load_json_object
 
-STATE_SCHEMA_VERSION = "2.0"
+STATE_SCHEMA_VERSION = "3.0"
 STAGE_ORDER = {
     "preflighted": 0,
     "image_ready": 1,
     "generated": 2,
     "inferred": 3,
     "validated": 4,
-    "evaluated": 5,
-    "completed": 6,
+    "integrated": 5,
+    "evaluated": 6,
+    "exported": 7,
+    "completed": 8,
 }
 
 

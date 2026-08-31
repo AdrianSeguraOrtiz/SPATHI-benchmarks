@@ -31,7 +31,9 @@ from .doctor import run_doctor
 from .pipeline import (
     build_spathi_image,
     evaluate,
+    export_analysis,
     generate_data,
+    integrate_inference,
     preflight,
     run_inference,
     validate_handoffs,
@@ -130,8 +132,18 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser("validate", help="validate evaluation handoffs")
     _add_common(validate_parser)
 
+    integrate_parser = subparsers.add_parser(
+        "integrate", help="build joint ANDREA inference views by dataset and regime"
+    )
+    _add_common(integrate_parser, andrea_repository=True)
+
     evaluate_parser = subparsers.add_parser("evaluate", help="run ANDREA evaluate-inference")
     _add_common(evaluate_parser, andrea_repository=True)
+
+    export_parser = subparsers.add_parser(
+        "export", help="write official ANDREA analysis ZIPs for every handoff"
+    )
+    _add_common(export_parser, andrea_repository=True)
 
     summarize_parser = subparsers.add_parser("summarize", help="combine evaluation metrics")
     _add_common(summarize_parser)
@@ -306,8 +318,18 @@ def _dispatch(
             run_root=args.run_root,
         )
         return "Handoff validation passed", path
+    if args.command == "integrate":
+        return "Joint inference views built", integrate_inference(
+            **common,
+            andrea_repo=args.andrea_repo,
+        )
     if args.command == "evaluate":
         return "Evaluation completed", evaluate(**common, andrea_repo=args.andrea_repo)
+    if args.command == "export":
+        return "ANDREA analysis bundles exported", export_analysis(
+            **common,
+            andrea_repo=args.andrea_repo,
+        )
     if args.command == "summarize":
         paths = summarize(
             repo_root=args.repo_root,

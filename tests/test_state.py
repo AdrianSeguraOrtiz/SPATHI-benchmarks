@@ -18,7 +18,7 @@ from spathi_bench.state import (
 
 def test_state_round_trip_is_atomic_and_stable(tmp_path: Path) -> None:
     state = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "profile_id": "smoke",
         "status": "generated",
         "datasets": [],
@@ -36,10 +36,10 @@ def test_write_state_replaces_prior_state(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     write_state(
         run_root,
-        {"schema_version": "2.0", "profile_id": "smoke", "status": "generated"},
+        {"schema_version": "3.0", "profile_id": "smoke", "status": "generated"},
     )
     replacement = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "profile_id": "smoke",
         "status": "inferred",
     }
@@ -59,7 +59,7 @@ def test_load_state_rejects_wrong_schema_and_profile(tmp_path: Path) -> None:
 
     write_state(
         run_root,
-        {"schema_version": "2.0", "profile_id": "reduced", "status": "generated"},
+        {"schema_version": "3.0", "profile_id": "reduced", "status": "generated"},
     )
     with pytest.raises(BenchmarkConfigError, match="State profile mismatch"):
         load_state(run_root, "smoke")
@@ -70,6 +70,7 @@ def test_status_order_supports_idempotent_stage_checks() -> None:
 
     assert status_at_least(state, "preflighted") is True
     assert status_at_least(state, "validated") is True
+    assert status_at_least(state, "integrated") is False
     assert status_at_least(state, "evaluated") is False
 
     with pytest.raises(BenchmarkConfigError, match="Unknown benchmark state status"):
@@ -79,13 +80,13 @@ def test_status_order_supports_idempotent_stage_checks() -> None:
 
 
 def test_require_status_requires_the_exact_predecessor() -> None:
-    require_status({"status": "evaluated"}, "evaluated", "Summarization")
+    require_status({"status": "exported"}, "exported", "Summarization")
 
     with pytest.raises(
         BenchmarkConfigError,
-        match="Summarization requires benchmark status 'evaluated', found 'completed'",
+        match="Summarization requires benchmark status 'exported', found 'completed'",
     ):
-        require_status({"status": "completed"}, "evaluated", "Summarization")
+        require_status({"status": "completed"}, "exported", "Summarization")
 
 
 def test_run_lock_rejects_concurrent_mutation_of_one_run(tmp_path: Path) -> None:
