@@ -99,7 +99,9 @@ def catalog_image_lease(
                     raise BenchmarkConfigError(
                         f"Catalog tag {tag} did not resolve to its locked image"
                     )
-            yield dict(details)
+            leased_details = dict(details)
+            leased_details["locked_repo_digest"] = repo_digest
+            yield leased_details
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 

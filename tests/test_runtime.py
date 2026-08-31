@@ -51,7 +51,8 @@ def test_matching_catalog_image_leases_run_concurrently(
         lock_entry,
         expected_id=image_id,
         lock_root=tmp_path / "locks",
-    ):
+    ) as leased:
+        assert leased["locked_repo_digest"] == repo_digest
         thread = threading.Thread(target=contender)
         thread.start()
         assert entered.wait(timeout=1), "matching shared lease was needlessly serialized"
