@@ -21,14 +21,23 @@ bench_init() {
   BENCH_RUN_ROOT="$BENCH_WORK_ROOT/v1/$BENCH_PROFILE/$BENCH_RUN_ID"
   BENCH_ANDREA_REPO="${ANDREA_REPO:-$BENCH_REPO_ROOT/../ANDREA}"
   BENCH_SPATHI_REPO="${SPATHI_REPO:-$BENCH_REPO_ROOT/../SPATHI}"
+  if [[ -z "${BENCH_PYTHON:-}" ]]; then
+    if [[ -x "$BENCH_REPO_ROOT/.venv/bin/python" ]]; then
+      BENCH_PYTHON="$BENCH_REPO_ROOT/.venv/bin/python"
+    else
+      BENCH_PYTHON="python3"
+    fi
+  fi
 
-  export BENCH_PROFILE BENCH_RUN_ID BENCH_WORK_ROOT BENCH_RUN_ROOT
-  export BENCH_ANDREA_REPO BENCH_SPATHI_REPO BENCH_REPO_ROOT
-  export PYTHONPATH="$BENCH_REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+}
+
+bench_command() {
+  PYTHONPATH="$BENCH_REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$BENCH_PYTHON" -m spathi_bench.cli "$@"
 }
 
 bench_cli() {
-  "${BENCH_PYTHON:-python3}" -m spathi_bench.cli "$@" \
+  bench_command "$@" \
     --repo-root "$BENCH_REPO_ROOT" \
     --profile "$BENCH_PROFILE" \
     --run-root "$BENCH_RUN_ROOT"
