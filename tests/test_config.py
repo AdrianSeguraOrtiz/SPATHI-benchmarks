@@ -50,7 +50,13 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
         "containers/spathi/constraints.txt",
         "containers/spathi/run_tool.py",
     }
-    assert {profile["id"] for profile in profiles} == {"smoke", "reduced", "full"}
+    assert {profile["id"] for profile in profiles} == {
+        "smoke",
+        "calibration",
+        "selection",
+        "reduced",
+        "full",
+    }
     assert {profile["id"] for profile in profiles if profile["status"] == "runnable"} == {"smoke"}
 
 
@@ -164,6 +170,30 @@ def test_profile_job_and_batch_ids_must_be_unique() -> None:
     profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
     profile["inference_batches"].append(deepcopy(profile["inference_batches"][0]))
     with pytest.raises(BenchmarkConfigError, match="duplicate inference batch IDs"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_runnable_profiles_cannot_mix_dataset_partitions() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["purpose"] = "calibration"
+
+    with pytest.raises(BenchmarkConfigError, match="must contain exactly dataset roles"):
+        validate_profile_references(REPO_ROOT, profile)
+
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["inference_batches"][0]["dataset_role"] = "development"
+    with pytest.raises(BenchmarkConfigError, match="no generation job provides it"):
+        validate_profile_references(REPO_ROOT, profile)
+
+
+def test_test_profile_requires_a_frozen_spathi_selection() -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
+    profile["purpose"] = "benchmark"
+    profile["generation_jobs"][0]["dataset_role"] = "test"
+    for batch in profile["inference_batches"]:
+        batch["dataset_role"] = "test"
+
+    with pytest.raises(BenchmarkConfigError, match="cannot become runnable before"):
         validate_profile_references(REPO_ROOT, profile)
 
 

@@ -23,6 +23,8 @@ def frozen_spathi_params() -> dict[str, Any]:
         "n_estimators": 25,
         "max_features": 1.0,
         "min_samples_leaf": 1,
+        "max_depth": None,
+        "bootstrap": None,
         "random_seed": 1729,
     }
 
