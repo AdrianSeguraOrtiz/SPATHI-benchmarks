@@ -23,9 +23,9 @@ are identical.
 
 No method receives a regulatory prior, true edges, lineage order or pseudotime in the
 primary ranking. Catalog methods that cannot restrict candidate regulators to `tf_list`
-remain in a separately labelled all-gene exploratory stratum; they are never pooled with
-the primary ranking. `inference/catalog-matrix.json` records this decision for every
-tool in the locked ANDREA catalog.
+are classified as potential all-gene exploratory methods in
+`inference/catalog-matrix.json`, but v1 does not execute or statistically analyse that
+stratum. They are never pooled with the primary ranking.
 
 Metrics are computed per group against the simulator's group-specific truth. Summary
 means first average contexts within each dataset and then give datasets equal weight, so
@@ -106,6 +106,8 @@ Important contract corrections:
   always consumes ordered column phenotypes.
 - inferCSN with `sift_method=none` is a `group_only` control; `entropy` is
   `pseudotime_aware`.
+- scRegulate has no expression-only mode in its locked ToolSpec. It appears only in
+  `prior_assisted` with `prior_source=provided_prior`.
 - Inferelator3 and any run using a truth-derived prior are never included in the
   primary ranking. Group-specific oracle priors and truth-derived lineage rates are
   excluded even from the global-prior assisted stratum.
@@ -119,13 +121,15 @@ silently linearizing a branching trajectory into one total order is forbidden.
 
 The principal dynamic benchmarks are dyngen and scMultiSim because they can provide
 group-varying regulatory truth. SERGIO, BoolODE and GeneSPIDER2 are invariant-network
-controls: groups or trajectories may vary while the true network does not, testing
-whether a method invents reconfiguration.
+controls: groups or trajectories may vary while the true network does not. Their v1
+role is to measure ordinary group-level inference accuracy against invariant truth;
+an explicit cross-group reconfiguration metric is not yet implemented.
 
-scMultiSim and SERGIO conditions must not all share the same bundled topology. At least
-one scMultiSim panel will use an independently supplied network. scMultiSim is not part
-of the initial smoke because its image reconstruction still needs a separately verified,
-pinned build; this does not affect the dyngen smoke.
+scMultiSim uses `grn_source=input_tsv` with three committed 100-edge regulatory networks:
+one each for development, validation and test. Their contents and seeds are disjoint, so
+no bundled or external topology crosses a protected partition. Its image and the images
+for every test control are pinned by repository digest. SERGIO uses its own preset and is
+included only as an invariant control, not as the source of a scMultiSim topology.
 
 ## Profiles
 
@@ -145,30 +149,56 @@ acceptable only for this contract smoke; it must not be reused as scientific evi
 
 ### reduced (planned)
 
-- dyngen and scMultiSim;
-- three independent seeds per condition;
-- `group_only`, `order_aware` and `pseudotime_aware` regimes;
-- every eligible catalog route is accounted for by the frozen catalog matrix, with
-  TF-restricted and all-gene strata kept separate;
+- twelve dyngen and three scMultiSim development datasets;
+- three independent seeds per condition and role-specific scMultiSim topology;
+- a `group_only` regression among selected SPATHI, GENIE3, GRNBoost2 and
+  inferCSN-without-pseudotime;
 - moderate gene/cell counts suitable for development and regression testing.
 
 ### full (planned)
 
-- dynamic benchmarks plus SERGIO, BoolODE and GeneSPIDER2 controls;
-- at least five independent seeds per condition;
-- topology, noise, dropout, imbalance, small-group and rewiring factors;
-- all four information regimes, negative controls and SPATHI ablations.
+- 50 independently seeded test datasets: 20 dyngen, ten scMultiSim, five SERGIO,
+  ten BoolODE and five GeneSPIDER2;
+- dyngen topology/noise conditions spanning 200--500 cells and 70--130 genes;
+- scMultiSim low-rewiring balanced populations versus high-rewiring, UMI-noisy
+  populations with one predeclared 12-cell minority group;
+- clean versus dropout-processed BoolODE invariant-network controls;
+- SERGIO, BoolODE and GeneSPIDER2 fixed-network controls;
+- `group_only`, `order_aware` and `pseudotime_aware`, plus negative controls;
+- `prior_assisted` remains explicitly blocked until a separately fingerprinted,
+  non-leaky prior dataset exists.
 
-The reduced and full profiles stay `planned` until every referenced simulator/tool
-combination passes ANDREA preflight and its exact request JSON is committed. A profile
-is never silently narrowed after failures: included, blocked and failed combinations
-must remain visible in the final provenance.
+The `reduced` and `full` files are non-runnable dataset templates. Their catalog requests
+and exact dataset selectors are committed under `inference/`; after validation freezes
+one SPATHI configuration, the comparison workflow materializes `reduced-v1` or `full-v1`
+below `work/` with the selected custom-tool requests. A profile is never silently narrowed after failures:
+included, blocked and failed combinations remain visible in provenance.
+
+The full TF-restricted directed family contains selected SPATHI, GENIE3, GRNBoost2,
+inferCSN without pseudotime, pySCENIC-GRN, scMINER with `custom_tf_list` and TIGRESS.
+ARACNe3 joins only the exploratory `topology` family because its catalog output is
+undirected. The order-aware family contains SPATHI and both SimiC similarity variants on
+the two linear dyngen jobs. The pseudotime-aware family contains SPATHI and paired
+inferCSN `none`/`entropy` variants on dyngen, scMultiSim and BoolODE jobs that provide
+pseudotime. Batch and statistical selectors prevent these methods from leaking onto
+incompatible simulations.
+
+The requested SimiC order-permutation negative control is not expressible safely in the
+current contracts. ANDREA's SimiC wrapper consumes the simulator-emitted
+`column_phenotypes.tsv`; neither `generate-data` nor `infer-network` accepts an order
+override, and SPATHI-benchmarks has no fingerprinted dataset-derivation stage. Mutating
+that file under an existing dataset would violate dataset identity. The control therefore
+remains explicitly blocked until ANDREA exposes a derived-dataset contract or this
+repository gains a provenance-preserving derivation stage; no fake simulator parameter is
+used in its place.
 
 ## Calibration and data partitions
 
 The smoke configuration is a contract check only. Scientific SPATHI configuration uses
-three bounded development stages declared in `spathi/search-space.json`: estimator-count
-convergence, one-factor structural variants and a small estimator shortlist. Every
+three bounded development stages declared in `spathi/search-space.json`: a tree-count
+sweep (historically identified as `convergence`), one-factor structural variants and a
+small estimator shortlist. The first stage tunes `n_estimators`; it is not interpreted as
+a formal plateau or one-standard-error convergence test. Every
 candidate is repeated over predeclared algorithmic seeds. The primary objective is
 directed AUPR, averaged equally over groups, then seeds, then datasets. Ties are resolved
 by stability, wall time, peak memory when measured, and distance from the reference
@@ -180,10 +210,26 @@ datasets stay together. Search stages see development only; validation chooses o
 global finalist; test compares the frozen choice with external methods once and can
 never alter it.
 
+The frozen v1 panel is:
+
+| Role | dyngen | scMultiSim | invariant controls | Total |
+| --- | ---: | ---: | ---: | ---: |
+| development | 4 conditions × 3 | 1 topology × 3 | 0 | 15 |
+| validation | 4 conditions × 3 | 1 topology × 3 | 0 | 15 |
+| test | 4 conditions × 5 | 1 topology × 2 stress conditions × 5 | SERGIO/GeneSPIDER2 × 5 plus BoolODE × 2 conditions × 5 | 50 |
+
+`scripts/calibrate.sh` materializes every executable stage profile below `work/`. Later
+profiles appear only after the preceding content-linked ranking has been validated. The
+profiles, request bundles, rankings and frozen selection are copied into each run's
+immutable input snapshot, so adaptive calibration needs no intermediate Git commits.
+The generic Friedman/Holm phase is marked not applicable to calibration and selection
+profiles; their authoritative selector is `calibration-rank`.
+
 This separation is enforced structurally:
 
 - each runnable profile purpose maps to exactly one dataset role;
-- every inference batch names that role and is applied only to matching datasets;
+- every inference batch names that role and, where needed, an exact compatible
+  `generation_jobs` subset; statistical families use the same selectors;
 - a runnable test profile requires an evidenced, frozen `selected-config.json`;
 - a SPATHI test batch may contain only `selection_role=selected`;
 - summaries never aggregate across role, split or condition; and
@@ -191,13 +237,15 @@ This separation is enforced structurally:
   every row outside its expected development or validation role;
 - effective simulator tasks are content-fingerprinted globally, and identical tasks or
   shared external inputs cannot cross development, validation and test; and
-- validation rankings embed their auditable rows and exact SPATHI build provenance, while
-  a frozen winner is hash-linked to the committed ranking.
+- every ranking embeds auditable rows, exact execution hashes and SPATHI build provenance;
+  parent rankings are linked by content hash and reconciled against each child shortlist;
+  and a frozen winner recursively validates the complete chain back to convergence.
 
-The CLI materializes deterministic ANDREA request bundles and proposes bounded
-shortlists. Ranking never writes a winner. The separate `calibration-freeze` command
-materializes it explicitly; the ranking and resulting selection must be reviewed and
-committed before any test profile becomes runnable.
+The high-level calibration workflow materializes deterministic ANDREA request bundles,
+proposes bounded shortlists and freezes the validation winner. Low-level planning,
+ranking and freezing commands remain available for diagnosis. Derived files are
+content-addressed runtime evidence; version control remains reserved for the scientific
+design, source inputs and schemas.
 
 ## Reproducibility and handoff
 

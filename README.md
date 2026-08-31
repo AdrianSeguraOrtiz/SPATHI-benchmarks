@@ -10,22 +10,29 @@ coupling those concerns to either scientific package.
 
 ## What is runnable now
 
-`smoke` is the only runnable profile. It verifies the complete contract with one small
-dyngen dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mode. Each
-tool is executed and evaluated independently so its result can be reused independently.
-The pipeline also projects those immutable results into one joint ANDREA-compatible
-source per dataset and regime, evaluates that view, and exports every official
-`analysis` handoff. A final statistical stage also exercises the reporting contract,
-but correctly emits `not_testable`: seven groups from one dataset are still one
-independent block. The smoke has no statistical power and its SPATHI configuration is
-not eligible for scientific selection.
+The committed `smoke` profile verifies the complete contract with one small dyngen
+dataset, GENIE3 in `group_emulated` mode and SPATHI in `group_native` mode. It has no
+statistical power and is never eligible for scientific selection. The scientific
+profiles are materialized automatically below `work/`: calibration begins with four
+tree-count configurations over 15 development datasets and five algorithmic seeds.
 
-`reduced` and `full` remain explicit planned profiles. They will not run until their
-dataset partitions and complete ANDREA request matrices are committed. The bounded
-SPATHI calibration engine is implemented, but scientific calibration must wait for a
-proper `development` panel; it must never use the smoke or test panel.
+The frozen development and validation panels each contain twelve dyngen datasets plus
+three scMultiSim datasets. scMultiSim uses a different committed regulatory network in
+each partition. The held-out test design contains 50 datasets: twenty dyngen, ten
+scMultiSim, five SERGIO, ten BoolODE and five GeneSPIDER2. Dyngen spans 200--500 cells
+and 70--130 genes; scMultiSim crosses low balanced rewiring with high rewiring, UMI noise
+and a 12-cell minority population; BoolODE crosses clean and dropout-processed fixed-GRN
+conditions. SERGIO, BoolODE and GeneSPIDER2 are invariant-network controls. All simulator images
+are pinned by repository digest and every scenario/run pair passes ANDREA planning.
 
-## Setup and first run
+Every later calibration profile is created only after ranking its predecessor;
+pre-generating it would violate the bounded search. `reduced` and `full` are immutable
+dataset templates. The high-level workflows materialize the adaptive calibration stages
+and the selected `reduced-v1` or `full-v1` profile below `work/`, where their contents
+are frozen by the normal provenance pipeline. Test data therefore remain inaccessible
+until configuration selection is complete.
+
+## Setup
 
 The expected checkout layout is:
 
@@ -39,40 +46,66 @@ Salonica/
 Use one Python environment for the benchmark CLI and the locked ANDREA checkout:
 
 ```bash
-python -m pip install -e ../ANDREA -e '.[dev]'
-scripts/doctor.sh
-scripts/run_all.sh smoke smoke-001
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e ../ANDREA -e '.[dev]'
 ```
 
 Experiments require all three repositories to be at their locked revisions and clean.
 The benchmark repository must also be committed and clean because every run freezes its
-orchestrator commit and all run-defining inputs.
+orchestrator commit and all run-defining inputs. Adaptive rankings, generated profiles
+and the selected configuration live below ignored `work/`; calibration does not require
+intermediate Git commits.
 
-The default paths can be overridden with `ANDREA_REPO`, `SPATHI_REPO`, `WORK_ROOT` and
-`BENCH_PYTHON`. `ANDREA_PYTHON` selects the interpreter used for `python -m andrea`; it
-defaults to the interpreter running `spathi-bench`.
+No shell exports or environment activation are required. The scripts discover sibling
+`ANDREA` and `SPATHI` checkouts and automatically use `.venv/bin/python` when it exists.
+Nonstandard installations may override `ANDREA_REPO`, `SPATHI_REPO` or `BENCH_PYTHON`;
+high-level adaptive artifacts deliberately remain below the repository's ignored
+`work/`. `ANDREA_PYTHON` selects the interpreter used for `python -m andrea`; it defaults
+to the interpreter running `spathi-bench`.
 Preflight fingerprints both interpreters separately. The statistics stage refuses to
 reuse a run if the benchmark interpreter has changed, even when `ANDREA_PYTHON` points
 to a different, unchanged environment.
 
-## Resume and stage control
+## Natural workflow
 
-Stages are idempotent. Repeating the same profile/run ID resumes from its recorded state
-and verifies every reused artifact. A failed inference or evaluation leaves already
-published per-tool artifacts in the shared cache, so the next attempt does not repeat
-them.
+The complete scientific workflow has two commands: calibrate SPATHI and compare its
+frozen configuration on the held-out benchmark.
 
 ```bash
-scripts/run_all.sh smoke smoke-001 --resume
-scripts/run_all.sh smoke smoke-001 --from infer
-scripts/run_all.sh smoke smoke-001 --until generate
+scripts/calibrate.sh
+scripts/compare.sh
 ```
 
-Valid stage names are `preflight`, `image`, `generate`, `infer`, `validate`, `integrate`,
-`evaluate`, `export`, `summarize` and `statistics`. Individual scripts under `scripts/`
-expose the same stages. A per-run filesystem lock rejects concurrent mutation of the
-same run ID. Use `--until summarize` to stop before statistical reporting, or run only
-the final stage with `scripts/60_statistics.sh <profile> <run-id>`.
+`scripts/calibrate.sh` executes the tree-count, structure and estimator searches plus
+independent validation, then freezes one global SPATHI configuration. `scripts/compare.sh` uses that
+selection and runs the `full` held-out benchmark by default. For a cheaper development
+regression before spending the full benchmark, run
+`scripts/compare.sh --profile reduced`. This optional profile uses the development panel
+and cannot support claims about held-out performance.
+
+Both entrypoints resume automatically. If Docker, the terminal or a tool fails, run the
+same command again; completed datasets, individual tool runs, evaluations and adaptive
+rankings are verified and reused. The default calibration ID is derived from the locked
+repository identities. An explicit ID is useful for naming a study:
+
+```bash
+scripts/calibrate.sh --run-id study-v1
+scripts/compare.sh --profile reduced --calibration-run-id study-v1
+scripts/compare.sh --calibration-run-id study-v1
+```
+
+Concurrent mutation of the same workflow is rejected by a filesystem lock. A different
+SPATHI or benchmark commit receives a different default workflow identity rather than
+silently reusing an incompatible selection.
+
+`doctor.sh` is optional because normal preflight performs the required gates. It is a
+non-destructive way to diagnose Python, Docker, repository locks and image availability
+before a long run:
+
+```bash
+scripts/doctor.sh
+```
 
 Inference and evaluation misses can run concurrently. `resources.infer_network` defines
 `max_parallel_runs`; `max_cores` and `max_ram_gb` apply to each concurrent ANDREA
@@ -94,11 +127,11 @@ keys include the inputs that can change their contents:
 | ANDREA commit or host environment | recompute | recompute | recompute | recompute |
 
 To benchmark a new SPATHI commit, update `repos.lock.json`, the SPATHI entry in
-`images.lock.json`, its commit-specific image tag in the custom-tool requests, and any
-changed build-input hashes. Commit those changes and start a new run ID. The pipeline
-will build the new SPATHI image but recover unchanged generated data, catalog inference
-and catalog evaluations as cache hits. It is therefore unnecessary to execute the other
-tools again merely because SPATHI changed.
+`images.lock.json` and any changed build-input hashes, then commit those source changes.
+Running `scripts/calibrate.sh` creates a new workflow identity for that revision. The
+pipeline builds the new SPATHI image but recovers unchanged generated data, catalog
+inference and catalog evaluations as cache hits. It is therefore unnecessary to execute
+the other tools again merely because SPATHI changed.
 
 The run state records hit counts and the concrete SPATHI image ID. Catalog containers
 are pulled by immutable repository digest. SPATHI is passed to ANDREA by exact local
@@ -169,75 +202,99 @@ the predeclared alpha. The Markdown report exposes the omnibus and post-hoc evid
 well as the machine-readable JSON and CSV files.
 
 `not_testable` is a successful analytical outcome, not a pipeline failure. In particular,
-the smoke always produces that status. `reduced` is intended for development; claims from
-`full` require a predeclared power analysis and enough independent datasets for the
-number of Holm-adjusted contrasts.
+the smoke always produces that status. `reduced-v1` is intended for development; claims
+from `full-v1` require the held-out complete panel, its predeclared Holm families and a
+reported power/sensitivity analysis; fifty datasets are not treated as an automatic
+guarantee of power.
 
 ## SPATHI calibration
 
-The search contract in `experiments/v1/spathi/search-space.json` has three bounded
-development stages:
+The search contract has three bounded development stages followed by one validation
+stage:
 
-1. convergence: 4 configurations × 5 algorithmic seeds;
-2. structure: 7 configurations × 3 seeds around one parent;
-3. estimator: at most 5 configurations × 3 seeds around at most two parents.
+1. tree-count sweep (internal stage ID `convergence`): 4 configurations × 5 algorithmic seeds × 15 datasets = 300 runs;
+2. structure: 7 configurations × 3 seeds × 15 datasets = 315 runs;
+3. estimator: at most 10 configurations × 3 seeds × 15 datasets = 450 runs;
+4. validation: at most 3 finalists × 3 seeds × 15 datasets = 135 runs.
 
-Generate the first native ANDREA request bundle with:
+The three development stages reference exactly the same generation jobs, so simulated
+data are generated once and recovered from the content-addressed cache thereafter.
+Every stage still performs normal evaluation and exports the official ANDREA
+`analysis.zip` handoffs. It stops at `summarize` because `calibration-rank`, not the
+generic Friedman/Holm stage, owns configuration selection.
 
-```bash
-spathi-bench calibration-plan \
-  --repo-root . \
-  --stage convergence \
-  --output-dir experiments/v1/spathi/generated/convergence
-```
-
-After adding that bundle to a committed `purpose=calibration` profile and running it,
-rank the complete balanced stage from its `reports/summary.json`:
-
-```bash
-spathi-bench calibration-rank \
-  --repo-root . \
-  --stage convergence \
-  --manifest experiments/v1/spathi/generated/convergence/calibration-manifest.json \
-  --summary work/v1/<profile>/<run>/reports/summary.json \
-  --output experiments/v1/spathi/generated/convergence-shortlist.json
-```
-
-Pass that shortlist to the next `calibration-plan` with `--parents`. After estimator
-ranking, use the same command with `--stage validation` and the 2–3 finalist shortlist;
-then rank that validation run with `calibration-rank --stage validation`. Freeze its
-winner explicitly, review the diff and commit both files:
-
-```bash
-spathi-bench calibration-freeze \
-  --repo-root . \
-  --ranking experiments/v1/spathi/generated/validation-ranking.json \
-  --output experiments/v1/spathi/selected-config.json
-```
+`scripts/calibrate.sh` performs that entire sequence, including stage materialization,
+ranking and final freezing. Adaptive request bundles, rankings and the selected
+configuration are stored together under
+`work/v1/workflows/calibration/<flow-id>/`; the workflow state hashes each transition.
+Nothing from one adaptive stage has to be copied into the source tree or committed
+before the next stage can run.
 
 Selection maximizes directed group-level AUPR with equal weight per group, seed and
 dataset, followed by stability, wall time, peak memory when available, and simplicity.
-It rejects incomplete batches, unequal datasets/seeds, different evaluable group sets,
-mixed roles and all test rows. A ranking embeds the calibration rows needed to recompute
-its scores and binds them to the exact SPATHI source/build identity and local image ID.
-The frozen selection is hash-linked to that committed ranking; editing a score, winner,
-configuration or source build invalidates the test gate.
+The first stage is therefore bounded tuning of `n_estimators`, not a formal plateau or
+one-standard-error convergence test.
+Every manifest freezes canonical run IDs, parameters and execution hashes. Each ranking
+is content-linked to its predecessor, and freezing recursively validates the complete
+convergence → structure → estimator → validation chain. Missing runs, extra finalists,
+unequal panels, role mixing, changed topologies and altered source/build identities are
+rejected.
 
-Development, validation and test are separate runnable profile purposes. Test data
-cannot even be generated by a runnable profile until `selected-config.json` contains a
-fully evidenced frozen choice; a SPATHI test batch may contain only that selected
-configuration. Dataset generation tasks are content-fingerprinted globally across
-development, validation and test; identical effective tasks and shared external inputs
-cannot cross partitions. The CLI never freezes a winner as a side effect of ranking:
-`calibration-freeze` is a separate, explicit and reviewable operation.
+After calibration, `scripts/compare.sh` materializes the matching selected-SPATHI
+profile below `work/v1/workflows/comparison/` and executes generation, inference,
+evaluation, ANDREA-compatible exports, summarization and statistics. The default is the
+held-out `full` profile; `scripts/compare.sh --profile reduced` selects the development
+regression profile instead.
+
+The full primary directed family compares SPATHI with GENIE3, GRNBoost2,
+inferCSN-without-pseudotime, pySCENIC-GRN, scMINER with the common TF list and TIGRESS.
+ARACNe3 is added only to the exploratory topology family because its catalog contract is
+undirected. Separate paired families compare SPATHI against both SimiC order variants on
+linear trajectories and against inferCSN with and without entropy-based pseudotime
+filtering on compatible datasets. Prior-assisted tools remain excluded until a
+separately fingerprinted non-leaky prior panel exists.
+
+An order-permuted SimiC control is deliberately not synthesized. SimiC receives the
+simulator-owned `column_phenotypes.tsv`, and the current ANDREA contracts expose no order
+override or derived-dataset identity. SPATHI-benchmarks also has no provenance-preserving
+dataset-derivation stage. Altering the file in place would reuse the wrong dataset
+fingerprint, so this negative control stays blocked until one of those contracts exists.
+
+The planned `reduced` and `full` source templates themselves remain non-runnable by
+design. The high-level workflow creates a content-bound `*-v1` profile only after it has
+validated the calibration selection.
+
+## Low-level commands (advanced)
+
+The public entrypoints above are the normal interface. For contract debugging, a single
+committed profile can still be run by explicit stage, and the materializers remain
+available directly:
+
+```bash
+scripts/run_all.sh smoke smoke-001
+scripts/run_all.sh smoke smoke-001 --from infer --until summarize
+.venv/bin/python -m spathi_bench.cli calibration-plan --help
+.venv/bin/python -m spathi_bench.cli calibration-rank --help
+.venv/bin/python -m spathi_bench.cli calibration-freeze --help
+.venv/bin/python -m spathi_bench.cli benchmark-plan --help
+```
+
+The low-level stages are `preflight`, `image`, `generate`, `infer`, `validate`,
+`integrate`, `evaluate`, `export`, `summarize` and `statistics`. They are idempotent, but
+manual callers are responsible for passing the correct adaptive parent rankings and
+profile files; the high-level workflows enforce those links automatically.
 
 ## Output layout
 
 ```text
 work/v1/
 ├── artifacts/                   immutable shared objects, including joint views and ZIPs
+├── workflows/
+│   ├── calibration/<flow-id>/   adaptive requests, rankings and selected-config.json
+│   └── comparison/<profile>/<flow-id>/
+│                               selected benchmark profile and workflow state
 └── <profile>/<run-id>/
-    ├── input_snapshot/          frozen committed requests, schemas and locks
+    ├── input_snapshot/          frozen source and adaptive requests, schemas and locks
     ├── preflight/
     ├── provenance/
     ├── logs/
