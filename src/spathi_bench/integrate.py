@@ -47,6 +47,7 @@ _EXECUTION_MODES = {
 }
 _PORTABLE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 
 ContractValidator = Callable[[Path], None]
 
@@ -85,6 +86,7 @@ def integrate_inference_runs(
     output_dir: Path,
     combined_run_id: str,
     regime: str,
+    benchmark_commit: str,
     contract_validator: ContractValidator | None = None,
 ) -> Path:
     """Create a deterministic joint infer-network ``analysis`` directory.
@@ -101,6 +103,8 @@ def integrate_inference_runs(
 
     _validate_identifier(combined_run_id, "combined_run_id")
     _validate_identifier(regime, "regime")
+    if not isinstance(benchmark_commit, str) or _GIT_COMMIT.fullmatch(benchmark_commit) is None:
+        raise IntegrationError("benchmark_commit must be a lowercase 40-character Git commit")
     if isinstance(run_report_paths, (str, bytes)) or not run_report_paths:
         raise IntegrationError("run_report_paths must be a non-empty sequence")
 
@@ -129,6 +133,7 @@ def integrate_inference_runs(
             sources=sources,
             combined_run_id=combined_run_id,
             regime=regime,
+            benchmark_commit=benchmark_commit,
         )
         report_path = staging / "run_report.json"
         report_path.write_text(
@@ -516,6 +521,7 @@ def _build_joint_report(
     sources: list[_SourceRun],
     combined_run_id: str,
     regime: str,
+    benchmark_commit: str,
 ) -> dict[str, Any]:
     selected = sorted(run_id for source in sources for run_id in source.selected)
     tools: dict[str, Any] = {
@@ -598,6 +604,7 @@ def _build_joint_report(
             "schema_version": "1.0",
             "kind": "joint-inference-view",
             "producer": "spathi-benchmarks",
+            "producer_commit": benchmark_commit,
             "regime": regime,
             "sources": integration_sources,
             "ordering": {

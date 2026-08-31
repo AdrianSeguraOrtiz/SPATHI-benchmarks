@@ -264,6 +264,20 @@ def _pin_profile_catalog_images(
     return observed
 
 
+def _benchmark_repository_provenance(run_root: Path) -> dict[str, Any]:
+    snapshot = load_json_object(run_root / "input_snapshot/manifest.json", "input snapshot")
+    repository = snapshot.get("benchmark_repository")
+    if (
+        not isinstance(repository, dict)
+        or not isinstance(repository.get("commit"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", repository["commit"]) is None
+        or not isinstance(repository.get("origin"), str)
+        or not repository["origin"]
+    ):
+        raise BenchmarkConfigError("Input snapshot has invalid SPATHI-benchmarks provenance")
+    return dict(repository)
+
+
 def _initial_state(
     *,
     created_at: str,
@@ -282,6 +296,7 @@ def _initial_state(
         "profile_id": profile_id,
         "purpose": profile["purpose"],
         "input_snapshot": str((run_root / "input_snapshot/manifest.json").resolve()),
+        "benchmark_repository": _benchmark_repository_provenance(run_root),
         "repositories": {
             "lock": repository_lock["repositories"],
             "observed": repositories,
@@ -1297,6 +1312,7 @@ def _integration_spec(
     return {
         "schema_version": "1.0",
         "integration_contract": "joint-inference-view-v1",
+        "spathi_benchmarks_commit": state["benchmark_repository"]["commit"],
         "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
         "andrea_environment": state["host_environment"]["fingerprint"],
         "dataset_artifact": dataset["dataset_artifact"]["key"],
@@ -1318,6 +1334,7 @@ def _validate_integrated_run_report(
     regime: str,
     run_id: str,
     source_run_ids: list[str],
+    benchmark_commit: str,
 ) -> dict[str, Any]:
     report = load_json_object(report_path, "integrated inference run report")
     integration = report.get("integration")
@@ -1331,6 +1348,7 @@ def _validate_integrated_run_report(
             integration.get("schema_version") != "1.0",
             integration.get("kind") != "joint-inference-view",
             integration.get("producer") != "spathi-benchmarks",
+            integration.get("producer_commit") != benchmark_commit,
             integration.get("regime") != regime,
             integration.get("monolithic_execution") is not False,
         )
@@ -1383,6 +1401,7 @@ def _execute_integration_task(
             output_dir=output_root,
             combined_run_id=task["run_id"],
             regime=regime,
+            benchmark_commit=task["benchmark_commit"],
             contract_validator=validate_contract,
         )
         return store.publish_from_temp(
@@ -1419,6 +1438,7 @@ def integrate_inference(
                 regime=integrated["regime"],
                 run_id=integrated["run_id"],
                 source_run_ids=integrated["source_run_ids"],
+                benchmark_commit=state["benchmark_repository"]["commit"],
             )
         return state_path(run_root)
     require_status(state, "validated", "Inference integration")
@@ -1478,6 +1498,7 @@ def integrate_inference(
                     "dataset": dataset,
                     "regime": regime,
                     "run_id": run_id,
+                    "benchmark_commit": state["benchmark_repository"]["commit"],
                     "run_report_paths": report_paths,
                 },
                 store=store,
@@ -1494,12 +1515,14 @@ def integrate_inference(
             regime=regime,
             run_id=run_id,
             source_run_ids=source_run_ids,
+            benchmark_commit=state["benchmark_repository"]["commit"],
         )
         integrated_runs.append(
             {
                 "dataset_id": dataset_id,
                 "regime": regime,
                 "run_id": run_id,
+                "spathi_benchmarks_commit": state["benchmark_repository"]["commit"],
                 "source_run_ids": source_run_ids,
                 "source_inference_artifacts": [
                     str(item["artifact"]["key"]) for item in ordered_runs
@@ -1727,6 +1750,7 @@ def evaluate(
                             "source_run_ids",
                             "source_inference_artifacts",
                             "dataset_fingerprint",
+                            "spathi_benchmarks_commit",
                         )
                     },
                     **common,
@@ -1763,6 +1787,7 @@ def _analysis_bundle_spec(
     return {
         "schema_version": "1.0",
         "bundle_contract": "andrea-analysis-v1",
+        "spathi_benchmarks_commit": state["benchmark_repository"]["commit"],
         "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
         "andrea_environment": state["host_environment"]["fingerprint"],
         "producer_command": producer_command,

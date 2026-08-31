@@ -81,7 +81,7 @@ keys include the inputs that can change their contents:
 
 | Change | Generated datasets | Catalog runs | SPATHI runs | Joint view/evaluation/exports |
 | --- | --- | --- | --- | --- |
-| SPATHI commit/config/image | reuse | reuse | recompute | recompute affected dataset/regime |
+| SPATHI commit/config/image | reuse | reuse | recompute | recompute joint results; reserialize ZIPs |
 | catalog tool image/params | reuse | recompute affected tool | reuse | recompute affected dataset/regime |
 | simulator request/image | recompute affected dataset | recompute downstream | recompute downstream | recompute downstream |
 | ANDREA commit or host environment | recompute | recompute | recompute | recompute |
@@ -96,6 +96,10 @@ tools again merely because SPATHI changed.
 The run state records hit counts and the concrete SPATHI image ID. Catalog containers
 are pulled by immutable repository digest. SPATHI is passed to ANDREA by exact local
 image ID, eliminating mutable-tag ambiguity for the external tool.
+
+Joint projections and ZIP artifacts also bind the SPATHI-benchmarks commit that produced
+them. A change in integration or serialization code therefore cannot reuse output from
+an older implementation; this does not invalidate simulated data or tool executions.
 
 ## ANDREA-compatible handoffs
 

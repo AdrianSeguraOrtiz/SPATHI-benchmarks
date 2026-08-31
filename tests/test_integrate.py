@@ -14,6 +14,11 @@ from spathi_bench.integrate import IntegrationError, integrate_inference_runs
 
 HEADER = ["source", "target", "score", "sign", "evidence", "context", "tool_id"]
 FINGERPRINT = {"algorithm": "sha256", "value": "a" * 64}
+BENCHMARK_COMMIT = "b" * 40
+
+
+def _integrate(**kwargs: Any) -> Path:
+    return integrate_inference_runs(benchmark_commit=BENCHMARK_COMMIT, **kwargs)
 
 
 def _write_network(path: Path, *, tool_run_id: str, score: str) -> None:
@@ -111,14 +116,14 @@ def test_integrates_deterministically_and_preserves_source_rows(tmp_path: Path) 
     )
     validated: list[Path] = []
 
-    report_path = integrate_inference_runs(
+    report_path = _integrate(
         run_report_paths=[source_z, source_a],
         output_dir=tmp_path / "joint-a",
         combined_run_id="dataset-a_group-only",
         regime="group_only",
         contract_validator=lambda path: validated.append(path),
     )
-    second_report_path = integrate_inference_runs(
+    second_report_path = _integrate(
         run_report_paths=[source_a, source_z],
         output_dir=tmp_path / "joint-b",
         combined_run_id="dataset-a_group-only",
@@ -145,6 +150,7 @@ def test_integrates_deterministically_and_preserves_source_rows(tmp_path: Path) 
     assert report["tools"]["selected"] == ["genie3_run", "spathi_run"]
     assert report["outputs"]["rows_per_tool"] == {"genie3_run": 1, "spathi_run": 1}
     assert report["integration"]["monolithic_execution"] is False
+    assert report["integration"]["producer_commit"] == BENCHMARK_COMMIT
     assert [source["source_run_id"] for source in report["integration"]["sources"]] == [
         "a-inference",
         "z-inference",
@@ -173,7 +179,7 @@ def test_joint_view_satisfies_locked_andrea_analysis_contract(tmp_path: Path) ->
         origin="custom",
     )
     andrea_checkout = Path(__file__).resolve().parents[2] / "ANDREA"
-    report_path = integrate_inference_runs(
+    report_path = _integrate(
         run_report_paths=[source_a, source_b],
         output_dir=tmp_path / "joint",
         combined_run_id="joint_group_only",
@@ -216,6 +222,35 @@ print(json.dumps({
     ]
 
 
+def test_integrates_a_completed_empty_network(tmp_path: Path) -> None:
+    source = _write_source(
+        tmp_path / "source",
+        source_run_id="empty-inference",
+        tool_run_id="empty_run",
+        catalog_tool_id="genie3",
+        origin="catalog",
+    )
+    header = ",".join(HEADER) + "\n"
+    (source.parent / "merged_network_raw.csv").write_text(header, encoding="utf-8")
+    (source.parent / "merged_network_normalized.csv").write_text(header, encoding="utf-8")
+    _mutate_report(
+        source,
+        lambda report: report["outputs"]["rows_per_tool"].update({"empty_run": 0}),
+    )
+
+    report_path = _integrate(
+        run_report_paths=[source],
+        output_dir=tmp_path / "joint",
+        combined_run_id="joint-empty",
+        regime="group_only",
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report["outputs"]["rows_per_tool"] == {"empty_run": 0}
+    assert report["tools"]["completed_contexts"] == {"empty_run": ["group:a"]}
+    assert (report_path.parent / "merged_network_raw.csv").read_text(encoding="utf-8") == header
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -247,7 +282,7 @@ def test_rejects_different_dataset_identity(
     )
 
     with pytest.raises(IntegrationError, match="same dataset ID and fingerprint"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source_a, source_b],
             output_dir=tmp_path / "joint",
             combined_run_id="joint",
@@ -272,7 +307,7 @@ def test_rejects_duplicate_source_or_tool_run_ids(tmp_path: Path) -> None:
         origin="catalog",
     )
     with pytest.raises(IntegrationError, match="unique run_id"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source_a, source_b],
             output_dir=tmp_path / "joint-source",
             combined_run_id="joint",
@@ -287,7 +322,7 @@ def test_rejects_duplicate_source_or_tool_run_ids(tmp_path: Path) -> None:
         origin="catalog",
     )
     with pytest.raises(IntegrationError, match="Tool run IDs must be unique"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source_a, source_c],
             output_dir=tmp_path / "joint-tool",
             combined_run_id="joint",
@@ -308,7 +343,7 @@ def test_rejects_inconsistent_output_capabilities_and_row_counts(tmp_path: Path)
         lambda report: report["tools"]["output_capabilities"]["run_a"].update({"directed": "yes"}),
     )
     with pytest.raises(IntegrationError, match="directed.*must be boolean"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source],
             output_dir=tmp_path / "joint-capability",
             combined_run_id="joint",
@@ -324,7 +359,7 @@ def test_rejects_inconsistent_output_capabilities_and_row_counts(tmp_path: Path)
         lambda report: report["outputs"]["rows_per_tool"].update({"run_a": 2}),
     )
     with pytest.raises(IntegrationError, match="row counts do not match"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source],
             output_dir=tmp_path / "joint-count",
             combined_run_id="joint",
@@ -348,7 +383,7 @@ def test_rejects_different_raw_and_normalized_schemas(tmp_path: Path) -> None:
     )
 
     with pytest.raises(IntegrationError, match="schema must be exactly"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source],
             output_dir=tmp_path / "joint",
             combined_run_id="joint",
@@ -369,7 +404,7 @@ def test_contract_failure_is_atomic(tmp_path: Path) -> None:
         raise ValueError("contract mismatch")
 
     with pytest.raises(IntegrationError, match="ANDREA rejected.*contract mismatch"):
-        integrate_inference_runs(
+        _integrate(
             run_report_paths=[source],
             output_dir=tmp_path / "joint",
             combined_run_id="joint",
@@ -378,3 +413,22 @@ def test_contract_failure_is_atomic(tmp_path: Path) -> None:
         )
     assert not (tmp_path / "joint").exists()
     assert not list(tmp_path.glob(".joint.tmp-*"))
+
+
+def test_rejects_an_invalid_benchmark_commit(tmp_path: Path) -> None:
+    source = _write_source(
+        tmp_path / "source",
+        source_run_id="inference-a",
+        tool_run_id="run_a",
+        catalog_tool_id="genie3",
+        origin="catalog",
+    )
+
+    with pytest.raises(IntegrationError, match="benchmark_commit"):
+        integrate_inference_runs(
+            run_report_paths=[source],
+            output_dir=tmp_path / "joint",
+            combined_run_id="joint",
+            regime="group_only",
+            benchmark_commit="not-a-commit",
+        )

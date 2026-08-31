@@ -24,6 +24,7 @@ from spathi_bench.pipeline import (
 
 def _state() -> dict[str, Any]:
     return {
+        "benchmark_repository": {"commit": "b" * 40},
         "repositories": {"observed": {"andrea": {"commit": "a" * 40}}},
         "host_environment": {"fingerprint": "h" * 64},
         "catalog_images": {"simulator:dyngen": {"locked_repo_digest": "dyngen@sha256:" + "d" * 64}},
@@ -267,6 +268,30 @@ def test_spathi_change_invalidates_only_spathi_inference_and_evaluation() -> Non
             run_id=None,
         ),
     )
+
+    changed_orchestrator = deepcopy(state)
+    changed_orchestrator["benchmark_repository"]["commit"] = "c" * 40
+    assert ArtifactKey.from_spec(
+        "joint-inference",
+        _integration_spec(
+            state=changed_orchestrator,
+            dataset=dataset,
+            regime="group_only",
+            inference_runs=[baseline_for_joint, new_spathi_for_joint],
+        ),
+    ) != new_joint_key
+    assert ArtifactKey.from_spec(
+        "analysis-bundle",
+        _analysis_bundle_spec(
+            state=changed_orchestrator,
+            source_artifact=baseline_inference["artifact"],
+            producer_command="infer-network",
+            dataset_id="dataset_a",
+            scope="individual",
+            regime="group_only",
+            run_id="genie3",
+        ),
+    ) != baseline_bundle
 
 
 def test_spathi_build_fingerprint_covers_every_locked_input() -> None:

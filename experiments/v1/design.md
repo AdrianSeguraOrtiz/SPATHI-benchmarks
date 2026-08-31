@@ -168,8 +168,10 @@ ANDREA revision/environment, dataset artifact, tool parameters, algorithmic seed
 concrete tool image. Changing SPATHI invalidates only SPATHI inference and its downstream
 evaluation; unchanged simulated data and catalog baselines remain reusable. A joint
 inference view is keyed by the ordered source-artifact identities within one dataset and
-information regime, so only that view, its joint evaluation and dependent analysis ZIPs
-are invalidated. The view preserves source network rows, records source hashes and never
-claims to be a monolithic execution. Cache misses may execute concurrently within an
-explicit per-profile resource limit, while state is published only after the
-deterministic ordered result set is complete.
+information regime, so a source-artifact change invalidates only that view, its joint
+evaluation and dependent analysis ZIPs. The view preserves source network rows, records
+source hashes and never claims to be a monolithic execution. Both the projection and
+analysis ZIP keys bind the SPATHI-benchmarks producer commit, deliberately invalidating
+all such transformations when their implementation revision changes. Cache misses may
+execute concurrently within an explicit per-profile resource limit, while state is
+published only after the deterministic ordered result set is complete.
