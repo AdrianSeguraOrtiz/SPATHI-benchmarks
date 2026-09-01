@@ -48,6 +48,7 @@ PROVENANCE_FIELDS = (
     "evaluation_artifact",
 )
 SUMMARY_METRICS = ("auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count")
+SUMMARY_SCHEMA_VERSION = "3.0"
 
 
 def _utc_now() -> str:
@@ -119,7 +120,7 @@ def _recover_published_reports(
             f"Incomplete reports directory already exists: {reports_dir}"
         ) from exc
     if (
-        payload.get("schema_version") != "2.0"
+        payload.get("schema_version") != SUMMARY_SCHEMA_VERSION
         or payload.get("profile_id") != profile_id
         or payload.get("purpose") != state["purpose"]
         or not metrics.is_file()
@@ -373,12 +374,12 @@ def summarize(
         metadata = {
             "family": row.get("family"),
             "selection_role": row["selection_role"],
-            "catalog_tool_id": row["catalog_tool_id"],
+            "configuration_sha256": row["configuration_sha256"],
         }
         previous = metadata_by_configuration.setdefault(configuration_id, metadata)
         if previous != metadata:
             raise BenchmarkConfigError(
-                f"Configuration {configuration_id!r} has conflicting summary metadata"
+                f"Configuration {configuration_id!r} has conflicting invariant summary metadata"
             )
 
     aggregates = []
@@ -386,17 +387,34 @@ def summarize(
     for group_key, values in sorted(grouped.items()):
         group_identity = dict(zip(group_fields, group_key, strict=True))
         configuration_id = group_identity["configuration_id"]
+        members = [
+            row
+            for row in rows
+            if all(str(row.get(field)) == value for field, value in group_identity.items())
+        ]
+        raw_catalog_tool_ids = {row["catalog_tool_id"] for row in members}
+        if not all(
+            isinstance(catalog_tool_id, str) and catalog_tool_id
+            for catalog_tool_id in raw_catalog_tool_ids
+        ):
+            raise BenchmarkConfigError("Aggregate metric rows contain an invalid catalog_tool_id")
+        catalog_tool_ids = sorted(raw_catalog_tool_ids)
+        family = metadata_by_configuration[configuration_id]["family"]
+        if family == "spathi":
+            tool_id = "SPATHI"
+        elif len(catalog_tool_ids) == 1:
+            tool_id = catalog_tool_ids[0]
+        else:
+            tool_id = configuration_id
         aggregates.append(
             {
                 **group_identity,
                 **metadata_by_configuration[configuration_id],
+                "tool_id": tool_id,
+                "catalog_tool_ids": catalog_tool_ids,
                 "n_datasets": len(datasets_per_group[group_key]),
                 "n_executions": len(executions_per_group[group_key]),
-                "n_metric_rows": sum(
-                    1
-                    for row in rows
-                    if all(str(row.get(field)) == value for field, value in group_identity.items())
-                ),
+                "n_metric_rows": len(members),
                 **{
                     f"mean_{name}": fmean(items) if items else None
                     for name, items in values.items()
@@ -407,6 +425,7 @@ def summarize(
     notes = [
         "Each metric is averaged across contexts, then algorithmic seeds, then equally across datasets.",
         "Aggregates never mix dataset roles, splits or experimental conditions.",
+        "Aggregate tool_id is a stable display identity; catalog_tool_ids lists the underlying ANDREA execution IDs.",
         "Raw metric semantics and statuses come directly from ANDREA.",
     ]
     if state["purpose"] == "smoke":
@@ -424,7 +443,7 @@ def summarize(
         summary_path.write_text(
             json.dumps(
                 {
-                    "schema_version": "2.0",
+                    "schema_version": SUMMARY_SCHEMA_VERSION,
                     "profile_id": profile_id,
                     "purpose": state["purpose"],
                     "benchmark_commit": state["benchmark_repository"]["commit"],

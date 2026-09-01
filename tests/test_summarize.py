@@ -252,7 +252,7 @@ def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path)
     assert rows[1]["diagnostics"] == '{"reason":"small truth"}'
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["schema_version"] == "2.0"
+    assert summary["schema_version"] == "3.0"
     assert summary["benchmark_commit"] == "4" * 40
     assert summary["metric_rows"] == 3
     aggregates = {
@@ -260,7 +260,11 @@ def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path)
         for item in summary["aggregates"]
     }
     genie3 = aggregates[("genie3_default", "group", "group_only")]
-    assert genie3["catalog_tool_id"] == "GENIE3"
+    assert genie3["tool_id"] == "GENIE3"
+    assert genie3["catalog_tool_ids"] == ["GENIE3"]
+    assert genie3["configuration_sha256"] == canonical_json_sha256(
+        {"configuration_id": "genie3_default"}
+    )
     assert genie3["n_datasets"] == 1
     assert genie3["n_executions"] == 1
     assert genie3["n_metric_rows"] == 2
@@ -300,6 +304,20 @@ def test_summarize_requires_exported_state_and_is_idempotent(tmp_path: Path) -> 
     second = summarize(repo_root=repo_root, profile_id="smoke", run_root=evaluated)
 
     assert second == first
+
+
+def test_summarize_recovers_published_current_schema_reports(tmp_path: Path) -> None:
+    repo_root, run_root = _evaluated_run(tmp_path)
+    published = summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    state = load_state(run_root, "smoke")
+    state["status"] = "exported"
+    state.pop("reports")
+    write_state(run_root, state)
+
+    recovered = summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+    assert recovered == published
+    assert load_state(run_root, "smoke")["status"] == "completed"
 
 
 def test_summarize_refuses_a_stale_reports_directory(tmp_path: Path) -> None:
@@ -394,6 +412,119 @@ def test_summarize_averages_algorithm_seeds_before_datasets(tmp_path: Path) -> N
     )
     assert aggregate["n_executions"] == 2
     assert aggregate["mean_auroc"] == pytest.approx(0.4)
+
+
+def test_summarize_allows_seed_specific_tool_ids_for_one_spathi_configuration(
+    tmp_path: Path,
+) -> None:
+    repo_root, run_root = _evaluated_run(tmp_path)
+    state = load_state(run_root, "smoke")
+    store = ArtifactStore(Path(state["artifact_store"]))
+    state["purpose"] = "calibration"
+    state["datasets"][0].update(
+        {"dataset_role": "development", "split_id": "dev_a", "condition_id": "condition_a"}
+    )
+    state["evaluations"] = [
+        _evaluation(
+            store,
+            dataset_id="dyngen-1729",
+            run_id=f"spathi_candidate_seed_{seed}",
+            tool_id=f"custom_spathi_candidate_seed_{seed}",
+            tool_origin="custom",
+            configuration_id="spathi_candidate",
+            algorithm_seed=seed,
+            family="spathi",
+            selection_role="candidate",
+            metrics=[
+                {
+                    "tool_id": f"spathi_candidate_seed_{seed}",
+                    "level": "directed",
+                    "context": "group:a",
+                    "status": "ok",
+                    "aupr": aupr,
+                }
+            ],
+        )
+        for seed, aupr in ((1729, 0.5), (31415, 0.9))
+    ]
+    write_state(run_root, state)
+
+    metrics_path, summary_path = summarize(
+        repo_root=repo_root,
+        profile_id="smoke",
+        run_root=run_root,
+    )
+
+    with metrics_path.open(encoding="utf-8", newline="") as handle:
+        metrics = list(csv.DictReader(handle))
+    assert {row["catalog_tool_id"] for row in metrics} == {
+        "custom_spathi_candidate_seed_1729",
+        "custom_spathi_candidate_seed_31415",
+    }
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["schema_version"] == "3.0"
+    assert [
+        (row["algorithm_seed"], row["aupr_directed"]) for row in summary["calibration_rows"]
+    ] == [
+        (1729, 0.5),
+        (31415, 0.9),
+    ]
+    assert len(summary["aggregates"]) == 1
+    aggregate = summary["aggregates"][0]
+    assert aggregate["tool_id"] == "SPATHI"
+    assert aggregate["catalog_tool_ids"] == [
+        "custom_spathi_candidate_seed_1729",
+        "custom_spathi_candidate_seed_31415",
+    ]
+    assert aggregate["configuration_sha256"] == canonical_json_sha256(
+        {"configuration_id": "spathi_candidate"}
+    )
+    assert aggregate["n_datasets"] == 1
+    assert aggregate["n_executions"] == 2
+    assert aggregate["mean_aupr"] == pytest.approx(0.7)
+
+
+@pytest.mark.parametrize(
+    ("field", "conflicting_value"),
+    [
+        ("family", "different_family"),
+        ("selection_role", "different_role"),
+        ("configuration_sha256", "f" * 64),
+    ],
+)
+def test_summarize_rejects_conflicting_configuration_metadata(
+    tmp_path: Path,
+    field: str,
+    conflicting_value: str,
+) -> None:
+    repo_root, run_root = _evaluated_run(tmp_path)
+    state = load_state(run_root, "smoke")
+    store = ArtifactStore(Path(state["artifact_store"]))
+    evaluation = _evaluation(
+        store,
+        dataset_id="dyngen-1729",
+        run_id="genie3_seed_31415",
+        tool_id="GENIE3",
+        tool_origin="catalog",
+        configuration_id="genie3_default",
+        algorithm_seed=31415,
+        metrics=[
+            {
+                "tool_id": "genie3_seed_31415",
+                "level": "group",
+                "context": "group:a",
+                "status": "ok",
+                "aupr": 0.5,
+            }
+        ],
+    )
+    evaluation[field] = conflicting_value
+    state["evaluations"].append(evaluation)
+    write_state(run_root, state)
+
+    with pytest.raises(BenchmarkConfigError, match="conflicting invariant summary metadata"):
+        summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
 
 
 def test_summarize_emits_balanced_calibration_rows_without_mixing_partitions(

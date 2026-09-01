@@ -186,7 +186,7 @@ def _run(
         writer.writeheader()
         writer.writerows(rows)
     summary_path = reports / "summary.json"
-    summary_path.write_text('{"schema_version":"2.0"}\n', encoding="utf-8")
+    summary_path.write_text('{"schema_version":"3.0"}\n', encoding="utf-8")
     write_state(
         run_root,
         {
