@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}SPATHI Benchmarks{% endblock %}</title>
+  <style>{{ report_css | safe }}</style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="report-header">
+    <div class="report-header__texture" aria-hidden="true"></div>
+    <div class="shell report-header__inner">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div>
+          <p class="eyebrow">SPATHI · BENCHMARKS</p>
+          <p class="brand-subtitle">Reproducible scientific report</p>
+        </div>
+        <div id="header-badges" class="header-badges" aria-label="Report status"></div>
+      </div>
+      <div class="hero-copy">
+        <p class="hero-kicker">{% block kicker %}{% endblock %}</p>
+        <h1>{% block heading %}{% endblock %}</h1>
+        <p class="hero-lead">{% block lead %}{% endblock %}</p>
+      </div>
+      <div id="workflow-meta" class="workflow-meta" aria-label="Workflow identity"></div>
+    </div>
+  </header>
+
+  <main id="main-content" class="shell report-main">
+    <noscript>
+      <div class="notice notice--error">
+        This report requires JavaScript to display its interactive visualizations.
+      </div>
+    </noscript>
+    <div id="fatal-error" class="notice notice--error is-hidden" role="alert"></div>
+    <div id="status-banner" aria-live="polite"></div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="report-footer">
+    <div class="shell report-footer__inner">
+      <div>
+        <strong>SPATHI Benchmarks</strong>
+        <span>Traceable results with no network dependency.</span>
+      </div>
+      <p>The tests and decisions shown here come from the experiment's canonical artifacts.</p>
+    </div>
+  </footer>
+
+  <script>{{ plotly_js | safe }}</script>
+  <script id="report-data" type="application/json">{{ report_data_json | safe }}</script>
+  <script>{{ common_js | safe }}</script>
+  <script>{{ report_js | safe }}</script>
+</body>
+</html>

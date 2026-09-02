@@ -110,6 +110,72 @@ Concurrent mutation of the same workflow is rejected by a filesystem lock. A dif
 SPATHI or benchmark commit receives a different default workflow identity rather than
 silently reusing an incompatible selection.
 
+## Interactive HTML reports
+
+Both high-level workflows generate a separate interactive report after completing their
+scientific work. No additional command is needed:
+
+- `scripts/calibrate.sh` writes
+  `work/v1/reports/<budget>/<calibration-flow-id>/calibration.html`.
+- `scripts/compare.sh` writes
+  `work/v1/reports/<budget>/<calibration-flow-id>/comparison.html`.
+
+Consequently, the calibration and comparison reports for one study sit beside each other
+in a single directory.
+
+The calibration report documents how the frozen SPATHI configuration was selected. It
+shows the four bounded stages, candidate rankings, accuracy versus wall time, observations
+by dataset and algorithmic seed, the parameters that vary within each stage, the selected
+configuration and the development/validation integrity checks. The comparison report
+keeps the declared analysis role and experimental strata visible while exposing score
+distributions, mean ranks, paired dataset results, confidence intervals and effect sizes,
+Holm-adjusted post-hoc tests, condition-level results, runtime and the joint ANDREA ZIPs
+for every dataset and regime.
+
+Both reports begin with the exact dataset panel used for the displayed results, including
+simulator, condition, role, split, generation seed, cells, genes, groups and transcription
+factors. All visible report text is in English. Calibration candidates are labelled from
+the parameter values that actually entered each stage; historical internal artifact IDs
+remain available through provenance but are not used as scientific labels.
+
+Each report embeds its data, CSS and Plotly JavaScript, so it opens directly in a browser
+without a server, CDN or network connection. A provenance manifest beside the HTML records
+the hashes of its inputs and output. It keeps the frozen scientific-input fingerprint
+separate from a renderer fingerprint that records the exact Python renderers, templates,
+CSS, JavaScript and embedded Plotly bundle plus the Jinja2 and Plotly versions. Report
+generation only validates and presents the frozen calibration rankings or the already
+published comparison summary and statistical files: it does not rerank candidates,
+reevaluate networks or recalculate statistical tests.
+
+To rebuild only the presentation layer after changing the reporting implementation, use a
+completed workflow:
+
+```bash
+scripts/calibrate.sh --profile reduced --report-only
+scripts/compare.sh --profile reduced --report-only
+```
+
+Without an ID, `--report-only` succeeds only when exactly one completed workflow exists for
+the requested profile. This prevents it from silently choosing among studies. If several
+completed workflows exist, identify the intended calibration explicitly:
+
+```bash
+scripts/calibrate.sh --profile reduced --run-id quick-v1 --report-only
+scripts/compare.sh --profile reduced --calibration-run-id quick-v1 --report-only
+```
+
+`--report-only` never starts or resumes simulation, inference, evaluation, summarization or
+statistics, and it rejects incomplete workflows. In the comparison command,
+`--calibration-run-id` is the original calibration ID; the corresponding comparison flow ID
+is derived from the profile and that ID.
+
+The visual report itself is self-contained, but its links to JSON, CSV and `analysis.zip`
+artifacts are deliberately relative rather than duplicated into the HTML. Keep the report
+inside its original version root (`work/v1` by default). To share the linked artifacts, copy
+the relevant version-root subtree—including its `reports/`, `workflows/` and dataset-profile
+branches—without flattening or relocating them; copying only the HTML or a single run breaks
+those links.
+
 `doctor.sh` is optional because normal preflight performs the required gates. It is a
 non-destructive way to diagnose Python, Docker, repository locks and image availability
 before a long run:
@@ -307,12 +373,18 @@ profile files; the high-level workflows enforce those links automatically.
 ```text
 work/v1/
 ├── artifacts/                   immutable shared objects, including joint views and ZIPs
+├── reports/
+│   └── <budget>/<calibration-flow-id>/
+│       ├── calibration.html
+│       ├── calibration-report.manifest.json
+│       ├── comparison.html
+│       └── comparison-report.manifest.json
 ├── workflows/
-│   ├── calibration/<budget>/<flow-id>/
-│   │                           adaptive requests, rankings and selected-config.json
-│   └── comparison/<profile>/<flow-id>/
+│   ├── calibration/<budget>/<calibration-flow-id>/
+│   │   └── ...                 requests, rankings and selected-config.json
+│   └── comparison/<budget>/<comparison-flow-id>/
 │                               selected benchmark profile and workflow state
-└── <profile>/<run-id>/
+└── <dataset-profile>/<comparison-flow-id>/
     ├── input_snapshot/          frozen source and adaptive requests, schemas and locks
     ├── preflight/
     ├── provenance/
@@ -337,6 +409,9 @@ work/v1/
             ├── pairwise.csv     Wilcoxon contrasts and Holm-adjusted p-values
             └── report.md        compact human-readable conclusions
 ```
+
+Here, `<budget>` is `reduced` or `full`; `<dataset-profile>` is respectively `reduced-v1`
+or `full-v1`; and `<comparison-flow-id>` is derived from the selected calibration.
 
 Every ZIP has an adjacent `analysis.zip.manifest.json` with archive and member hashes.
 The benchmark reads canonical manifests rather than discovering timestamped outputs.

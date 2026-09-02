@@ -30,7 +30,12 @@ from .pipeline import (
 from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
-from .workflows import run_calibration_workflow, run_comparison_workflow
+from .workflows import (
+    rebuild_calibration_report,
+    rebuild_comparison_report,
+    run_calibration_workflow,
+    run_comparison_workflow,
+)
 
 
 def _path(value: str) -> Path:
@@ -76,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_parser.add_argument("--work-root", type=_path)
     calibrate_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
     calibrate_parser.add_argument("--run-id")
+    calibrate_parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="rebuild HTML from one completed calibration without running experiments",
+    )
 
     compare_parser = subparsers.add_parser(
         "compare",
@@ -87,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--work-root", type=_path)
     compare_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
     compare_parser.add_argument("--calibration-run-id")
+    compare_parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="rebuild HTML from one completed comparison without running experiments",
+    )
 
     calibration_plan = subparsers.add_parser(
         "calibration-plan",
@@ -231,6 +246,13 @@ def _dispatch(
         )
         return "Environment diagnostics", report
     if args.command == "calibrate":
+        if args.report_only:
+            return "SPATHI calibration report rebuilt", rebuild_calibration_report(
+                repo_root=args.repo_root,
+                work_root=args.work_root or args.repo_root / "work",
+                calibration_budget=args.profile,
+                run_id=args.run_id,
+            )
         return "SPATHI calibration completed", run_calibration_workflow(
             repo_root=args.repo_root,
             andrea_repo=args.andrea_repo,
@@ -240,6 +262,13 @@ def _dispatch(
             run_id=args.run_id,
         )
     if args.command == "compare":
+        if args.report_only:
+            return "SPATHI comparison report rebuilt", rebuild_comparison_report(
+                repo_root=args.repo_root,
+                work_root=args.work_root or args.repo_root / "work",
+                profile=args.profile,
+                calibration_run_id=args.calibration_run_id,
+            )
         return "SPATHI comparison completed", run_comparison_workflow(
             repo_root=args.repo_root,
             andrea_repo=args.andrea_repo,

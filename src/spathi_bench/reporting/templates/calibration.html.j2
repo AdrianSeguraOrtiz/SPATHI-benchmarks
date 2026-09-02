@@ -1,0 +1,121 @@
+{% extends "base.html.j2" %}
+
+{% block title %}Calibration · SPATHI Benchmarks{% endblock %}
+{% block kicker %}CALIBRATION{% endblock %}
+{% block heading %}How the SPATHI configuration was selected{% endblock %}
+{% block lead %}Explore convergence, cost, and stability for every candidate while keeping development separate from frozen validation.{% endblock %}
+
+{% block content %}
+  <section class="section dataset-overview-section" aria-labelledby="dataset-overview-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Evidence base</p>
+        <h2 id="dataset-overview-heading">Datasets used in calibration</h2>
+      </div>
+      <p class="section-help">Dataset roles remain visible so development and frozen validation evidence cannot be confused.</p>
+    </div>
+    <div id="dataset-overview" class="dataset-overview-grid"></div>
+  </section>
+
+  <section class="section section--overview" aria-labelledby="overview-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Summary</p>
+        <h2 id="overview-heading">Process overview</h2>
+      </div>
+    </div>
+    <div id="overview-cards" class="stat-grid"></div>
+  </section>
+
+  <section id="selection-section" class="section" aria-labelledby="selection-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Frozen result</p>
+        <h2 id="selection-heading">Selected configuration</h2>
+      </div>
+    </div>
+    <div id="selection-card" class="selection-layout"></div>
+  </section>
+
+  <section class="section" aria-labelledby="stages-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Explorer</p>
+        <h2 id="stages-heading">Calibration stages</h2>
+      </div>
+      <p class="section-help">Each tab preserves its candidate universe, observations, and selection criterion.</p>
+    </div>
+    <div id="stage-tabs" class="tabs" role="tablist" aria-label="Calibration stages"></div>
+    <article id="stage-panel" class="stage-panel" role="tabpanel">
+      <div id="stage-intro" class="stage-intro"></div>
+
+      <div class="chart-grid chart-grid--two">
+        <section class="card chart-card" aria-labelledby="ranking-chart-title">
+          <div class="card-heading">
+            <div>
+              <p class="card-kicker">Accuracy</p>
+              <h3 id="ranking-chart-title">Candidate ranking</h3>
+            </div>
+          </div>
+          <div id="ranking-chart" class="plot" role="img" aria-label="Configuration ranking by accuracy score"></div>
+        </section>
+
+        <section class="card chart-card" aria-labelledby="pareto-chart-title">
+          <div class="card-heading">
+            <div>
+              <p class="card-kicker">Efficiency</p>
+              <h3 id="pareto-chart-title">Accuracy versus runtime</h3>
+            </div>
+            <span class="legend-note">Pareto frontier highlighted</span>
+          </div>
+          <div id="pareto-chart" class="plot" role="img" aria-label="Relationship between accuracy and runtime"></div>
+        </section>
+      </div>
+
+      <section class="card chart-card" aria-labelledby="observations-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Robustness</p>
+            <h3 id="observations-chart-title">Observations by dataset and seed</h3>
+          </div>
+        </div>
+        <div id="observations-chart" class="plot plot--wide" role="img" aria-label="Distribution of observations for each candidate"></div>
+      </section>
+
+      <section class="card chart-card" aria-labelledby="parameters-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Search space</p>
+            <h3 id="parameters-chart-title">Parameters and outcome</h3>
+          </div>
+          <span class="legend-note">Hover over a line to identify the candidate</span>
+        </div>
+        <div id="parameters-chart" class="plot plot--wide plot--tall" role="img" aria-label="Parallel coordinates for explored parameter values"></div>
+      </section>
+
+      <section class="card" aria-labelledby="candidate-table-title">
+        <div class="card-heading card-heading--actions">
+          <div>
+            <p class="card-kicker">Audit trail</p>
+            <h3 id="candidate-table-title">Candidate table</h3>
+          </div>
+          <div id="candidate-table-actions"></div>
+        </div>
+        <div id="candidate-table" class="table-wrap"></div>
+      </section>
+    </article>
+  </section>
+
+  <section class="section" aria-labelledby="provenance-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Traceability</p>
+        <h2 id="provenance-heading">Provenance and artifacts</h2>
+      </div>
+    </div>
+    <div class="provenance-grid">
+      <div id="provenance" class="card"></div>
+      <div id="report-links" class="card"></div>
+    </div>
+  </section>
+{% endblock %}

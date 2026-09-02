@@ -216,9 +216,7 @@ def andrea_contract_command(
     environment = andrea_environment(andrea_repo)
     benchmark_source = str((repo_root / "src").resolve())
     existing = environment.get("PYTHONPATH")
-    environment["PYTHONPATH"] = benchmark_source + (
-        os.pathsep + existing if existing else ""
-    )
+    environment["PYTHONPATH"] = benchmark_source + (os.pathsep + existing if existing else "")
     stream_command(
         [str(executable), "-m", "spathi_bench.andrea_bridge", *arguments],
         cwd=repo_root,

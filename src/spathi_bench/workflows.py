@@ -38,6 +38,7 @@ from .pipeline import (
     validate_handoffs,
 )
 from .provenance import observe_benchmark_repository
+from .reporting import render_calibration_report, render_comparison_report
 from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
@@ -86,6 +87,128 @@ def _calibration_identity(identity: dict[str, str], calibration_budget: str) -> 
     scoped["calibration_budget"] = calibration_budget
     scoped["fingerprint"] = canonical_json_sha256(scoped)
     return scoped
+
+
+def _workflow_work_root(repo_root: Path, work_root: Path) -> tuple[Path, Path]:
+    root = repo_root.resolve()
+    work = work_root.resolve()
+    if not work.is_relative_to(root / "work"):
+        raise BenchmarkConfigError("High-level workflow work root must be below repository work/")
+    return root, work
+
+
+def _completed_workflow_root(
+    *,
+    base: Path,
+    workflow_type: str,
+    requested_id: str | None,
+) -> Path:
+    if requested_id is not None:
+        if not _WORKFLOW_ID.fullmatch(requested_id):
+            raise BenchmarkConfigError(f"Invalid workflow run ID: {requested_id!r}")
+        candidate = base / requested_id
+        candidates = [candidate]
+    else:
+        candidates = sorted(
+            (path.parent for path in base.glob("*/workflow.json")),
+            key=lambda path: path.name,
+        )
+    completed: list[Path] = []
+    for candidate in candidates:
+        state_path = candidate / "workflow.json"
+        if not state_path.is_file():
+            continue
+        state = load_json_object(state_path, f"{workflow_type} workflow state")
+        if state.get("workflow_type") == workflow_type and state.get("status") == "complete":
+            completed.append(candidate.resolve())
+    if requested_id is not None and not completed:
+        raise BenchmarkConfigError(
+            f"No completed {workflow_type} workflow named {requested_id!r} exists below {base}"
+        )
+    if not completed:
+        raise BenchmarkConfigError(f"No completed {workflow_type} workflow exists below {base}")
+    if len(completed) > 1:
+        option = "--run-id" if workflow_type == "calibration" else "--calibration-run-id"
+        identifiers = ", ".join(path.name for path in completed)
+        raise BenchmarkConfigError(
+            f"Multiple completed {workflow_type} workflows exist ({identifiers}); select one with "
+            f"{option}"
+        )
+    return completed[0]
+
+
+def rebuild_calibration_report(
+    *,
+    repo_root: Path,
+    work_root: Path,
+    calibration_budget: str,
+    run_id: str | None,
+) -> dict[str, Any]:
+    """Rebuild only the presentation layer of one completed calibration."""
+
+    if calibration_budget not in CALIBRATION_BUDGETS:
+        raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
+    root, work = _workflow_work_root(repo_root, work_root)
+    workflow_root = _completed_workflow_root(
+        base=work / "v1/workflows/calibration" / calibration_budget,
+        workflow_type="calibration",
+        requested_id=run_id,
+    )
+    with run_lock(workflow_root):
+        report = render_calibration_report(
+            repo_root=root,
+            version_root=work / "v1",
+            workflow_root=workflow_root,
+        )
+        state_path = workflow_root / "workflow.json"
+        state = load_json_object(state_path, "calibration workflow state")
+        state["reports"] = report
+        _write_json(state_path, state)
+    return report
+
+
+def rebuild_comparison_report(
+    *,
+    repo_root: Path,
+    work_root: Path,
+    profile: str,
+    calibration_run_id: str | None,
+) -> dict[str, Any]:
+    """Rebuild only the presentation layer of one completed comparison."""
+
+    if profile not in {"reduced", "full"}:
+        raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
+    root, work = _workflow_work_root(repo_root, work_root)
+    requested_flow_id = (
+        f"{profile}-{calibration_run_id}" if calibration_run_id is not None else None
+    )
+    workflow_root = _completed_workflow_root(
+        base=work / "v1/workflows/comparison" / profile,
+        workflow_type="comparison",
+        requested_id=requested_flow_id,
+    )
+    with run_lock(workflow_root):
+        report = render_comparison_report(
+            repo_root=root,
+            version_root=work / "v1",
+            workflow_root=workflow_root,
+        )
+        state_path = workflow_root / "workflow.json"
+        state = load_json_object(state_path, "comparison workflow state")
+        state["reports"] = report
+        stage = require_mapping_for_workflow(state, "comparison")
+        pipeline = stage.get("pipeline")
+        if isinstance(pipeline, dict):
+            pipeline["interactive_report"] = report["html"]
+        _write_json(state_path, state)
+    return report
+
+
+def require_mapping_for_workflow(state: dict[str, Any], stage_id: str) -> dict[str, Any]:
+    stages = state.get("stages")
+    if not isinstance(stages, dict) or not isinstance(stages.get(stage_id), dict):
+        raise BenchmarkConfigError(f"Completed workflow has no {stage_id!r} stage")
+    return stages[stage_id]
 
 
 def _adopt_workflow(
@@ -172,10 +295,7 @@ def run_calibration_workflow(
 
     if calibration_budget not in CALIBRATION_BUDGETS:
         raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
-    root = repo_root.resolve()
-    work = work_root.resolve()
-    if not work.is_relative_to(root / "work"):
-        raise BenchmarkConfigError("High-level workflow work root must be below repository work/")
+    root, work = _workflow_work_root(repo_root, work_root)
     identity = _calibration_identity(_workflow_identity(root), calibration_budget)
     flow_id = _flow_id(identity, run_id)
     workflow_root = work / "v1/workflows/calibration" / calibration_budget / flow_id
@@ -250,6 +370,13 @@ def run_calibration_workflow(
             }
         )
         _write_json(state_path, state)
+        report = render_calibration_report(
+            repo_root=root,
+            version_root=work / "v1",
+            workflow_root=workflow_root,
+        )
+        state["reports"] = report
+        _write_json(state_path, state)
     return state
 
 
@@ -312,10 +439,7 @@ def run_comparison_workflow(
 
     if profile not in {"reduced", "full"}:
         raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
-    root = repo_root.resolve()
-    work = work_root.resolve()
-    if not work.is_relative_to(root / "work"):
-        raise BenchmarkConfigError("High-level workflow work root must be below repository work/")
+    root, work = _workflow_work_root(repo_root, work_root)
     identity = _workflow_identity(root)
     calibration_id, selected_config = _calibration_selection(
         repo_root=root,
@@ -369,5 +493,14 @@ def run_comparison_workflow(
                 "profile_sha256": sha256_file(profile_file),
             }
         )
+        _write_json(state_path, state)
+        report = render_comparison_report(
+            repo_root=root,
+            version_root=work / "v1",
+            workflow_root=workflow_root,
+            run_root=run_root,
+        )
+        state["reports"] = report
+        state["stages"]["comparison"]["pipeline"]["interactive_report"] = report["html"]
         _write_json(state_path, state)
     return state

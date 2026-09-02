@@ -1,0 +1,153 @@
+{% extends "base.html.j2" %}
+
+{% block title %}Comparison · SPATHI Benchmarks{% endblock %}
+{% block kicker %}COMPARISON{% endblock %}
+{% block heading %}Which method works best, and under which conditions{% endblock %}
+{% block lead %}Compare accuracy, ranks, effect sizes, and costs while keeping the experimental regime and exploratory or confirmatory role visible.{% endblock %}
+
+{% block content %}
+  <section class="section dataset-overview-section" aria-labelledby="dataset-overview-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Evidence base</p>
+        <h2 id="dataset-overview-heading">Datasets used in comparison</h2>
+      </div>
+      <p class="section-help">Inspect simulator, condition, split, and role before interpreting aggregate results.</p>
+    </div>
+    <div id="dataset-overview" class="dataset-overview-grid"></div>
+  </section>
+
+  <section class="section section--overview" aria-labelledby="overview-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Summary</p>
+        <h2 id="overview-heading">Comparison status</h2>
+      </div>
+    </div>
+    <div id="overview-cards" class="stat-grid"></div>
+  </section>
+
+  <section class="section filter-section" aria-labelledby="analysis-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Explorer</p>
+        <h2 id="analysis-heading">Select a comparison</h2>
+      </div>
+      <p class="section-help">Filters only expose combinations present in the statistical report.</p>
+    </div>
+    <div id="analysis-filters" class="filter-grid"></div>
+    <div id="analysis-state" class="analysis-state" aria-live="polite"></div>
+  </section>
+
+  <section id="analysis-results" class="section section--results" aria-labelledby="results-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Results</p>
+        <h2 id="results-heading">Accuracy and ranks</h2>
+      </div>
+      <div id="analysis-badges" class="badge-row"></div>
+    </div>
+
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="score-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Distribution</p>
+            <h3 id="score-chart-title">Score by method</h3>
+          </div>
+        </div>
+        <div id="score-chart" class="plot" role="img" aria-label="Scores by method"></div>
+      </section>
+
+      <section class="card chart-card" aria-labelledby="rank-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Friedman</p>
+            <h3 id="rank-chart-title">Mean rank</h3>
+          </div>
+          <span class="legend-note">Lower is better</span>
+        </div>
+        <div id="rank-chart" class="plot" role="img" aria-label="Mean rank for each method"></div>
+      </section>
+    </div>
+
+    <section class="card chart-card" aria-labelledby="paired-chart-title">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Blocked design</p>
+          <h3 id="paired-chart-title">Paired results by dataset</h3>
+        </div>
+        <span class="legend-note">Each line represents the same dataset</span>
+      </div>
+      <div id="paired-chart" class="plot plot--wide" role="img" aria-label="Paired scores by dataset"></div>
+    </section>
+
+    <div class="chart-grid chart-grid--two effect-grid">
+      <section class="card chart-card" aria-labelledby="forest-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Effect size</p>
+            <h3 id="forest-chart-title">Difference from the control</h3>
+          </div>
+          <span class="legend-note">Green: favors control · red: favors competitor · gray: inconclusive</span>
+        </div>
+        <div id="forest-chart" class="plot" role="img" aria-label="Confidence intervals for differences from the control"></div>
+      </section>
+
+      <section class="card" aria-labelledby="holm-table-title">
+        <div class="card-heading card-heading--actions">
+          <div>
+            <p class="card-kicker">Post hoc</p>
+            <h3 id="holm-table-title">Paired tests with Holm correction</h3>
+          </div>
+          <div id="holm-table-actions"></div>
+        </div>
+        <div id="holm-table" class="table-wrap table-wrap--compact"></div>
+      </section>
+    </div>
+
+    <section class="card chart-card" aria-labelledby="condition-chart-title">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Heterogeneity</p>
+          <h3 id="condition-chart-title">Breakdown by condition</h3>
+        </div>
+      </div>
+      <div id="condition-chart" class="plot plot--wide" role="img" aria-label="Results broken down by experimental condition"></div>
+    </section>
+
+    <section class="card chart-card" aria-labelledby="runtime-chart-title">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Computational cost</p>
+          <h3 id="runtime-chart-title">Runtime</h3>
+        </div>
+      </div>
+      <div id="runtime-chart" class="plot plot--wide" role="img" aria-label="Runtime by method"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="bundles-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Interoperability</p>
+        <h2 id="bundles-heading">Joint ZIP bundles for ANDREA</h2>
+      </div>
+      <div id="bundle-status"></div>
+    </div>
+    <div id="bundle-table" class="card table-wrap"></div>
+  </section>
+
+  <section class="section" aria-labelledby="provenance-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Traceability</p>
+        <h2 id="provenance-heading">Provenance and artifacts</h2>
+      </div>
+    </div>
+    <div class="provenance-grid">
+      <div id="provenance" class="card"></div>
+      <div id="report-links" class="card"></div>
+    </div>
+  </section>
+{% endblock %}

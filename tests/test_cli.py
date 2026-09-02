@@ -326,3 +326,63 @@ def test_high_level_compare_cli_defaults_to_full(
     )
     assert calls[0]["profile"] == "full"
     assert calls[0]["calibration_run_id"] is None
+
+
+@pytest.mark.parametrize("command", ["calibrate", "compare"])
+def test_high_level_report_only_uses_published_outputs(
+    command: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibration_calls: list[dict[str, Any]] = []
+    comparison_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli,
+        "rebuild_calibration_report",
+        lambda **kwargs: calibration_calls.append(kwargs) or {"status": "rendered"},
+    )
+    monkeypatch.setattr(
+        cli,
+        "rebuild_comparison_report",
+        lambda **kwargs: comparison_calls.append(kwargs) or {"status": "rendered"},
+    )
+    repo = tmp_path / "repo"
+    arguments = [
+        command,
+        "--repo-root",
+        str(repo),
+        "--andrea-repo",
+        str(tmp_path / "ANDREA"),
+        "--spathi-repo",
+        str(tmp_path / "SPATHI"),
+        "--profile",
+        "reduced",
+        "--report-only",
+    ]
+    if command == "calibrate":
+        arguments.extend(["--run-id", "chosen"])
+    else:
+        arguments.extend(["--calibration-run-id", "chosen"])
+
+    assert main(arguments) == 0
+
+    if command == "calibrate":
+        assert comparison_calls == []
+        assert calibration_calls == [
+            {
+                "repo_root": repo.resolve(),
+                "work_root": repo.resolve() / "work",
+                "calibration_budget": "reduced",
+                "run_id": "chosen",
+            }
+        ]
+    else:
+        assert calibration_calls == []
+        assert comparison_calls == [
+            {
+                "repo_root": repo.resolve(),
+                "work_root": repo.resolve() / "work",
+                "profile": "reduced",
+                "calibration_run_id": "chosen",
+            }
+        ]

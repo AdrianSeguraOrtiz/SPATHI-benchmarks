@@ -125,6 +125,24 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
     monkeypatch.setattr(workflows, "run_profile_pipeline", fake_pipeline)
     monkeypatch.setattr(workflows, "rank_calibration_stage", fake_rank)
     monkeypatch.setattr(workflows, "freeze_calibration_selection", fake_freeze)
+    rendered: list[Path] = []
+
+    def fake_report(*, repo_root: Path, version_root: Path, workflow_root: Path) -> dict[str, Any]:
+        assert repo_root == repo
+        assert version_root == work / "v1"
+        assert (workflow_root / "selected-config.json").is_file()
+        state = json.loads((workflow_root / "workflow.json").read_text(encoding="utf-8"))
+        assert state["status"] == "complete"
+        rendered.append(workflow_root)
+        return {
+            "schema_version": "1.0",
+            "html": {
+                "path": ("work/v1/reports/reduced/calibration-test/calibration.html"),
+                "sha256": "a" * 64,
+            },
+        }
+
+    monkeypatch.setattr(workflows, "render_calibration_report", fake_report)
 
     first = workflows.run_calibration_workflow(
         repo_root=repo,
@@ -163,6 +181,11 @@ def test_calibrate_chains_four_stages_freezes_and_resumes_idempotently(
     assert selected.is_file()
     assert second["selected_config_sha256"] == sha256_file(selected)
     assert len(materialized) == len(pipelines) == len(ranked) == 8
+    assert len(rendered) == 2
+    assert second["reports"]["html"]["sha256"] == "a" * 64
+    assert second["reports"]["html"]["path"] == (
+        "work/v1/reports/reduced/calibration-test/calibration.html"
+    )
 
 
 def test_compare_requires_a_completed_matching_calibration(
@@ -333,6 +356,25 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
 
     monkeypatch.setattr(workflows, "summarize", fake_summarize)
     monkeypatch.setattr(workflows, "analyze_statistics", fake_statistics)
+    rendered: list[tuple[Path, Path]] = []
+
+    def fake_report(
+        *, repo_root: Path, version_root: Path, workflow_root: Path, run_root: Path
+    ) -> dict[str, Any]:
+        assert repo_root == repo
+        assert version_root == work / "v1"
+        state = json.loads((workflow_root / "workflow.json").read_text(encoding="utf-8"))
+        assert state["status"] == "complete"
+        rendered.append((workflow_root, run_root))
+        return {
+            "schema_version": "1.0",
+            "html": {
+                "path": ("work/v1/reports/full/complete-calibration/comparison.html"),
+                "sha256": "b" * 64,
+            },
+        }
+
+    monkeypatch.setattr(workflows, "render_comparison_report", fake_report)
 
     result = workflows.run_comparison_workflow(
         repo_root=repo,
@@ -363,3 +405,162 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
         "summarize",
         "statistics",
     ]
+    assert len(rendered) == 1
+    assert result["reports"]["html"]["sha256"] == "b" * 64
+    assert result["stages"]["comparison"]["pipeline"]["interactive_report"]["sha256"] == ("b" * 64)
+    assert result["reports"]["html"]["path"] == (
+        "work/v1/reports/full/complete-calibration/comparison.html"
+    )
+
+
+def test_report_only_calibration_uses_completed_outputs_without_current_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, work, _andrea, _spathi = _workflow_paths(tmp_path)
+    work = work / "isolated"
+    work.mkdir()
+    base = work / "v1/workflows/calibration/reduced"
+    _write_json(
+        base / "abandoned/workflow.json",
+        {
+            "schema_version": "1.0",
+            "workflow_type": "calibration",
+            "flow_id": "abandoned",
+            "identity": IDENTITY,
+            "calibration_budget": "reduced",
+            "status": "running",
+            "stages": {},
+        },
+    )
+    completed = base / "finished"
+    _write_json(
+        completed / "workflow.json",
+        {
+            "schema_version": "1.0",
+            "workflow_type": "calibration",
+            "flow_id": "finished",
+            "identity": IDENTITY,
+            "calibration_budget": "reduced",
+            "status": "complete",
+            "stages": {},
+        },
+    )
+    monkeypatch.setattr(
+        workflows,
+        "_workflow_identity",
+        lambda _root: pytest.fail("report-only must not inspect the current Git identity"),
+    )
+    calls: list[tuple[Path, Path]] = []
+    report = {
+        "schema_version": "1.0",
+        "html": {
+            "path": "work/isolated/v1/reports/reduced/finished/calibration.html",
+            "sha256": "c" * 64,
+        },
+    }
+    monkeypatch.setattr(
+        workflows,
+        "render_calibration_report",
+        lambda *, repo_root, version_root, workflow_root: (
+            calls.append((version_root, workflow_root)) or report
+        ),
+    )
+
+    result = workflows.rebuild_calibration_report(
+        repo_root=repo,
+        work_root=work,
+        calibration_budget="reduced",
+        run_id=None,
+    )
+
+    assert result == report
+    assert calls == [(work / "v1", completed.resolve())]
+    state = json.loads((completed / "workflow.json").read_text(encoding="utf-8"))
+    assert state["reports"] == report
+
+
+def test_report_only_rejects_ambiguous_completed_workflows(tmp_path: Path) -> None:
+    repo, work, _andrea, _spathi = _workflow_paths(tmp_path)
+    base = work / "v1/workflows/calibration/full"
+    for flow_id in ("first", "second"):
+        _write_json(
+            base / flow_id / "workflow.json",
+            {
+                "schema_version": "1.0",
+                "workflow_type": "calibration",
+                "flow_id": flow_id,
+                "identity": IDENTITY,
+                "calibration_budget": "full",
+                "status": "complete",
+                "stages": {},
+            },
+        )
+
+    with pytest.raises(BenchmarkConfigError, match=r"select one with --run-id"):
+        workflows.rebuild_calibration_report(
+            repo_root=repo,
+            work_root=work,
+            calibration_budget="full",
+            run_id=None,
+        )
+
+
+def test_report_only_comparison_selects_calibration_id_without_current_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, work, _andrea, _spathi = _workflow_paths(tmp_path)
+    work = work / "isolated"
+    work.mkdir()
+    completed = work / "v1/workflows/comparison/reduced/reduced-chosen"
+    _write_json(
+        completed / "workflow.json",
+        {
+            "schema_version": "1.0",
+            "workflow_type": "comparison",
+            "flow_id": "reduced-chosen",
+            "identity": IDENTITY,
+            "profile": "reduced",
+            "status": "complete",
+            "stages": {
+                "comparison": {
+                    "status": "complete",
+                    "pipeline": {"run_root": str(work / "v1/reduced-v1/reduced-chosen")},
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        workflows,
+        "_workflow_identity",
+        lambda _root: pytest.fail("report-only must not inspect the current Git identity"),
+    )
+    calls: list[tuple[Path, Path]] = []
+    report = {
+        "schema_version": "1.0",
+        "html": {
+            "path": ("work/isolated/v1/reports/reduced/chosen/comparison.html"),
+            "sha256": "d" * 64,
+        },
+    }
+    monkeypatch.setattr(
+        workflows,
+        "render_comparison_report",
+        lambda *, repo_root, version_root, workflow_root: (
+            calls.append((version_root, workflow_root)) or report
+        ),
+    )
+
+    result = workflows.rebuild_comparison_report(
+        repo_root=repo,
+        work_root=work,
+        profile="reduced",
+        calibration_run_id="chosen",
+    )
+
+    assert result == report
+    assert calls == [(work / "v1", completed.resolve())]
+    state = json.loads((completed / "workflow.json").read_text(encoding="utf-8"))
+    assert state["reports"] == report
+    assert state["stages"]["comparison"]["pipeline"]["interactive_report"] == report["html"]

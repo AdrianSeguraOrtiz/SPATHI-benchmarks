@@ -88,9 +88,7 @@ def test_materialized_exports_are_stable_idempotent_and_tamper_evident(tmp_path:
     first_hash = sha256_file(manifest_path)
 
     assert (run_root / "exports/datasets/dataset-a/analysis.zip").is_file()
-    assert (
-        run_root / "exports/inference/dataset-a/group_only/joint/analysis.zip"
-    ).is_file()
+    assert (run_root / "exports/inference/dataset-a/group_only/joint/analysis.zip").is_file()
     assert all(Path(bundle["export_zip"]).is_file() for bundle in bundles)
     assert (
         _materialize_exports(
