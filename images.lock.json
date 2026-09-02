@@ -56,14 +56,14 @@
   },
   "images": {
     "spathi": {
-      "tag": "spathi-benchmarks/spathi:8e79cad3",
+      "tag": "spathi-benchmarks/spathi:89a47513",
       "base_image": "python:3.13-slim@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f",
       "source_repository": "spathi",
-      "source_commit": "8e79cad3adeadcaa9a5f8f3a774d222325507ed5",
+      "source_commit": "89a47513895a3e455d879c22267840d9c64dbf49",
       "build_inputs": {
-        "containers/spathi/Dockerfile": "9dc82e649c2e08e7e8aeda354fca65160eeb16fb1128d79ba7b4e94a9978c93b",
+        "containers/spathi/Dockerfile": "d2ddd84400aec1a2672d2ce650f6d5ca44712cdc7991614d258efbc9cd49f5c0",
         "containers/spathi/constraints.txt": "126c6303c0e86c1d4ebee6c96dfbaf9d0d154181e447e779ece7c9779d4581da",
-        "containers/spathi/run_tool.py": "af3dda7c67c7943950c39e77f0ef6b54d10dc16212d19e5538a5fc0796ed2e91"
+        "containers/spathi/run_tool.py": "42f399058550f9a95c6f6257ef027f0ed349ccb15189d04f564528a75829ed07"
       },
       "python_dependencies": {
         "joblib": "1.5.3",

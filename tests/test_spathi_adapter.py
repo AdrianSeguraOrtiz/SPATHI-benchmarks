@@ -153,43 +153,74 @@ def test_run_forwards_contract_and_atomically_publishes_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
+    progress_writes: list[dict[str, Any]] = []
 
     class FakeConfig:
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
             self.output_dir = kwargs["output_dir"]
 
-    def fake_infer(config: FakeConfig) -> Any:
+    def fake_infer(
+        config: FakeConfig,
+        *,
+        progress_callback: Any,
+        checkpoint: bool,
+    ) -> Any:
+        captured["checkpoint"] = checkpoint
+        for phase, fraction in (
+            ("validating_inputs", None),
+            ("building_representation", None),
+            ("model_inference", 0.5),
+            ("writing_outputs", 1.0),
+            ("complete", 1.0),
+        ):
+            progress_callback(
+                types.SimpleNamespace(
+                    phase=phase,
+                    message=f"Progress: {phase}",
+                    model_fraction=fraction,
+                )
+            )
         config.output_dir.mkdir()
         network = config.output_dir / "network.csv"
         with network.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(adapter.EXPECTED_NETWORK_COLUMNS)
-        return types.SimpleNamespace(network_path=network)
+        return types.SimpleNamespace(network_path=network, warnings=("bounded warning",))
 
     spathi_package = types.ModuleType("spathi")
     spathi_package.__path__ = []
-    config_module = types.ModuleType("spathi.config")
-    config_module.SpathiConfig = FakeConfig
-    pipeline_module = types.ModuleType("spathi.pipeline")
-    pipeline_module.infer_group_specific_grns = fake_infer
+    spathi_package.SpathiConfig = FakeConfig
+    spathi_package.infer = fake_infer
     monkeypatch.setitem(sys.modules, "spathi", spathi_package)
-    monkeypatch.setitem(sys.modules, "spathi.config", config_module)
-    monkeypatch.setitem(sys.modules, "spathi.pipeline", pipeline_module)
+    original_write_progress = adapter._write_progress
+
+    def tracked_write_progress(output_dir: Path, **kwargs: Any) -> None:
+        progress_writes.append(dict(kwargs))
+        original_write_progress(output_dir, **kwargs)
+
+    monkeypatch.setattr(adapter, "_write_progress", tracked_write_progress)
 
     adapter.run(_namespace(external_tool_inputs, threads=2))
 
+    spathi_output = captured.pop("output_dir")
+    assert isinstance(spathi_output, Path)
+    assert spathi_output.name == "spathi-run"
+    assert spathi_output.parent.name.startswith("spathi-adapter-")
+    assert not spathi_output.exists()
     assert captured == {
         "expression": external_tool_inputs["expression"],
         "tf_list": external_tool_inputs["extra"] / "tf_list.txt",
         "groups": external_tool_inputs["extra"] / "groups.tsv",
-        "output_dir": external_tool_inputs["output_dir"] / "spathi-run",
         "threads": 2,
+        "report": False,
         **frozen_spathi_params,
+        "checkpoint": False,
     }
     network = external_tool_inputs["output_dir"] / "network.csv"
     assert network.read_text(encoding="utf-8").startswith("source,target,score")
-    assert not (external_tool_inputs["output_dir"] / ".network.csv.tmp").exists()
+    assert network.stat().st_mode & 0o777 == 0o644
+    assert not list(external_tool_inputs["output_dir"].glob(".network.*.tmp"))
     progress = json.loads(
         (external_tool_inputs["output_dir"] / "progress.json").read_text(encoding="utf-8")
     )
@@ -198,8 +229,62 @@ def test_run_forwards_contract_and_atomically_publishes_network(
         "percent": 100,
         "phase": "done",
         "status": "completed",
-        "warnings": [],
+        "warnings": ["bounded warning"],
     }
+    assert [write["phase"] for write in progress_writes] == [
+        "validating_inputs",
+        "validating_inputs",
+        "building_representation",
+        "model_inference",
+        "writing_outputs",
+        "complete",
+        "done",
+    ]
+    assert [write["percent"] for write in progress_writes] == [5, 10, 15, 62, 92, 98, 100]
+
+
+def test_adapter_uses_only_the_public_spathi_api() -> None:
+    source = (REPO_ROOT / "containers/spathi/run_tool.py").read_text(encoding="utf-8")
+
+    assert "from spathi import SpathiConfig, infer" in source
+    assert "spathi.pipeline" not in source
+
+
+def test_adapter_removes_temporary_network_when_copy_fails(
+    adapter: types.ModuleType,
+    external_tool_inputs: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.output_dir = kwargs["output_dir"]
+
+    def fake_infer(config: FakeConfig, **_: Any) -> Any:
+        config.output_dir.mkdir()
+        network = config.output_dir / "network.csv"
+        network.write_text(
+            "source,target,score,sign,evidence,context\n",
+            encoding="utf-8",
+        )
+        return types.SimpleNamespace(network_path=network, warnings=())
+
+    spathi_package = types.ModuleType("spathi")
+    spathi_package.__path__ = []
+    spathi_package.SpathiConfig = FakeConfig
+    spathi_package.infer = fake_infer
+    monkeypatch.setitem(sys.modules, "spathi", spathi_package)
+
+    def fail_copy(_source: Path, destination: Path) -> None:
+        destination.write_text("partial", encoding="utf-8")
+        raise OSError("copy failed")
+
+    monkeypatch.setattr(adapter.shutil, "copyfile", fail_copy)
+
+    with pytest.raises(OSError, match="copy failed"):
+        adapter.run(_namespace(external_tool_inputs))
+
+    assert not list(external_tool_inputs["output_dir"].glob(".network.*.tmp"))
+    assert not (external_tool_inputs["output_dir"] / "network.csv").exists()
 
 
 def test_main_records_adapter_failures(

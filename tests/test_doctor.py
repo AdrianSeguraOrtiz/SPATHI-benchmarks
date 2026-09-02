@@ -21,7 +21,10 @@ def _repositories(tmp_path: Path) -> tuple[Path, Path]:
     return andrea, spathi
 
 
-def _successful_runner(andrea_repo: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
+def _successful_runner(
+    andrea_repo: Path,
+    spathi_repo: Path,
+) -> Callable[..., subprocess.CompletedProcess[str]]:
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         if command[0] == "/usr/bin/docker" and command[1:] == ["--version"]:
             stdout = "Docker version 28.0.0\n"
@@ -31,6 +34,22 @@ def _successful_runner(andrea_repo: Path) -> Callable[..., subprocess.CompletedP
             stdout = "github.com/docker/buildx v0.24.0\n"
         elif command[0] == "/venv/bin/python" and command[1:] == ["-m", "andrea", "--help"]:
             stdout = "usage: andrea\n"
+        elif (
+            command[0] == "/venv/bin/python"
+            and command[1] == "-c"
+            and Path(command[-1]) == spathi_repo.resolve()
+        ):
+            stdout = json.dumps(
+                {
+                    "module": str(spathi_repo / "src" / "spathi" / "__init__.py"),
+                    "missing_exports": [],
+                    "missing_config_fields": [],
+                    "unsupported_required_config_fields": [],
+                    "missing_progress_members": [],
+                    "missing_result_fields": [],
+                    "infer_signature_ok": True,
+                }
+            )
         elif command[0] == "/venv/bin/python" and command[1] == "-c":
             stdout = f"{andrea_repo / 'andrea' / '__init__.py'}\n"
         else:  # pragma: no cover - makes unexpected subprocesses immediately visible
@@ -58,17 +77,18 @@ def test_run_doctor_reports_a_complete_healthy_environment(tmp_path: Path) -> No
         python_executable="/venv/bin/python",
         python_version=(3, 11, 9),
         report_path=output,
-        runner=_successful_runner(andrea),
+        runner=_successful_runner(andrea, spathi),
         resolver=_resolver,
     )
 
     assert report["ok"] is True
-    assert report["summary"] == {"pass": 8, "fail": 0, "skip": 0}
+    assert report["summary"] == {"pass": 9, "fail": 0, "skip": 0}
     assert {check["status"] for check in report["checks"]} == {"pass"}
     assert json.loads(output.read_text(encoding="utf-8")) == report
     checks = _by_id(report)
     assert checks["andrea_cli"]["details"]["python_executable"] == "/venv/bin/python"  # type: ignore[index]
     assert checks["andrea_import"]["details"]["repository"] == str(andrea.resolve())  # type: ignore[index]
+    assert checks["spathi_api"]["details"]["repository"] == str(spathi.resolve())  # type: ignore[index]
 
 
 def test_missing_docker_fails_cli_and_skips_dependent_checks(tmp_path: Path) -> None:
@@ -78,7 +98,7 @@ def test_missing_docker_fails_cli_and_skips_dependent_checks(tmp_path: Path) -> 
         andrea_repo=andrea,
         spathi_repo=spathi,
         python_executable="/venv/bin/python",
-        runner=_successful_runner(andrea),
+        runner=_successful_runner(andrea, spathi),
         resolver=lambda _executable: None,
     )
 
@@ -124,8 +144,12 @@ def test_andrea_import_must_resolve_inside_expected_checkout(tmp_path: Path) -> 
     installed.write_text("", encoding="utf-8")
 
     def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        outcome = _successful_runner(andrea)(command, **kwargs)
-        if command[0] == "/venv/bin/python":
+        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
+        if (
+            command[0] == "/venv/bin/python"
+            and command[1] == "-c"
+            and Path(command[-1]) == andrea.resolve()
+        ):
             return subprocess.CompletedProcess(command, 0, stdout=f"{installed}\n", stderr="")
         return outcome
 
@@ -143,13 +167,105 @@ def test_andrea_import_must_resolve_inside_expected_checkout(tmp_path: Path) -> 
     assert check["details"]["imported_module"] == str(installed.resolve())  # type: ignore[index]
 
 
+def test_spathi_api_check_reports_missing_public_exports(tmp_path: Path) -> None:
+    andrea, spathi = _repositories(tmp_path)
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
+        if (
+            command[0] == "/venv/bin/python"
+            and command[1] == "-c"
+            and Path(command[-1]) == spathi.resolve()
+        ):
+            payload = {
+                "module": str(spathi / "src/spathi/__init__.py"),
+                "missing_exports": ["infer"],
+                "missing_config_fields": [],
+                "unsupported_required_config_fields": [],
+                "missing_progress_members": [],
+                "missing_result_fields": [],
+                "infer_signature_ok": True,
+            }
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        return outcome
+
+    report = run_doctor(
+        andrea_repo=andrea,
+        spathi_repo=spathi,
+        python_executable="/venv/bin/python",
+        runner=runner,
+        resolver=_resolver,
+    )
+
+    check = _by_id(report)["spathi_api"]
+    assert report["ok"] is False
+    assert check["status"] == "fail"
+    assert check["details"]["missing_exports"] == ["infer"]  # type: ignore[index]
+
+
+def test_spathi_api_check_reports_an_incompatible_adapter_contract(
+    tmp_path: Path,
+) -> None:
+    andrea, spathi = _repositories(tmp_path)
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
+        if (
+            command[0] == "/venv/bin/python"
+            and command[1] == "-c"
+            and Path(command[-1]) == spathi.resolve()
+        ):
+            payload = {
+                "module": str(spathi / "src/spathi/__init__.py"),
+                "missing_exports": [],
+                "missing_config_fields": ["report"],
+                "unsupported_required_config_fields": ["new_required_option"],
+                "missing_progress_members": ["model_fraction"],
+                "missing_result_fields": ["warnings"],
+                "infer_signature_ok": False,
+            }
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        return outcome
+
+    report = run_doctor(
+        andrea_repo=andrea,
+        spathi_repo=spathi,
+        python_executable="/venv/bin/python",
+        runner=runner,
+        resolver=_resolver,
+    )
+
+    check = _by_id(report)["spathi_api"]
+    assert report["ok"] is False
+    assert check["status"] == "fail"
+    assert check["details"]["missing_config_fields"] == ["report"]  # type: ignore[index]
+    assert check["details"]["unsupported_required_config_fields"] == [  # type: ignore[index]
+        "new_required_option"
+    ]
+    assert check["details"]["missing_progress_members"] == [  # type: ignore[index]
+        "model_fraction"
+    ]
+    assert check["details"]["missing_result_fields"] == ["warnings"]  # type: ignore[index]
+    assert check["details"]["infer_signature_ok"] is False  # type: ignore[index]
+
+
 def test_command_errors_are_reported_instead_of_raised(tmp_path: Path) -> None:
     andrea, spathi = _repositories(tmp_path)
 
     def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[:2] == ["/usr/bin/docker", "info"]:
             raise subprocess.TimeoutExpired(command, timeout=kwargs["timeout"])
-        return _successful_runner(andrea)(command, **kwargs)
+        return _successful_runner(andrea, spathi)(command, **kwargs)
 
     report = run_doctor(
         andrea_repo=andrea,

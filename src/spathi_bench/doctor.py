@@ -36,6 +36,81 @@ module_file = pathlib.Path(module.__file__).resolve()
 print(module_file)
 """.strip()
 
+_SPATHI_API_PROBE = """
+import ast
+import dataclasses
+import importlib
+import json
+import pathlib
+import sys
+
+repository = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repository / "src"))
+module = importlib.import_module("spathi")
+module_file = pathlib.Path(module.__file__).resolve()
+required = {"SpathiConfig", "SpathiProgressEvent", "SpathiRunResult", "infer"}
+exports = set(getattr(module, "__all__", ()))
+config_type = getattr(module, "SpathiConfig")
+progress_type = getattr(module, "SpathiProgressEvent")
+required_config_fields = {
+    "bandwidth", "bootstrap", "distance_metric", "distance_space",
+    "distance_standardization", "expression", "group_size_correction", "groups",
+    "kernel", "max_depth", "max_features", "min_samples_leaf", "n_components",
+    "n_estimators", "output_dir", "pca_svd_solver", "random_seed", "report",
+    "tf_list", "threads", "tree_method", "weight_mode",
+}
+config_definition = dataclasses.fields(config_type)
+config_fields = {field.name for field in config_definition}
+unsupported_required_config_fields = sorted(
+    field.name
+    for field in config_definition
+    if field.default is dataclasses.MISSING
+    and field.default_factory is dataclasses.MISSING
+    and field.name not in required_config_fields
+)
+progress_fields = {field.name for field in dataclasses.fields(progress_type)}
+missing_progress_members = sorted(
+    {"phase", "message", "model_fraction"}
+    - progress_fields
+    - set(dir(progress_type))
+)
+tree = ast.parse((repository / "src" / "spathi" / "core.py").read_text(encoding="utf-8"))
+infer_defs = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "infer"]
+infer_signature_ok = False
+if len(infer_defs) == 1:
+    signature = infer_defs[0].args
+    positional = [argument.arg for argument in (*signature.posonlyargs, *signature.args)]
+    keyword_only = {argument.arg for argument in signature.kwonlyargs}
+    required_unprovided = {
+        argument.arg
+        for argument, default in zip(signature.kwonlyargs, signature.kw_defaults, strict=True)
+        if default is None and argument.arg not in {"progress_callback", "checkpoint"}
+    }
+    infer_signature_ok = positional == ["config"] and {
+        "progress_callback", "checkpoint"
+    } <= keyword_only and not required_unprovided
+result_defs = [
+    node for node in tree.body
+    if isinstance(node, ast.ClassDef) and node.name == "SpathiRunResult"
+]
+result_fields = set()
+if len(result_defs) == 1:
+    result_fields = {
+        node.target.id
+        for node in result_defs[0].body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+print(json.dumps({
+    "module": str(module_file),
+    "missing_exports": sorted(required - exports),
+    "missing_config_fields": sorted(required_config_fields - config_fields),
+    "unsupported_required_config_fields": unsupported_required_config_fields,
+    "missing_progress_members": missing_progress_members,
+    "missing_result_fields": sorted({"network_path", "warnings"} - result_fields),
+    "infer_signature_ok": infer_signature_ok,
+}))
+""".strip()
+
 
 def _result(
     check_id: str,
@@ -348,6 +423,101 @@ def _andrea_import_check(
     )
 
 
+def _spathi_api_check(
+    spathi_repo: Path,
+    python_executable: str,
+    *,
+    repository_available: bool,
+    runner: CommandRunner,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    expected_repo = spathi_repo.resolve()
+    if not repository_available:
+        return _skipped(
+            "spathi_api",
+            "SPATHI API check requires an existing Git checkout",
+            remediation="Provide the expected SPATHI repository and rerun the diagnostic.",
+        )
+    command = [python_executable, "-c", _SPATHI_API_PROBE, str(expected_repo)]
+    outcome = _command(command, runner=runner, timeout_seconds=timeout_seconds)
+    if isinstance(outcome, Exception) or outcome.returncode != 0:
+        return _failed(
+            "spathi_api",
+            "SPATHI's public API could not be inspected from the expected repository",
+            details=_command_failure_details(command, outcome),
+            remediation="Synchronize the locked SPATHI checkout and verify its public package.",
+        )
+    try:
+        payload = json.loads((outcome.stdout or "").strip().splitlines()[-1])
+        module_path = Path(payload["module"]).resolve()
+        missing_exports = payload["missing_exports"]
+        missing_config_fields = payload["missing_config_fields"]
+        unsupported_required_config_fields = payload["unsupported_required_config_fields"]
+        missing_progress_members = payload["missing_progress_members"]
+        missing_result_fields = payload["missing_result_fields"]
+        infer_signature_ok = payload["infer_signature_ok"]
+        for key, values in (
+            ("missing_exports", missing_exports),
+            ("missing_config_fields", missing_config_fields),
+            ("unsupported_required_config_fields", unsupported_required_config_fields),
+            ("missing_progress_members", missing_progress_members),
+            ("missing_result_fields", missing_result_fields),
+        ):
+            if not isinstance(values, list) or not all(isinstance(name, str) for name in values):
+                raise TypeError(f"{key} must be a list of strings")
+        if not isinstance(infer_signature_ok, bool):
+            raise TypeError("infer_signature_ok must be a boolean")
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return _failed(
+            "spathi_api",
+            "SPATHI API probe returned an invalid payload",
+            details={**_command_failure_details(command, outcome), "error": str(exc)},
+            remediation="Verify that the locked SPATHI package exposes its public API metadata.",
+        )
+    if not module_path.is_relative_to(expected_repo):
+        return _failed(
+            "spathi_api",
+            "SPATHI resolved outside the expected repository",
+            details={
+                "expected_repository": str(expected_repo),
+                "imported_module": str(module_path),
+            },
+            remediation="Remove the conflicting installation or select the matching SPATHI checkout.",
+        )
+    if missing_exports:
+        return _failed(
+            "spathi_api",
+            "SPATHI does not expose the API required by its benchmark adapter",
+            details={"missing_exports": missing_exports, "module": str(module_path)},
+            remediation="Update SPATHI-benchmarks for the locked SPATHI public API.",
+        )
+    if (
+        missing_config_fields
+        or unsupported_required_config_fields
+        or missing_progress_members
+        or missing_result_fields
+        or not infer_signature_ok
+    ):
+        return _failed(
+            "spathi_api",
+            "SPATHI's public API contract is incompatible with its benchmark adapter",
+            details={
+                "missing_config_fields": missing_config_fields,
+                "unsupported_required_config_fields": unsupported_required_config_fields,
+                "missing_progress_members": missing_progress_members,
+                "missing_result_fields": missing_result_fields,
+                "infer_signature_ok": infer_signature_ok,
+                "module": str(module_path),
+            },
+            remediation="Update SPATHI-benchmarks for the locked SPATHI configuration and infer signature.",
+        )
+    return _passed(
+        "spathi_api",
+        "SPATHI exposes the public API required by its benchmark adapter",
+        details={"repository": str(expected_repo), "module": str(module_path)},
+    )
+
+
 def write_doctor_report(report: dict[str, Any], path: Path) -> Path:
     """Atomically write a doctor report as UTF-8 JSON."""
 
@@ -434,6 +604,15 @@ def run_doctor(
             Path(andrea_repo),
             selected_python,
             repository_available=andrea_repository["status"] == "pass",
+            runner=command_runner,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+    checks.append(
+        _spathi_api_check(
+            Path(spathi_repo),
+            selected_python,
+            repository_available=spathi_repository["status"] == "pass",
             runner=command_runner,
             timeout_seconds=timeout_seconds,
         )

@@ -123,6 +123,16 @@ scientific work. No additional command is needed:
 Consequently, the calibration and comparison reports for one study sit beside each other
 in a single directory.
 
+These experiment-level reports are distinct from SPATHI's per-inference `report.html`.
+The benchmark adapter deliberately runs SPATHI with `report=False` and without internal
+checkpoints: generating a cell-level HTML document for every calibration candidate would
+distort runtime measurements and duplicate presentation that is already aggregated here.
+Neither switch changes the inferred network. Structured SPATHI progress is translated into
+ANDREA's `progress.json`, and SPATHI warnings are preserved in that contract. SPATHI's
+diagnostic run directory is built in container-local scratch space and discarded after its
+validated `network.csv` is copied atomically, leaving only the two files declared by the
+ANDREA external-tool contract in `/io/out`.
+
 The calibration report documents how the frozen SPATHI configuration was selected. It
 shows the four bounded stages, candidate rankings, accuracy versus wall time, observations
 by dataset and algorithmic seed, the parameters that vary within each stage, the selected
@@ -209,6 +219,11 @@ Running `scripts/calibrate.sh` creates a new workflow identity for that revision
 pipeline builds the new SPATHI image but recovers unchanged generated data, catalog
 inference and catalog evaluations as cache hits. It is therefore unnecessary to execute
 the other tools again merely because SPATHI changed.
+
+Changing the pinned SPATHI implementation does require a fresh calibration and fresh
+SPATHI inference/evaluation artifacts; a configuration selected for an older implementation
+is never silently promoted. The simulation datasets and unaffected catalog-tool artifacts
+remain reusable through the content-addressed store.
 
 The run state records hit counts and the concrete SPATHI image ID. Catalog containers
 are pulled by immutable repository digest. SPATHI is passed to ANDREA by exact local
