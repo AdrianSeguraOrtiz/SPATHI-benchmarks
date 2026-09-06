@@ -2,6 +2,20 @@
 set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  printf 'Usage: %s [PROFILE] [RUN_ID] [--from STAGE] [--until STAGE]\n' "${0##*/}"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  printf '%s\n' \
+    'Runs a runnable low-level profile through the selected contiguous stage interval.' \
+    'Default profile: smoke. Stages: preflight, image, generate, infer, validate,' \
+    'integrate, evaluate, export, summarize, statistics.'
+  exit 0
+fi
+
 PROFILE="${1:-smoke}"
 RUN_ID="${2:-$(date -u +%Y%m%dT%H%M%SZ)}"
 shift "$(( $# >= 2 ? 2 : $# ))"
@@ -18,11 +32,9 @@ while (( $# > 0 )); do
       UNTIL_STAGE="${2:?--until requires a stage}"
       shift 2
       ;;
-    --resume)
-      shift
-      ;;
     *)
       echo "Unknown argument: $1" >&2
+      usage >&2
       exit 2
       ;;
   esac

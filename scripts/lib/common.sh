@@ -4,7 +4,21 @@ set -euo pipefail
 
 BENCH_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+bench_environment() {
+  BENCH_WORK_ROOT="${WORK_ROOT:-$BENCH_REPO_ROOT/work}"
+  BENCH_ANDREA_REPO="${ANDREA_REPO:-$BENCH_REPO_ROOT/../ANDREA}"
+  BENCH_SPATHI_REPO="${SPATHI_REPO:-$BENCH_REPO_ROOT/../SPATHI}"
+  if [[ -z "${BENCH_PYTHON:-}" ]]; then
+    if [[ -x "$BENCH_REPO_ROOT/.venv/bin/python" ]]; then
+      BENCH_PYTHON="$BENCH_REPO_ROOT/.venv/bin/python"
+    else
+      BENCH_PYTHON="python3"
+    fi
+  fi
+}
+
 bench_init() {
+  bench_environment
   BENCH_PROFILE="${1:-smoke}"
   BENCH_RUN_ID="${2:-manual}"
 
@@ -17,18 +31,7 @@ bench_init() {
     return 2
   fi
 
-  BENCH_WORK_ROOT="${WORK_ROOT:-$BENCH_REPO_ROOT/work}"
   BENCH_RUN_ROOT="$BENCH_WORK_ROOT/v1/$BENCH_PROFILE/$BENCH_RUN_ID"
-  BENCH_ANDREA_REPO="${ANDREA_REPO:-$BENCH_REPO_ROOT/../ANDREA}"
-  BENCH_SPATHI_REPO="${SPATHI_REPO:-$BENCH_REPO_ROOT/../SPATHI}"
-  if [[ -z "${BENCH_PYTHON:-}" ]]; then
-    if [[ -x "$BENCH_REPO_ROOT/.venv/bin/python" ]]; then
-      BENCH_PYTHON="$BENCH_REPO_ROOT/.venv/bin/python"
-    else
-      BENCH_PYTHON="python3"
-    fi
-  fi
-
 }
 
 bench_command() {

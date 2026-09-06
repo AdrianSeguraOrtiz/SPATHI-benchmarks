@@ -3,13 +3,13 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: scripts/compare.sh [--profile full|reduced] [--calibration-run-id ID] [--report-only]"
-  echo "Runs or resumes the selected SPATHI comparison."
+  echo "Usage: scripts/compare.sh [--profile full|reduced] [--efficiency-run-id ID] [--report-only]"
+  echo "Runs or resumes the efficiency-gated SPATHI comparison."
   echo
   echo "Options:"
-  echo "  --profile full|reduced    Use held-out full (default) or development reduced."
-  echo "                            The calibration must use the same profile."
-  echo "  --calibration-run-id ID   Use a same-profile calibration with an explicit ID."
+  echo "  --profile full|reduced    Use publication full (default) or operational reduced."
+  echo "                            The efficiency study must use the same profile."
+  echo "  --efficiency-run-id ID    Select one completed same-profile efficiency study."
   echo "  --report-only             Rebuild HTML from completed outputs; run no experiments."
   echo "  -h, --help                Show this help."
   echo
@@ -18,7 +18,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 source "$SCRIPT_ROOT/lib/common.sh"
-bench_init smoke compare
+bench_environment
 
 bench_command compare \
   --repo-root "$BENCH_REPO_ROOT" \

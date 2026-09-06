@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: scripts/calibrate.sh [--profile full|reduced] [--run-id ID] [--report-only]"
-  echo "Runs or resumes the tree-count, structure, estimator and validation stages."
+  echo "Runs or resumes geometry, estimator, interaction, estimator-scale transfer, convergence and validation."
   echo
   echo "Options:"
   echo "  --profile full|reduced  Use the full (default) or reduced evidence budget."
@@ -17,7 +17,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 source "$SCRIPT_ROOT/lib/common.sh"
-bench_init smoke calibrate
+bench_environment
 
 bench_command calibrate \
   --repo-root "$BENCH_REPO_ROOT" \
