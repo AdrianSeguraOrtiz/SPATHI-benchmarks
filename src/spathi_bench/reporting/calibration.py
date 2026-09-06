@@ -11,17 +11,25 @@ from ..state import STATE_SCHEMA_VERSION
 from .common import (
     central_report_path,
     path_below,
+    reconcile_report_bundle,
     repo_file,
     require_array,
-    require_completed_workflow,
     require_mapping,
+    require_reportable_workflow,
     safe_relative_link,
     verify_sha256,
     write_report_bundle,
 )
 from .datasets import build_dataset_overview, combine_dataset_overviews
 
-CALIBRATION_STAGE_ORDER = ("convergence", "structure", "estimator", "validation")
+CALIBRATION_STAGE_ORDER = (
+    "geometry",
+    "estimator",
+    "interaction",
+    "estimator_scale_transfer",
+    "convergence",
+    "validation",
+)
 
 
 def _stage_specifications(search_space: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -35,12 +43,12 @@ def _stage_specifications(search_space: dict[str, Any]) -> dict[str, dict[str, A
     if "validation" not in specifications and isinstance(protocol, dict):
         specifications["validation"] = {
             "id": "validation",
-            "order": 4,
+            "order": 6,
             "dataset_role": "validation",
             "strategy": "frozen_finalist_selection",
             "purpose": (
-                "Choose one global configuration from the predeclared development finalists "
-                "without accessing the held-out test panel."
+                "Choose one conditional group policy from the predeclared development "
+                "finalists without accessing the held-out test panel."
             ),
             "advance_limit": 1,
             "candidates": [],
@@ -50,7 +58,7 @@ def _stage_specifications(search_space: dict[str, Any]) -> dict[str, dict[str, A
 
 def _candidate_rationales(stage: dict[str, Any]) -> dict[str, str]:
     rationales = {
-        "reference": "Reference configuration from the frozen search space.",
+        "base": "Base configuration from the frozen search space.",
         "inherited": "Configuration inherited unchanged from the preceding shortlist.",
     }
     for raw_candidate in stage.get("candidates", []):
@@ -228,7 +236,7 @@ def _record_group_counts(
 def render_calibration_report(
     *, repo_root: Path, version_root: Path, workflow_root: Path
 ) -> dict[str, Any]:
-    """Render a completed calibration without rerunning or reranking any experiment."""
+    """Render a publishable calibration without rerunning or reranking experiments."""
 
     root = repo_root.resolve()
     version = path_below(
@@ -244,7 +252,7 @@ def render_calibration_report(
         file=False,
     )
     workflow_path = calibration_root / "workflow.json"
-    workflow = require_completed_workflow(workflow_path, "calibration")
+    workflow = require_reportable_workflow(workflow_path, "calibration")
     calibration_budget = workflow.get("calibration_budget")
     if calibration_budget not in {"reduced", "full"}:
         raise BenchmarkConfigError("Completed calibration has an invalid evidence budget")
@@ -259,7 +267,8 @@ def render_calibration_report(
     stage_records = require_mapping(workflow.get("stages"), "calibration workflow stages")
     if set(stage_records) != set(CALIBRATION_STAGE_ORDER):
         raise BenchmarkConfigError(
-            "Completed calibration must contain convergence, structure, estimator and validation"
+            "Completed calibration must contain geometry, estimator, interaction, "
+            "estimator scale transfer, convergence and validation"
         )
 
     report_path = central_report_path(
@@ -268,6 +277,8 @@ def render_calibration_report(
         scope=calibration_budget,
         flow_id=workflow["flow_id"],
     )
+    if workflow.get("interactive_report") != report_path.relative_to(root).as_posix():
+        raise BenchmarkConfigError("Calibration workflow records a non-canonical report path")
     stages: list[dict[str, Any]] = []
     input_paths = [search_path]
     previous_ranking_path: Path | None = None
@@ -303,7 +314,7 @@ def render_calibration_report(
         parent = ranking.get("parent_ranking")
         if previous_ranking_path is None:
             if parent is not None:
-                raise BenchmarkConfigError("Convergence ranking unexpectedly declares a parent")
+                raise BenchmarkConfigError("Geometry ranking unexpectedly declares a parent")
         else:
             parent_record = require_mapping(parent, f"{stage_id} parent ranking")
             parent_path = repo_file(
@@ -354,15 +365,24 @@ def render_calibration_report(
                 f"{stage_id} ranking datasets differ from its completed benchmark state"
             )
         role = str(ranking["dataset_role"])
-        previous_state = dataset_states.setdefault(role, stage_state)
+        specification = specifications.get(stage_id, {})
+        selector = specification.get("dataset_selector")
+        panel_id = (
+            str(selector.get("split_id"))
+            if isinstance(selector, dict) and selector.get("split_id")
+            else role
+        )
+        previous_state = dataset_states.setdefault(panel_id, stage_state)
         if _dataset_identity(previous_state) != _dataset_identity(stage_state):
-            raise BenchmarkConfigError(f"Calibration stages disagree on the {role!r} dataset panel")
+            raise BenchmarkConfigError(
+                f"Calibration stages disagree on the {panel_id!r} dataset panel"
+            )
         dataset_state_paths.append(stage_state_path)
         stages.append(
             _stage_payload(
                 stage_id=stage_id,
                 ranking=ranking,
-                specification=specifications.get(stage_id, {}),
+                specification=specification,
             )
         )
         ranking_paths[stage_id] = ranking_path
@@ -390,15 +410,15 @@ def render_calibration_report(
         or selected.get("test_accessed_before_freeze") is not False
     ):
         raise BenchmarkConfigError("Frozen SPATHI configuration has an invalid selection contract")
-    selected_candidate = require_mapping(
-        selected.get("selected_candidate"), "frozen SPATHI candidate"
+    selected_policy = require_mapping(
+        selected.get("selected_policy"), "frozen SPATHI conditional policy"
     )
     validation_winner = require_mapping(stages[-1].get("winner"), "validation winner")
     if (
-        selected_candidate.get("candidate_id") != validation_winner.get("candidate_id")
-        or selected_candidate.get("configuration_sha256")
+        selected_policy.get("source_candidate_id") != validation_winner.get("candidate_id")
+        or selected_policy.get("source_configuration_sha256")
         != validation_winner.get("configuration_sha256")
-        or selected_candidate.get("spathi_commit") != workflow["identity"].get("spathi_commit")
+        or selected_policy.get("spathi_commit") != workflow["identity"].get("spathi_commit")
     ):
         raise BenchmarkConfigError("Frozen selection differs from the validation winner")
     input_paths.append(selected_path)
@@ -438,7 +458,7 @@ def render_calibration_report(
         "report_type": "calibration",
         "workflow": {
             "flow_id": workflow["flow_id"],
-            "status": workflow["status"],
+            "status": "complete",
             "calibration_budget": calibration_budget,
             "identity": workflow["identity"],
         },
@@ -456,11 +476,16 @@ def render_calibration_report(
         "stages": stages,
         "links": links,
     }
-    return write_report_bundle(
-        repo_root=root,
-        kind="calibration",
-        output_path=report_path,
-        payload=payload,
-        input_paths=input_paths,
-        manifest_name="calibration-report.manifest.json",
+    return reconcile_report_bundle(
+        workflow,
+        write_report_bundle(
+            repo_root=root,
+            kind="calibration",
+            output_path=report_path,
+            payload=payload,
+            input_paths=input_paths,
+            manifest_name="calibration-report.manifest.json",
+            immutable=True,
+        ),
+        "calibration",
     )

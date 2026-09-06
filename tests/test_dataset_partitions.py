@@ -141,8 +141,15 @@ def test_equal_filenames_with_different_content_do_not_conflict(tmp_path: Path) 
         [_profile("calibration", development), _profile("selection", validation)],
     )
 
-    assert contract["identity_contract_version"] == "1.1"
-    assert contract["protected_roles"] == ["development", "test", "validation"]
+    assert contract["identity_contract_version"] == "1.0"
+    assert contract["protected_roles"] == [
+        "development",
+        "dimensional_transfer",
+        "efficiency_safety",
+        "efficiency_validation",
+        "test",
+        "validation",
+    ]
     assert contract["identity_types"] == ["generation_task", "related_input"]
     assert len(contract["records"]) == 2
 

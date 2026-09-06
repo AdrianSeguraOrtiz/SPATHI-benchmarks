@@ -64,10 +64,12 @@
     const target = R.query("#status-banner");
     const workflow = data.workflow || {};
     const integrity = data.integrity || {};
+    const analysisMode = String(((data.statistics || {}).contract || {}).status || "");
     const incompleteStatuses = new Set([
       "incomplete",
       "incomplete_panel",
       "partially_tested",
+      "confirmatory_incomplete",
       "not_testable",
       "failed",
       "error",
@@ -81,7 +83,10 @@
     } else if (incomplete || !["complete", "completed"].includes(String(workflow.status || "complete").toLowerCase())) {
       R.notice(target, "warning", "Partial report", `${incomplete} analyses are incomplete or failed. Review their reasons before interpreting results.`);
     } else {
-      R.notice(target, "success", "Comparison complete", "Scores, tests, and effect sizes come from the canonical statistical artifacts.");
+      const message = analysisMode === "inferential"
+        ? "Scores, tests, and effect sizes come from the canonical analysis artifacts."
+        : "Scores and paired descriptive effects come from the canonical analysis artifacts; no hypothesis test or winner claim was made.";
+      R.notice(target, "success", "Comparison complete", message);
     }
   }
 
@@ -91,11 +96,16 @@
     const blocks = R.unique(analyses.flatMap((analysis) => asArray(analysis.blocks).map((block) => block.dataset_id)));
     const tools = R.unique(analyses.flatMap((analysis) => asArray(analysis.configurations).map((configuration) => configuration.tool_id)));
     const roles = R.unique(analyses.map(roleOf));
+    const analyzed = firstDefined(
+      summary.n_inferential,
+      0,
+    ) + firstDefined(summary.n_descriptive, 0) + firstDefined(summary.n_contract_only, 0);
+    const inferential = firstDefined(summary.n_inferential, analyses.filter((item) => item.status === "tested").length);
     R.addStatCards(R.query("#overview-cards"), [
-      { label: "Analyses", value: R.formatInteger(firstDefined(summary.n_analyses, analyses.length)), detail: `${R.formatInteger(firstDefined(summary.n_tested, analyses.filter((item) => item.status === "tested").length))} tested` },
-      { label: "Dataset blocks", value: R.formatInteger(blocks.length), detail: "Independent unit of the statistical test" },
+      { label: "Analyses", value: R.formatInteger(firstDefined(summary.n_analyses, analyses.length)), detail: `${R.formatInteger(analyzed)} complete; ${R.formatInteger(inferential)} inferential` },
+      { label: "Dataset blocks", value: R.formatInteger(blocks.length), detail: "Independent unit of each paired comparison" },
       { label: "Methods", value: R.formatInteger(tools.length || R.unique(analyses.flatMap((analysis) => asArray(analysis.rankings).map((ranking) => ranking.tool_id))).length), detail: "Comparable configurations" },
-      { label: "Control wins", value: R.formatInteger(summary.n_control_wins), detail: `out of ${R.formatInteger(summary.n_tested)} tested analyses` },
+      { label: "Control wins", value: R.formatInteger(summary.n_control_wins), detail: inferential ? `out of ${R.formatInteger(inferential)} inferential analyses` : "No winner claims in this evidence mode" },
       { label: "Analysis role", value: roles.map(R.humanize).join(" / ") || "—", detail: roles.includes("exploratory") ? "Not confirmatory evidence" : "Held-out partition" },
     ]);
   }
@@ -540,7 +550,7 @@
       { label: "ANDREA commit", value: identity.andrea_commit || workflow.andrea_commit },
       { label: "Benchmark commit", value: identity.benchmark_commit || (data.summary && data.summary.benchmark_commit) },
       { label: "Fingerprint", value: identity.fingerprint || workflow.fingerprint },
-      { label: "Statistical contract", value: statistics.contract && (statistics.contract.id || statistics.contract.schema_version) },
+      { label: "Analysis mode", value: statistics.contract && statistics.contract.status },
       { label: "Schema", value: statistics.schema_version },
     ]);
     R.renderLinks(R.query("#report-links"), "Artifacts", normalizeLinks(data.links || data.artifacts));

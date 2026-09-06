@@ -20,8 +20,21 @@ from spathi_bench.pipeline import (
     _inference_spec,
     _integration_spec,
     _spathi_build_fingerprint,
+    _validate_inference_state_contract,
     build_spathi_image,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DOCKER_RUNTIME = {"fingerprint": "d" * 64}
+
+
+@pytest.fixture(autouse=True)
+def _stable_docker_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        pipeline,
+        "docker_runtime_environment",
+        lambda: deepcopy(DOCKER_RUNTIME),
+    )
 
 
 def _state() -> dict[str, Any]:
@@ -29,7 +42,161 @@ def _state() -> dict[str, Any]:
         "benchmark_repository": {"commit": "b" * 40},
         "repositories": {"observed": {"andrea": {"commit": "a" * 40}}},
         "host_environment": {"fingerprint": "h" * 64},
+        "benchmark_environment": {"fingerprint": "j" * 64},
+        "docker_runtime_environment": deepcopy(DOCKER_RUNTIME),
         "catalog_images": {"simulator:dyngen": {"locked_repo_digest": "dyngen@sha256:" + "d" * 64}},
+    }
+
+
+def test_preflight_revalidates_seed_contracts_before_resuming(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resumed_state_was_read = False
+
+    def stale_design(_repo_root: Path, _andrea_repo: Path) -> None:
+        raise BenchmarkConfigError("Reproducibility audit failed: stale seed fixture")
+
+    def existing_state(*_args: Any) -> dict[str, Any]:
+        nonlocal resumed_state_was_read
+        resumed_state_was_read = True
+        return {"status": "preflighted"}
+
+    monkeypatch.setattr(pipeline, "validate_all_profiles", lambda _root: None)
+    monkeypatch.setattr(pipeline, "validate_environment_lock", lambda _root: None)
+    monkeypatch.setattr(pipeline, "validate_design_contracts", stale_design)
+    monkeypatch.setattr(pipeline, "_load_existing_state", existing_state)
+
+    with pytest.raises(BenchmarkConfigError, match="stale seed fixture"):
+        pipeline.preflight(
+            repo_root=tmp_path,
+            profile_id="smoke",
+            run_root=tmp_path / "run",
+            andrea_repo=tmp_path / "andrea",
+            spathi_repo=tmp_path / "spathi",
+        )
+    assert not resumed_state_was_read
+
+
+def test_docker_runtime_change_invalidates_a_preflighted_run() -> None:
+    state = {"docker_runtime_environment": {"fingerprint": "a" * 64}}
+
+    with pytest.raises(BenchmarkConfigError, match="Docker runtime.*changed"):
+        pipeline._validate_docker_runtime(state, {"fingerprint": "b" * 64})
+
+
+def test_preflight_writes_scale_stress_generation_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = tmp_path / "work/v1/scalability-reduced/test-run"
+    run_root.mkdir(parents=True)
+    profile = {
+        "id": "scalability-reduced",
+        "purpose": "scalability",
+        "generation_jobs": [
+            {
+                "id": "scale_stress_scalability_reduced",
+                "generator_request": ("experiments/v1/simulations/scale_stress/scale-reduced.json"),
+            }
+        ],
+        "resources": {
+            "generate_data": {
+                "max_parallel_tasks": 1,
+                "max_cores": 1,
+                "max_ram_gb": 1,
+            }
+        },
+    }
+    monkeypatch.setattr(pipeline, "validate_all_profiles", lambda _root: None)
+    monkeypatch.setattr(pipeline, "validate_design_contracts", lambda _root, _andrea: None)
+    monkeypatch.setattr(pipeline, "_load_existing_state", lambda *_args: None)
+    monkeypatch.setattr(pipeline, "freeze_run_inputs", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "frozen_repository_root", lambda _run: REPO_ROOT)
+    monkeypatch.setattr(
+        pipeline,
+        "frozen_path",
+        lambda _run, raw_path, _label: REPO_ROOT / raw_path,
+    )
+    monkeypatch.setattr(pipeline, "frozen_profile", lambda *_args: profile)
+    monkeypatch.setattr(pipeline, "validate_profile_references", lambda *_args: None)
+    monkeypatch.setattr(
+        pipeline,
+        "load_repo_lock",
+        lambda _root: {
+            "repositories": {
+                "andrea": {"commit": "a" * 40},
+                "spathi": {"commit": "b" * 40},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_validate_andrea_repository",
+        lambda *_args: {"commit": "a" * 40},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "validate_locked_repository",
+        lambda **_kwargs: {"commit": "b" * 40},
+    )
+    monkeypatch.setattr(pipeline, "check_docker", lambda: None)
+    monkeypatch.setattr(pipeline, "_validate_spathi_image_contract", lambda _root: {})
+    monkeypatch.setattr(pipeline, "_pin_profile_catalog_images", lambda **_kwargs: {})
+    monkeypatch.setattr(pipeline, "andrea_host_environment", lambda: {"host": "test"})
+    monkeypatch.setattr(
+        pipeline,
+        "benchmark_host_environment",
+        lambda: {"fingerprint": "f" * 64},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_initial_state",
+        lambda **_kwargs: {"schema_version": "1.0", "status": "preflighted"},
+    )
+    monkeypatch.setattr(pipeline, "write_state", lambda *_args: None)
+
+    report = pipeline.preflight(
+        repo_root=REPO_ROOT,
+        profile_id="scalability-reduced",
+        run_root=run_root,
+        andrea_repo=tmp_path / "andrea",
+        spathi_repo=tmp_path / "spathi",
+    )
+
+    assert report.is_file()
+    assert json.loads(report.read_text(encoding="utf-8"))["docker_runtime_environment"] == (
+        DOCKER_RUNTIME
+    )
+    plan = json.loads(
+        (run_root / "preflight/scale_stress_scalability_reduced-generation-plan.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert plan["generator"] == "spathi_scale_stress"
+    assert plan["expression_preparation"] == {
+        "input_scale": "nonnegative_synthetic_counts_like",
+        "normalization": "library-size-log1p",
+        "target_sum": 10000.0,
+        "library_size_scope": "all_generated_genes_before_any_filtering",
+        "formula": "log1p(target_sum * raw_value / per_cell_library_size)",
+    }
+    assert [dataset["dataset_id"] for dataset in plan["datasets"]] == [
+        "scale_stress_reduced_baseline",
+        "scale_stress_reduced_moderate",
+    ]
+    assert plan["datasets"][0] == {
+        "dataset_id": "scale_stress_reduced_baseline",
+        "design_role": {
+            "kind": "synthetic_scale_case",
+            "case_id": "reduced_baseline",
+            "purpose": "Exercise a rounded multi-group baseline with modest development cost.",
+        },
+        "seed": 887098426,
+        "cells": 1000,
+        "genes": 5000,
+        "tfs": 250,
+        "groups": 3,
     }
 
 
@@ -59,6 +226,322 @@ def test_inference_batch_generation_jobs_filter_datasets_within_role() -> None:
     assert not _batch_selects_dataset(
         batch, {"dataset_role": "validation", "generation_job": "dyngen"}
     )
+
+
+def _inference_attribution_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[dict[str, Any], Path]:
+    run_root = tmp_path / "work/v1/smoke/run"
+    params_path = tmp_path / "tools-params.json"
+    run = {
+        "run_id": "genie3_seed_17",
+        "tool_id": "genie3",
+        "params": {"random_seed": 17},
+        "execution": {"mode": "group_emulated"},
+    }
+    params_path.write_text(json.dumps({"runs": [run]}), encoding="utf-8")
+    metadata = {
+        "run_id": run["run_id"],
+        "configuration_id": "genie3_default",
+        "selection_role": "baseline",
+        "algorithm_seed": 17,
+        "algorithm_seed_parameter": "random_seed",
+        "family": "genie3",
+    }
+    batch = {
+        "id": "group_only_baseline",
+        "kind": "baseline",
+        "dataset_role": "smoke",
+        "regime": "group_only",
+        "tools_params": "tools-params.json",
+        "run_metadata": "run-metadata.json",
+    }
+    profile = {
+        "generation_jobs": [],
+        "inference_batches": [batch],
+        "resources": {
+            "generate_data": {"max_parallel_tasks": 1, "max_cores": 1, "max_ram_gb": 1},
+            "infer_network": {
+                "max_parallel_runs": 1,
+                "max_cores": 1,
+                "max_ram_gb": 1,
+                "planner": "heuristic",
+                "planner_time_limit_seconds": 30,
+            },
+        },
+    }
+    dataset = {
+        "dataset_id": "dataset_a",
+        "dataset_role": "smoke",
+        "generation_job": "dyngen_smoke",
+        "dataset_artifact": {
+            "kind": "dataset",
+            "digest": "d" * 64,
+            "key": "sha256:" + "d" * 64,
+            "path": str(tmp_path / "unused-dataset"),
+            "cache_hit": False,
+        },
+    }
+    state = {
+        **_state(),
+        "status": "inferred",
+        "datasets": [dataset],
+        "cache": {"dataset_hits": 0, "inference_hits": 0},
+        "inference_runs": [],
+    }
+    tool_image = {"kind": "catalog", "repo_digest": "genie3@sha256:" + "e" * 64}
+    resources = {
+        key: value
+        for key, value in profile["resources"]["infer_network"].items()
+        if key != "max_parallel_runs"
+    }
+    spec = _inference_spec(
+        state=state,
+        dataset=dataset,
+        batch=batch,
+        run=run,
+        metadata=metadata,
+        custom_definition=None,
+        tool_image=tool_image,
+        resources=resources,
+    )
+    store = _artifact_store(run_root)
+    key = store.key_for("inference", spec)
+    fingerprint = {"algorithm": "sha256", "value": "f" * 64}
+    with store.staging_directory(key) as staging:
+        preflight_path = staging / "request/preflight.json"
+        preflight_path.parent.mkdir(parents=True)
+        preflight_path.write_text(
+            json.dumps(
+                {
+                    "inputs": {"dataset_id": dataset["dataset_id"]},
+                    "dataset": {"dataset_id": dataset["dataset_id"]},
+                    "runs": {
+                        "requested_total": 1,
+                        "selected": [run["run_id"]],
+                        "skipped": {},
+                        "tool_origins": {run["run_id"]: "catalog"},
+                        "issues": {run["run_id"]: []},
+                    },
+                    "issues": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        report_path = staging / "output/execution/run_report.json"
+        report_path.parent.mkdir(parents=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "run_id": run["run_id"],
+                    "status": "executed",
+                    "dataset": {"id": dataset["dataset_id"], "fingerprint": fingerprint},
+                    "tools": {
+                        "selected": [run["run_id"]],
+                        "status_by_tool": {run["run_id"]: "completed"},
+                        "failed": [],
+                        "tool_origins": {run["run_id"]: "catalog"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        artifact = store.publish_from_temp(staging, kind="inference", spec=spec)
+    published_report = artifact.file("output/execution/run_report.json").resolve()
+    configuration_sha256, execution_sha256 = pipeline._parameter_hashes(run, metadata)
+    state["inference_runs"] = [
+        {
+            "dataset_id": dataset["dataset_id"],
+            "batch_id": batch["id"],
+            "batch_kind": batch["kind"],
+            "regime": batch["regime"],
+            "run_id": run["run_id"],
+            "tool_id": run["tool_id"],
+            "tool_origin": "catalog",
+            "configuration_id": metadata["configuration_id"],
+            "selection_role": metadata["selection_role"],
+            "algorithm_seed": metadata["algorithm_seed"],
+            "algorithm_seed_parameter": metadata["algorithm_seed_parameter"],
+            "family": metadata["family"],
+            "configuration_sha256": configuration_sha256,
+            "execution_sha256": execution_sha256,
+            "dataset_fingerprint": fingerprint,
+            "tool_image": tool_image,
+            "run_report": str(published_report),
+            "artifact": pipeline._artifact_ref(artifact, cache_hit=False),
+        }
+    ]
+    monkeypatch.setattr(pipeline, "frozen_repository_root", lambda _run_root: tmp_path)
+    monkeypatch.setattr(pipeline, "frozen_profile", lambda _run_root, _profile_id: profile)
+    monkeypatch.setattr(pipeline, "frozen_path", lambda _run_root, _raw, _label: params_path)
+    monkeypatch.setattr(
+        pipeline,
+        "load_run_metadata",
+        lambda _root, _path, _label: {"schema_version": "1.0", "runs": [metadata]},
+    )
+    monkeypatch.setattr(pipeline, "_runtime_image_contract", lambda **_kwargs: tool_image)
+    monkeypatch.setattr(pipeline, "_validate_generated_state_contract", lambda **_kwargs: None)
+    return state, run_root
+
+
+def _single_run_preflight_payload() -> dict[str, Any]:
+    return {
+        "inputs": {"dataset_id": "dataset_a"},
+        "dataset": {"dataset_id": "dataset_a"},
+        "runs": {
+            "requested_total": 1,
+            "selected": ["genie3_seed_17"],
+            "skipped": {},
+            "tool_origins": {"genie3_seed_17": "catalog"},
+            "issues": {"genie3_seed_17": []},
+        },
+        "issues": [],
+    }
+
+
+def test_single_run_preflight_requires_exact_dataset_and_run(tmp_path: Path) -> None:
+    report_path = tmp_path / "preflight.json"
+    report_path.write_text(json.dumps(_single_run_preflight_payload()), encoding="utf-8")
+
+    report = pipeline._validate_single_run_preflight(
+        report_path,
+        run_id="genie3_seed_17",
+        dataset_id="dataset_a",
+        expected_origin="catalog",
+    )
+
+    assert report["runs"]["selected"] == ["genie3_seed_17"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("dataset", "wrong dataset identity"),
+        ("skipped", "skipped requested run"),
+        ("origin", "wrong origin"),
+        ("run_block", "blocked 'genie3_seed_17'"),
+        ("global_block", "blocking dataset issues"),
+    ],
+)
+def test_single_run_preflight_rejects_ineligible_dataset_routes(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    payload = _single_run_preflight_payload()
+    if mutation == "dataset":
+        payload["dataset"]["dataset_id"] = "dataset_b"
+    elif mutation == "skipped":
+        payload["runs"]["skipped"] = {"genie3_seed_17": "incompatible"}
+    elif mutation == "origin":
+        payload["runs"]["tool_origins"]["genie3_seed_17"] = "custom"
+    elif mutation == "run_block":
+        payload["runs"]["issues"]["genie3_seed_17"] = [
+            {"severity": "block", "code": "compatibility", "message": "incompatible"}
+        ]
+    else:
+        payload["issues"] = [{"severity": "block", "code": "dataset", "message": "invalid dataset"}]
+    report_path = tmp_path / "preflight.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(BenchmarkConfigError, match=message):
+        pipeline._validate_single_run_preflight(
+            report_path,
+            run_id="genie3_seed_17",
+            dataset_id="dataset_a",
+            expected_origin="catalog",
+        )
+
+
+def test_inference_state_reconciles_frozen_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state, run_root = _inference_attribution_case(tmp_path, monkeypatch)
+
+    verified = _validate_inference_state_contract(
+        state=state,
+        profile_id="smoke",
+        run_root=run_root,
+    )
+
+    assert set(verified) == {("dataset_a", "group_only_baseline", "genie3_seed_17")}
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("configuration_id", "another_configuration"),
+        ("configuration_sha256", "0" * 64),
+        ("algorithm_seed", 18),
+        ("selection_role", "candidate"),
+    ],
+)
+def test_inference_state_rejects_mutated_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    replacement: Any,
+) -> None:
+    state, run_root = _inference_attribution_case(tmp_path, monkeypatch)
+    state["inference_runs"][0][field] = replacement
+
+    with pytest.raises(BenchmarkConfigError, match="attribution differs from frozen inputs"):
+        _validate_inference_state_contract(
+            state=state,
+            profile_id="smoke",
+            run_root=run_root,
+        )
+
+
+def test_inference_state_rejects_mutated_artifact_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state, run_root = _inference_attribution_case(tmp_path, monkeypatch)
+    state["inference_runs"][0]["artifact"]["digest"] = "0" * 64
+
+    with pytest.raises(BenchmarkConfigError, match="differs from its digest"):
+        _validate_inference_state_contract(
+            state=state,
+            profile_id="smoke",
+            run_root=run_root,
+        )
+
+
+def test_inference_state_rejects_mutated_evaluation_attribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state, run_root = _inference_attribution_case(tmp_path, monkeypatch)
+    inference = state["inference_runs"][0]
+    dataset = state["datasets"][0]
+    spec = _evaluation_spec(state=state, dataset=dataset, inference=inference)
+    store = _artifact_store(run_root)
+    key = store.key_for("evaluation", spec)
+    with store.staging_directory(key) as staging:
+        report_path = staging / "output/evaluation/evaluation_report.json"
+        report_path.parent.mkdir(parents=True)
+        report_path.write_text('{"status":"complete"}\n', encoding="utf-8")
+        artifact = store.publish_from_temp(staging, kind="evaluation", spec=spec)
+    state["status"] = "evaluated"
+    state["cache"]["evaluation_hits"] = 0
+    state["evaluations"] = [
+        {
+            **{field: inference[field] for field in pipeline._INFERENCE_ATTRIBUTION_FIELDS},
+            "run_report": inference["run_report"],
+            "evaluation_report": str(
+                artifact.file("output/evaluation/evaluation_report.json").resolve()
+            ),
+            "inference_artifact": inference["artifact"],
+            "artifact": pipeline._artifact_ref(artifact, cache_hit=False),
+        }
+    ]
+    state["evaluations"][0]["configuration_id"] = "another_configuration"
+
+    with pytest.raises(BenchmarkConfigError, match="attribution differs from inference state"):
+        _validate_inference_state_contract(
+            state=state,
+            profile_id="smoke",
+            run_root=run_root,
+        )
 
 
 def test_inference_key_ignores_classification_regime() -> None:
@@ -102,10 +585,10 @@ def test_inference_key_ignores_classification_regime() -> None:
         tool_image=tool_image,
         resources=resources,
     )
-    pseudotime_aware = _inference_spec(
+    order_aware = _inference_spec(
         state=state,
         dataset=dataset,
-        batch={"kind": "spathi", "regime": "pseudotime_aware"},
+        batch={"kind": "spathi", "regime": "order_aware"},
         run=run,
         metadata=metadata,
         custom_definition=custom_definition,
@@ -113,9 +596,9 @@ def test_inference_key_ignores_classification_regime() -> None:
         resources=resources,
     )
 
-    assert group_only == pseudotime_aware
+    assert group_only == order_aware
     assert ArtifactKey.from_spec("inference", group_only) == ArtifactKey.from_spec(
-        "inference", pseudotime_aware
+        "inference", order_aware
     )
 
 
@@ -225,6 +708,7 @@ def test_generation_key_does_not_depend_on_spathi(tmp_path: Path) -> None:
         job=job,
         scenario=scenario,
         simulator_runs=runs,
+        input_root=tmp_path,
         resources=resources,
     )
     state["spathi_image"] = {"source_commit": "1" * 40}
@@ -233,10 +717,152 @@ def test_generation_key_does_not_depend_on_spathi(tmp_path: Path) -> None:
         job=job,
         scenario=scenario,
         simulator_runs=runs,
+        input_root=tmp_path,
         resources=resources,
     )
 
     assert before == after
+
+
+def test_generation_key_binds_every_external_scenario_input(tmp_path: Path) -> None:
+    root = tmp_path / "repository"
+    scenario_dir = root / "experiments/scenario"
+    scenario_dir.mkdir(parents=True)
+    network = scenario_dir / "network.tsv"
+    tree = scenario_dir / "tree.nwk"
+    network.write_text("target\tregulator\nG2\tG1\n", encoding="utf-8")
+    tree.write_text("(A,B);\n", encoding="utf-8")
+    scenario = scenario_dir / "scenario.json"
+    scenario.write_text(
+        json.dumps(
+            {
+                "inputs": {
+                    "regulatory_network": {"path": "network.tsv"},
+                    "tree_newick": {"path": "tree.nwk"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    runs = scenario_dir / "runs.json"
+    runs.write_text('{"runs":[{"simulator_id":"dyngen"}]}\n', encoding="utf-8")
+    arguments = {
+        "state": _state(),
+        "job": {
+            "id": "development",
+            "dataset_role": "development",
+            "split_id": "split_a",
+            "condition_id": "condition_a",
+        },
+        "scenario": scenario,
+        "simulator_runs": runs,
+        "input_root": root,
+        "resources": {"max_parallel_tasks": 1, "max_cores": 2, "max_ram_gb": 8},
+    }
+
+    before = _generation_spec(**arguments)
+    before_key = ArtifactKey.from_spec("dataset", before)
+    network.write_text("target\tregulator\nG3\tG1\n", encoding="utf-8")
+    after = _generation_spec(**arguments)
+
+    assert before["scenario_sha256"] == after["scenario_sha256"]
+    assert before["scenario_external_inputs"] != after["scenario_external_inputs"]
+    assert ArtifactKey.from_spec("dataset", after) != before_key
+
+
+def test_scale_stress_generation_key_binds_seed_plan_and_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spathi_bench import scale_stress
+
+    root = tmp_path / "repository"
+    request = root / "request.json"
+    seed_plan = root / "seed-plan.json"
+    root.mkdir()
+    request.write_text('{"request":"fixed"}\n', encoding="utf-8")
+    seed_plan.write_text('{"master_seed":1}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        scale_stress,
+        "validate_scale_stress_request",
+        lambda _root, _request: {
+            "seed_plan": "seed-plan.json",
+            "scale_grid": {
+                "provenance": "author_defined_public_synthetic_grid",
+                "cells": [1000],
+                "genes": [5000],
+                "transcription_factors": [250],
+            },
+        },
+    )
+    arguments = {
+        "state": _state(),
+        "job": {
+            "id": "scale_stress",
+            "dataset_role": "scalability",
+            "split_id": "scalability_v1",
+            "condition_id": "scale_grid",
+        },
+        "request": request,
+        "input_root": root,
+        "resources": {"max_parallel_tasks": 1, "max_cores": 2, "max_ram_gb": 8},
+    }
+
+    before = pipeline._scale_stress_generation_spec(**arguments)
+    before_key = ArtifactKey.from_spec("dataset", before)
+    seed_plan.write_text('{"master_seed":2}\n', encoding="utf-8")
+    after_seed_change = pipeline._scale_stress_generation_spec(**arguments)
+    request.write_text('{"request":"changed"}\n', encoding="utf-8")
+    after_request_change = pipeline._scale_stress_generation_spec(**arguments)
+
+    assert before["request_sha256"] == after_seed_change["request_sha256"]
+    assert before["request_dependencies"] != after_seed_change["request_dependencies"]
+    assert ArtifactKey.from_spec("dataset", after_seed_change) != before_key
+    assert after_seed_change["request_sha256"] != after_request_change["request_sha256"]
+    assert ArtifactKey.from_spec("dataset", after_request_change) != ArtifactKey.from_spec(
+        "dataset", after_seed_change
+    )
+
+
+@pytest.mark.parametrize("unsafe_kind", ("symlink", "escape"))
+def test_generation_spec_rejects_unsafe_external_scenario_input(
+    tmp_path: Path,
+    unsafe_kind: str,
+) -> None:
+    root = tmp_path / "repository"
+    scenario_dir = root / "experiments/scenario"
+    scenario_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.tsv"
+    outside.write_text("target\tregulator\nG2\tG1\n", encoding="utf-8")
+    if unsafe_kind == "symlink":
+        (scenario_dir / "network.tsv").symlink_to(outside)
+        declared_path = "network.tsv"
+        error = "symlink"
+    else:
+        declared_path = "../../../outside.tsv"
+        error = "escapes"
+    scenario = scenario_dir / "scenario.json"
+    scenario.write_text(
+        json.dumps({"inputs": {"regulatory_network": {"path": declared_path}}}),
+        encoding="utf-8",
+    )
+    runs = scenario_dir / "runs.json"
+    runs.write_text('{"runs":[{"simulator_id":"dyngen"}]}\n', encoding="utf-8")
+
+    with pytest.raises(BenchmarkConfigError, match=error):
+        _generation_spec(
+            state=_state(),
+            job={
+                "id": "development",
+                "dataset_role": "development",
+                "split_id": "split_a",
+                "condition_id": "condition_a",
+            },
+            scenario=scenario,
+            simulator_runs=runs,
+            input_root=root,
+            resources={"max_parallel_tasks": 1, "max_cores": 2, "max_ram_gb": 8},
+        )
 
 
 def test_spathi_change_invalidates_only_spathi_inference_and_evaluation() -> None:
@@ -323,6 +949,33 @@ def test_spathi_change_invalidates_only_spathi_inference_and_evaluation() -> Non
     old_spathi_key = ArtifactKey.from_spec("inference", old_spathi_spec)
     new_spathi_key = ArtifactKey.from_spec("inference", new_spathi_spec)
     assert old_spathi_key != new_spathi_key
+    changed_environment = deepcopy(state)
+    changed_environment["benchmark_environment"]["fingerprint"] = "k" * 64
+    changed_environment_spec = _inference_spec(
+        state=changed_environment,
+        dataset=dataset,
+        batch=baseline_batch,
+        run=baseline_run,
+        metadata=baseline_metadata,
+        custom_definition=None,
+        tool_image=baseline_image,
+        resources=resources,
+    )
+    assert baseline_key != ArtifactKey.from_spec("inference", changed_environment_spec)
+
+    changed_docker = deepcopy(state)
+    changed_docker["docker_runtime_environment"]["fingerprint"] = "e" * 64
+    changed_docker_spec = _inference_spec(
+        state=changed_docker,
+        dataset=dataset,
+        batch=baseline_batch,
+        run=baseline_run,
+        metadata=baseline_metadata,
+        custom_definition=None,
+        tool_image=baseline_image,
+        resources=resources,
+    )
+    assert baseline_key != ArtifactKey.from_spec("inference", changed_docker_spec)
 
     baseline_inference = {
         "artifact": {"key": baseline_key.value},
@@ -522,7 +1175,10 @@ def test_spathi_image_provenance_records_the_requested_tag(
     monkeypatch.setattr(
         pipeline,
         "_load_existing_state",
-        lambda *_args, **_kwargs: {"status": "preflighted"},
+        lambda *_args, **_kwargs: {
+            "status": "preflighted",
+            "docker_runtime_environment": deepcopy(DOCKER_RUNTIME),
+        },
     )
     monkeypatch.setattr(pipeline, "frozen_repository_root", lambda _run_root: frozen_root)
     monkeypatch.setattr(

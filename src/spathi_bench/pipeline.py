@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import math
 import os
 import re
 import shutil
@@ -22,6 +22,7 @@ from .artifacts import (
     canonical_json_sha256,
     sha256_file,
 )
+from .calibration_contexts import load_dataset_group_contract, require_complete_group_contexts
 from .config import (
     BenchmarkConfigError,
     load_image_lock,
@@ -34,6 +35,7 @@ from .config import (
     validate_locked_repository,
     validate_profile_references,
 )
+from .environment_lock import validate_environment_lock
 from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
 from .provenance import (
@@ -44,6 +46,7 @@ from .provenance import (
     validate_run_inputs,
 )
 from .runtime import (
+    CommandExecutionError,
     andrea_command,
     andrea_contract_command,
     andrea_host_environment,
@@ -52,9 +55,12 @@ from .runtime import (
     catalog_image_leases,
     check_docker,
     docker_image_details,
+    docker_runtime_environment,
     stream_command,
     validate_andrea_import,
 )
+from .safe_io import atomic_write_json, path_below_no_symlinks, reject_symlink_components
+from .scenario_inputs import scenario_external_input_records
 from .state import (
     STATE_SCHEMA_VERSION,
     load_state,
@@ -69,15 +75,45 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+class InferenceExecutionFailure(RuntimeError):
+    """A validated single-run ANDREA execution whose tool failed.
+
+    This exception is deliberately narrower than a generic command failure.  It
+    is emitted only after the failed ANDREA report has been checked for the
+    requested dataset, run, and tool origin.  Workflows may therefore retain it
+    as operational evidence without treating a missing or corrupt report as a
+    scientific result.
+    """
+
+    def __init__(
+        self,
+        *,
+        dataset_id: str,
+        batch_id: str,
+        run_id: str,
+        orchestrator_return_code: int,
+        tool_exit_code: int,
+        tool_duration_seconds: float,
+        tool_error: str,
+        command_log_path: Path,
+        progress: dict[str, Any] | None,
+        tool_log_tail: str | None,
+    ) -> None:
+        self.dataset_id = dataset_id
+        self.batch_id = batch_id
+        self.run_id = run_id
+        self.orchestrator_return_code = orchestrator_return_code
+        self.tool_exit_code = tool_exit_code
+        self.tool_duration_seconds = tool_duration_seconds
+        self.tool_error = tool_error
+        self.command_log_path = command_log_path.resolve()
+        self.progress = progress
+        self.tool_log_tail = tool_log_tail
+        super().__init__(f"Inference run {run_id!r} failed: {tool_error}")
 
 
 def _artifact_store(run_root: Path) -> ArtifactStore:
-    resolved = run_root.resolve()
+    resolved = reject_symlink_components(run_root, "Benchmark run root")
     try:
         version_root = resolved.parents[1]
     except IndexError as exc:
@@ -89,7 +125,8 @@ def _artifact_store(run_root: Path) -> ArtifactStore:
             "Run root must follow <work>/<version>/<profile>/<run-id>; "
             f"refusing an artifact store at {version_root / 'artifacts'}"
         )
-    return ArtifactStore(version_root / "artifacts")
+    store_root = reject_symlink_components(version_root / "artifacts", "Shared artifact store")
+    return ArtifactStore(store_root)
 
 
 def _artifact_ref(artifact: Artifact, *, cache_hit: bool) -> dict[str, Any]:
@@ -112,7 +149,13 @@ def _artifact_from_ref(store: ArtifactStore, reference: dict[str, Any]) -> Artif
     artifact = store.lookup(key)
     if artifact is None:
         raise BenchmarkConfigError(f"Referenced artifact is missing: {key}")
-    if Path(str(reference.get("path", ""))).resolve() != artifact.path.resolve():
+    recorded_path = path_below_no_symlinks(
+        Path(str(reference.get("path", ""))),
+        artifact.path.parent,
+        "Artifact reference path",
+        require_directory=True,
+    )
+    if recorded_path != artifact.path:
         raise BenchmarkConfigError(f"Artifact reference path differs from its content key: {key}")
     return artifact
 
@@ -120,16 +163,19 @@ def _artifact_from_ref(store: ArtifactStore, reference: dict[str, Any]) -> Artif
 def _artifact_member_from_state(artifact: Artifact, raw_path: Any, label: str) -> Path:
     if not isinstance(raw_path, str) or not raw_path:
         raise BenchmarkConfigError(f"{label} is missing from benchmark state")
-    candidate = Path(raw_path).resolve()
-    root = artifact.path.resolve()
-    if not candidate.is_relative_to(root) or not candidate.is_file():
-        raise BenchmarkConfigError(f"{label} escapes or is missing from its artifact: {raw_path}")
+    root = reject_symlink_components(artifact.path, f"{label} artifact")
+    candidate = path_below_no_symlinks(
+        Path(raw_path),
+        root,
+        label,
+        require_file=True,
+    )
     relative = candidate.relative_to(root).as_posix()
     try:
         member = artifact.file(relative)
     except ValueError as exc:
         raise BenchmarkConfigError(f"{label} is not declared by its artifact: {raw_path}") from exc
-    return member.resolve()
+    return path_below_no_symlinks(member, root, label, require_file=True)
 
 
 def _validated_dataset_paths(
@@ -171,6 +217,14 @@ def _validate_host_environment(state: dict[str, Any], observed: dict[str, Any]) 
     if not isinstance(recorded, dict) or recorded.get("fingerprint") != observed.get("fingerprint"):
         raise BenchmarkConfigError(
             "The host Python environment used by ANDREA changed after preflight; use a new run ID"
+        )
+
+
+def _validate_docker_runtime(state: dict[str, Any], observed: dict[str, Any]) -> None:
+    recorded = state.get("docker_runtime_environment")
+    if not isinstance(recorded, dict) or recorded.get("fingerprint") != observed.get("fingerprint"):
+        raise BenchmarkConfigError(
+            "The Docker runtime used for this benchmark changed after preflight; use a new run ID"
         )
 
 
@@ -235,6 +289,8 @@ def _referenced_catalog_image_ids(
 ) -> set[str]:
     identifiers: set[str] = set()
     for job in profile["generation_jobs"]:
+        if "simulator_runs" not in job:
+            continue
         runs = load_json_object(frozen_path(run_root, job["simulator_runs"], "simulator runs"))
         identifiers.update(f"simulator:{run['simulator_id']}" for run in runs["runs"])
     for batch in profile["inference_batches"]:
@@ -293,6 +349,7 @@ def _initial_state(
     catalog_images: dict[str, Any],
     host_environment: dict[str, Any],
     benchmark_environment: dict[str, Any],
+    docker_runtime: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": STATE_SCHEMA_VERSION,
@@ -309,6 +366,7 @@ def _initial_state(
         "catalog_images": catalog_images,
         "host_environment": host_environment,
         "benchmark_environment": benchmark_environment,
+        "docker_runtime_environment": docker_runtime,
         "artifact_store": str(_artifact_store(run_root).root.resolve()),
         "benchmarks": [],
         "datasets": [],
@@ -338,8 +396,14 @@ def preflight(
     spathi_repo: Path,
     profile_file: Path | None = None,
 ) -> Path:
+    # Re-run the committed design gates before both fresh and resumed work.  A
+    # stale seed plan must never be hidden by an already-preflighted state.
+    validate_environment_lock(repo_root)
+    validate_all_profiles(repo_root)
+    validate_design_contracts(repo_root, andrea_repo)
     existing = _load_existing_state(repo_root, profile_id, run_root)
     if existing is not None:
+        _validate_docker_runtime(existing, docker_runtime_environment())
         if not status_at_least(existing, "preflighted"):
             raise BenchmarkConfigError("Existing run has not completed preflight")
         if profile_file is not None:
@@ -354,8 +418,6 @@ def preflight(
             raise BenchmarkConfigError("Preflight state exists but its report is missing")
         return path
 
-    validate_all_profiles(repo_root)
-    validate_design_contracts(repo_root, andrea_repo)
     if profile_file is not None:
         runtime_profile = load_profile_file(
             repo_root,
@@ -389,6 +451,7 @@ def preflight(
     )
     host_environment = andrea_host_environment()
     benchmark_environment = benchmark_host_environment()
+    docker_runtime = docker_runtime_environment()
 
     preflight_dir = run_root / "preflight"
     if preflight_dir.exists():
@@ -397,13 +460,14 @@ def preflight(
             "recoverable benchmark preflight",
         )
         expected = {
-            "schema_version": "2.0",
+            "schema_version": "1.0",
             "profile_id": profile_id,
             "purpose": profile["purpose"],
             "repositories": repositories,
             "catalog_images": catalog_images,
             "host_environment": host_environment,
             "benchmark_environment": benchmark_environment,
+            "docker_runtime_environment": docker_runtime,
             "status": "passed",
         }
         if any(report.get(field) != value for field, value in expected.items()):
@@ -411,7 +475,12 @@ def preflight(
                 f"Preflight output exists without state and cannot be recovered: {preflight_dir}"
             )
         for job in profile["generation_jobs"]:
-            for suffix in ("catalog.json", "simulation-plan.json"):
+            suffixes = (
+                ("generation-plan.json",)
+                if "generator_request" in job
+                else ("catalog.json", "simulation-plan.json")
+            )
+            for suffix in suffixes:
                 if not (preflight_dir / f"{job['id']}-{suffix}").is_file():
                     raise BenchmarkConfigError(
                         f"Preflight output exists without state and is incomplete: {preflight_dir}"
@@ -426,6 +495,7 @@ def preflight(
             catalog_images=catalog_images,
             host_environment=host_environment,
             benchmark_environment=benchmark_environment,
+            docker_runtime=docker_runtime,
         )
         write_state(run_root, state)
         return preflight_dir / "benchmark-preflight.json"
@@ -433,6 +503,41 @@ def preflight(
     try:
         resources = profile["resources"]["generate_data"]
         for job in profile["generation_jobs"]:
+            if "generator_request" in job:
+                from .scale_stress import validate_scale_stress_request
+
+                request_path = frozen_path(
+                    run_root,
+                    job["generator_request"],
+                    "scale-stress generator request",
+                )
+                request = validate_scale_stress_request(frozen_root, request_path)
+                atomic_write_json(
+                    temporary / f"{job['id']}-generation-plan.json",
+                    {
+                        "schema_version": "1.0",
+                        "generator": "spathi_scale_stress",
+                        "generation_job": job["id"],
+                        "request_sha256": sha256_file(request_path),
+                        "scale_grid": request["scale_grid"],
+                        "expression_preparation": request["expression_preparation"],
+                        "datasets": [
+                            {
+                                "dataset_id": dataset["id"],
+                                "design_role": dataset["design_role"],
+                                "seed": dataset["seed"],
+                                "cells": sum(group["cells"] for group in dataset["groups"]),
+                                "genes": dataset["genes"],
+                                "tfs": dataset["tfs"],
+                                "groups": len(dataset["groups"]),
+                            }
+                            for dataset in request["datasets"]
+                        ],
+                    },
+                    f"{job['id']} generation plan",
+                    boundary=temporary,
+                )
+                continue
             scenario = frozen_path(run_root, job["scenario"], "scenario")
             simulator_runs = frozen_path(run_root, job["simulator_runs"], "simulator runs")
             andrea_command(
@@ -470,7 +575,7 @@ def preflight(
                 log_path=run_root / "logs" / f"00-{job['id']}-plan.log",
             )
         report = {
-            "schema_version": "2.0",
+            "schema_version": "1.0",
             "created_at": _utc_now(),
             "profile_id": profile_id,
             "purpose": profile["purpose"],
@@ -478,9 +583,15 @@ def preflight(
             "catalog_images": catalog_images,
             "host_environment": host_environment,
             "benchmark_environment": benchmark_environment,
+            "docker_runtime_environment": docker_runtime,
             "status": "passed",
         }
-        _write_json(temporary / "benchmark-preflight.json", report)
+        atomic_write_json(
+            temporary / "benchmark-preflight.json",
+            report,
+            "benchmark preflight report",
+            boundary=temporary,
+        )
         os.rename(temporary, preflight_dir)
     finally:
         if temporary.exists():
@@ -496,6 +607,7 @@ def preflight(
         catalog_images=catalog_images,
         host_environment=host_environment,
         benchmark_environment=benchmark_environment,
+        docker_runtime=docker_runtime,
     )
     write_state(run_root, state)
     return preflight_dir / "benchmark-preflight.json"
@@ -546,6 +658,7 @@ def build_spathi_image(
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
         raise BenchmarkConfigError("Build-image requires a completed preflight")
+    _validate_docker_runtime(state, docker_runtime_environment())
     provenance_path = run_root / "provenance" / "spathi-image.json"
     previous_status = str(state["status"])
     if status_at_least(state, "image_ready"):
@@ -611,7 +724,7 @@ def build_spathi_image(
         raise BenchmarkConfigError("Built SPATHI image has the wrong build fingerprint")
     details.update(
         {
-            "schema_version": "2.0",
+            "schema_version": "1.0",
             "built_at": _utc_now(),
             "tag": image["tag"],
             "source_commit": expected_commit,
@@ -622,7 +735,12 @@ def build_spathi_image(
             "reused": reusable,
         }
     )
-    _write_json(provenance_path, details)
+    atomic_write_json(
+        provenance_path,
+        details,
+        "SPATHI image provenance",
+        boundary=run_root,
+    )
     state["spathi_image"] = {**details, "provenance": str(provenance_path.resolve())}
     state["status"] = previous_status if previous_status != "preflighted" else "image_ready"
     state["updated_at"] = _utc_now()
@@ -636,6 +754,7 @@ def _generation_spec(
     job: dict[str, Any],
     scenario: Path,
     simulator_runs: Path,
+    input_root: Path,
     resources: dict[str, Any],
 ) -> dict[str, Any]:
     runs = load_json_object(simulator_runs, "simulator runs")
@@ -648,8 +767,51 @@ def _generation_spec(
         "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
         "andrea_environment": state["host_environment"]["fingerprint"],
         "scenario_sha256": sha256_file(scenario),
+        "scenario_external_inputs": scenario_external_input_records(scenario, input_root),
         "simulator_runs_sha256": sha256_file(simulator_runs),
         "simulator_images": simulator_images,
+        "resources": resources,
+        "generation_job": job["id"],
+        "dataset_role": job["dataset_role"],
+        "split_id": job["split_id"],
+        "condition_id": job["condition_id"],
+    }
+
+
+def _scale_stress_generation_spec(
+    *,
+    state: dict[str, Any],
+    job: dict[str, Any],
+    request: Path,
+    input_root: Path,
+    resources: dict[str, Any],
+) -> dict[str, Any]:
+    from .scale_stress import validate_scale_stress_request
+
+    validated_request = validate_scale_stress_request(input_root, request)
+    seed_plan = path_below_no_symlinks(
+        input_root / str(validated_request["seed_plan"]),
+        input_root,
+        "scale-stress seed plan",
+        require_file=True,
+    )
+    implementation_root = Path(__file__).parent
+    return {
+        "schema_version": "1.0",
+        "generator": "spathi_scale_stress",
+        "generator_implementation": {
+            name: sha256_file(implementation_root / name)
+            for name in ("scale_stress.py", "safe_io.py", "seeds.py")
+        },
+        "request_sha256": sha256_file(request),
+        "request_dependencies": {
+            "seed_plan": {
+                "path": seed_plan.relative_to(input_root).as_posix(),
+                "sha256": sha256_file(seed_plan),
+            },
+        },
+        "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
+        "benchmark_environment": state["benchmark_environment"]["fingerprint"],
         "resources": resources,
         "generation_job": job["id"],
         "dataset_role": job["dataset_role"],
@@ -702,6 +864,7 @@ def generate_data(
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
         raise BenchmarkConfigError("Generation requires a completed preflight")
+    _validate_docker_runtime(state, docker_runtime_environment())
     if status_at_least(state, "generated"):
         store = _artifact_store(run_root)
         for benchmark in state["benchmarks"]:
@@ -720,6 +883,60 @@ def generate_data(
     dataset_hits = 0
 
     for job in profile["generation_jobs"]:
+        if "generator_request" in job:
+            request = frozen_path(
+                run_root,
+                job["generator_request"],
+                "scale-stress generator request",
+            )
+            spec = _scale_stress_generation_spec(
+                state=state,
+                job=job,
+                request=request,
+                input_root=frozen_root,
+                resources=resources,
+            )
+            key = store.key_for("dataset", spec)
+            artifact = store.lookup(key)
+            cache_hit = artifact is not None
+            if artifact is None:
+                from .scale_stress import generate_scale_stress_panel
+
+                with store.staging_directory(key) as staging:
+                    output_root = staging / "output"
+                    output_root.mkdir()
+                    generate_scale_stress_panel(
+                        repo_root=frozen_root,
+                        request_path=request,
+                        output_root=output_root,
+                    )
+                    unique_direct_manifest(output_root, "benchmark-manifest.json")
+                    artifact = store.publish_from_temp(staging, kind="dataset", spec=spec)
+            else:
+                dataset_hits += 1
+            manifest_path = unique_direct_manifest(
+                artifact.path / "output", "benchmark-manifest.json"
+            )
+            job_datasets = datasets_from_benchmark(manifest_path, job["id"])
+            for dataset in job_datasets:
+                dataset.update(
+                    {
+                        "dataset_role": job["dataset_role"],
+                        "split_id": job["split_id"],
+                        "condition_id": job["condition_id"],
+                        "dataset_artifact": _artifact_ref(artifact, cache_hit=cache_hit),
+                    }
+                )
+            benchmarks.append(
+                {
+                    "generation_job": job["id"],
+                    "benchmark_manifest": str(manifest_path),
+                    "dataset_ids": [item["dataset_id"] for item in job_datasets],
+                    "artifact": _artifact_ref(artifact, cache_hit=cache_hit),
+                }
+            )
+            datasets.extend(job_datasets)
+            continue
         scenario = frozen_path(run_root, job["scenario"], "scenario")
         simulator_runs = frozen_path(run_root, job["simulator_runs"], "simulator runs")
         spec = _generation_spec(
@@ -727,6 +944,7 @@ def generate_data(
             job=job,
             scenario=scenario,
             simulator_runs=simulator_runs,
+            input_root=frozen_root,
             resources=resources,
         )
         key = store.key_for("dataset", spec)
@@ -844,6 +1062,208 @@ def _validate_single_run_report(
     return report
 
 
+def _reported_failure_member(report_path: Path, raw_path: Any, label: str) -> Path:
+    """Resolve one failed-run diagnostic without permitting staging escape."""
+
+    if not isinstance(raw_path, str) or not raw_path:
+        raise BenchmarkConfigError(f"Failed inference report has no {label}")
+    raw = Path(raw_path)
+    candidate = raw if raw.is_absolute() else report_path.parent / raw
+    root = reject_symlink_components(report_path.parent, "Failed inference run directory")
+    try:
+        return path_below_no_symlinks(
+            candidate,
+            root,
+            f"Failed inference report {label}",
+            require_file=True,
+        )
+    except BenchmarkConfigError as exc:
+        raise BenchmarkConfigError(
+            f"Failed inference report {label} escapes or is missing from its run directory"
+        ) from exc
+
+
+def _failure_progress_snapshot(path: Path | None) -> dict[str, Any] | None:
+    """Read a wrapper progress snapshot without hiding a malformed contract."""
+
+    if path is None:
+        return None
+    payload = load_json_object(path, "failed inference progress")
+    percent = payload.get("percent")
+    status = payload.get("status")
+    phase = payload.get("phase")
+    message = payload.get("message")
+    warnings = payload.get("warnings", [])
+    if (
+        not isinstance(percent, int)
+        or isinstance(percent, bool)
+        or not 0 <= percent <= 100
+        or not isinstance(status, str)
+        or not status
+        or not isinstance(phase, str)
+        or not phase
+        or not isinstance(message, str)
+        or not isinstance(warnings, list)
+        or any(not isinstance(item, str) for item in warnings)
+    ):
+        raise BenchmarkConfigError("Failed inference progress has an invalid contract")
+    return {
+        "percent": percent,
+        "status": status,
+        "phase": phase,
+        "message": message,
+        "warnings": list(warnings),
+    }
+
+
+def _tail_text(path: Path, *, max_lines: int = 200, max_characters: int = 65_536) -> str | None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    tail = "\n".join(text.splitlines()[-max_lines:]).strip()
+    if not tail:
+        return None
+    return tail[-max_characters:]
+
+
+def _validated_failed_inference(
+    report_path: Path,
+    *,
+    run_id: str,
+    dataset_id: str,
+    expected_origin: str,
+    command_failure: CommandExecutionError,
+    batch_id: str,
+) -> InferenceExecutionFailure:
+    """Reduce a structurally valid failed ANDREA run to transportable evidence."""
+
+    report = load_json_object(report_path, "failed inference run report")
+    tools = report.get("tools")
+    if not isinstance(tools, dict):
+        raise BenchmarkConfigError("Failed inference report has no tools object")
+    selected = tools.get("selected")
+    status_by_tool = tools.get("status_by_tool")
+    origins = tools.get("tool_origins")
+    failed = tools.get("failed")
+    results = tools.get("results")
+    if (
+        report.get("run_id") != run_id
+        or report.get("status") != "executed"
+        or selected != [run_id]
+        or not isinstance(status_by_tool, dict)
+        or status_by_tool.get(run_id) != "failed"
+        or not isinstance(failed, dict)
+        or set(failed) != {run_id}
+        or not isinstance(results, dict)
+        or set(results) != {run_id}
+    ):
+        raise BenchmarkConfigError(
+            f"Failed inference report does not describe exactly failed run {run_id!r}"
+        )
+    if (report.get("dataset") or {}).get("id") != dataset_id:
+        raise BenchmarkConfigError("Failed inference report has the wrong dataset identity")
+    if not isinstance(origins, dict) or origins.get(run_id) != expected_origin:
+        raise BenchmarkConfigError("Failed inference report has the wrong tool origin")
+    result = results[run_id]
+    if not isinstance(result, dict) or result.get("status") != "failed":
+        raise BenchmarkConfigError("Failed inference report has invalid tool execution details")
+    exit_code = result.get("exit_code")
+    duration = result.get("duration_seconds")
+    error = result.get("error")
+    if (
+        not isinstance(exit_code, int)
+        or isinstance(exit_code, bool)
+        or not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or not math.isfinite(float(duration))
+        or float(duration) < 0
+        or not isinstance(error, str)
+        or not error.strip()
+    ):
+        raise BenchmarkConfigError("Failed inference report lacks valid failure accounting")
+
+    progress_path: Path | None = None
+    if result.get("progress_path") is not None:
+        progress_path = _reported_failure_member(
+            report_path, result["progress_path"], "progress_path"
+        )
+    log_path = _reported_failure_member(report_path, result.get("logs_path"), "logs_path")
+    return InferenceExecutionFailure(
+        dataset_id=dataset_id,
+        batch_id=batch_id,
+        run_id=run_id,
+        orchestrator_return_code=command_failure.return_code,
+        tool_exit_code=exit_code,
+        tool_duration_seconds=float(duration),
+        tool_error=error.strip(),
+        command_log_path=command_failure.log_path,
+        progress=_failure_progress_snapshot(progress_path),
+        tool_log_tail=_tail_text(log_path),
+    )
+
+
+def _validate_single_run_preflight(
+    report_path: Path,
+    *,
+    run_id: str,
+    dataset_id: str,
+    expected_origin: str,
+) -> dict[str, Any]:
+    """Require ANDREA to accept exactly the requested run on this dataset."""
+
+    report = load_json_object(report_path, "inference preflight report")
+    runs = report.get("runs")
+    if not isinstance(runs, dict):
+        raise BenchmarkConfigError("Inference preflight report has no runs object")
+    inputs = report.get("inputs")
+    dataset = report.get("dataset")
+    if (
+        not isinstance(inputs, dict)
+        or inputs.get("dataset_id") != dataset_id
+        or not isinstance(dataset, dict)
+        or dataset.get("dataset_id") != dataset_id
+    ):
+        raise BenchmarkConfigError(
+            f"Dataset-specific preflight has the wrong dataset identity for {dataset_id!r}"
+        )
+    selected = runs.get("selected")
+    skipped = runs.get("skipped")
+    origins = runs.get("tool_origins")
+    if runs.get("requested_total") != 1 or selected != [run_id]:
+        raise BenchmarkConfigError(
+            f"Dataset-specific preflight did not select exactly {run_id!r}: {selected!r}"
+        )
+    if skipped != {}:
+        raise BenchmarkConfigError(
+            f"Dataset-specific preflight skipped requested run {run_id!r}: {skipped!r}"
+        )
+    if origins != {run_id: expected_origin}:
+        raise BenchmarkConfigError(
+            f"Dataset-specific preflight assigned the wrong origin to {run_id!r}"
+        )
+    issues = runs.get("issues")
+    if not isinstance(issues, dict):
+        raise BenchmarkConfigError("Inference preflight report has no run issue inventory")
+    blocking = [
+        issue
+        for issue in issues.get(run_id, [])
+        if isinstance(issue, dict) and issue.get("severity") == "block"
+    ]
+    if blocking:
+        raise BenchmarkConfigError(f"Dataset-specific preflight blocked {run_id!r}: {blocking!r}")
+    global_issues = report.get("issues")
+    if not isinstance(global_issues, list):
+        raise BenchmarkConfigError("Inference preflight report has no global issue inventory")
+    global_blocking = [
+        issue
+        for issue in global_issues
+        if isinstance(issue, dict) and issue.get("severity") == "block"
+    ]
+    if global_blocking:
+        raise BenchmarkConfigError(
+            f"Dataset-specific preflight reported blocking dataset issues: {global_blocking!r}"
+        )
+    return report
+
+
 def _runtime_image_contract(
     *,
     state: dict[str, Any],
@@ -912,11 +1332,14 @@ def _inference_spec(
     resources: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "schema_version": "2.0",
+        "schema_version": "1.0",
+        "preflight_contract": "andrea_infer_network_single_run",
         "dataset_artifact": dataset["dataset_artifact"]["key"],
         "dataset_id": dataset["dataset_id"],
         "andrea_commit": state["repositories"]["observed"]["andrea"]["commit"],
         "andrea_environment": state["host_environment"]["fingerprint"],
+        "benchmark_environment": state["benchmark_environment"]["fingerprint"],
+        "docker_runtime_environment": state["docker_runtime_environment"]["fingerprint"],
         "batch_kind": batch["kind"],
         "run": run,
         "run_metadata": metadata,
@@ -964,11 +1387,21 @@ def _execute_inference_task(
         request_root = staging / "request"
         request_root.mkdir()
         tools_params = request_root / "tools-params.json"
-        _write_json(tools_params, {"runs": [run]})
+        atomic_write_json(
+            tools_params,
+            {"runs": [run]},
+            "inference tools request",
+            boundary=staging,
+        )
         custom_tools: Path | None = None
         if task["custom_definition"] is not None:
             custom_tools = request_root / "custom-tools.json"
-            _write_json(custom_tools, {"tools": [task["custom_definition"]]})
+            atomic_write_json(
+                custom_tools,
+                {"tools": [task["custom_definition"]]},
+                "inference custom-tool request",
+                boundary=staging,
+            )
         output_root = staging / "output"
         command = [
             "infer-network",
@@ -992,6 +1425,20 @@ def _execute_inference_task(
             command.extend(["--custom-tools", str(custom_tools)])
         batch_kind = task["batch"]["kind"]
 
+        preflight_path = request_root / "preflight.json"
+        preflight_command = [
+            "infer-network",
+            "preflight",
+            "--dataset-manifest",
+            str(task["dataset_manifest"]),
+            "--tools-params",
+            str(tools_params),
+            "--output-json",
+            str(preflight_path),
+        ]
+        if custom_tools is not None:
+            preflight_command.extend(["--custom-tools", str(custom_tools)])
+
         def execute_and_validate() -> None:
             _ensure_runtime_image(
                 state=state,
@@ -1000,16 +1447,52 @@ def _execute_inference_task(
                 run=run,
             )
             andrea_command(
-                command,
+                preflight_command,
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
                 log_path=run_root
                 / "logs"
                 / (
-                    f"20-{_log_token(task['dataset']['dataset_id'])}-"
+                    f"19-{_log_token(task['dataset']['dataset_id'])}-"
                     f"{_log_token(task['batch']['id'])}-{_log_token(run_id)}.log"
                 ),
             )
+            _validate_single_run_preflight(
+                preflight_path,
+                run_id=run_id,
+                dataset_id=str(task["dataset"]["dataset_id"]),
+                expected_origin=task["expected_origin"],
+            )
+            try:
+                andrea_command(
+                    command,
+                    repo_root=repo_root,
+                    andrea_repo=andrea_repo,
+                    log_path=run_root
+                    / "logs"
+                    / (
+                        f"20-{_log_token(task['dataset']['dataset_id'])}-"
+                        f"{_log_token(task['batch']['id'])}-{_log_token(run_id)}.log"
+                    ),
+                )
+            except CommandExecutionError as exc:
+                failed_reports = sorted(output_root.glob("*/run_report.json"))
+                if not failed_reports:
+                    # A command crash with no attributable ANDREA report is an
+                    # infrastructure/contract failure, not scalability evidence.
+                    raise
+                if len(failed_reports) != 1:
+                    raise BenchmarkConfigError(
+                        "Failed inference produced an ambiguous run_report.json set"
+                    ) from exc
+                raise _validated_failed_inference(
+                    failed_reports[0].resolve(),
+                    run_id=run_id,
+                    dataset_id=str(task["dataset"]["dataset_id"]),
+                    expected_origin=str(task["expected_origin"]),
+                    command_failure=exc,
+                    batch_id=str(task["batch"]["id"]),
+                ) from exc
             _ensure_runtime_image(
                 state=state,
                 frozen_root=frozen_root,
@@ -1044,6 +1527,485 @@ def _batch_selects_dataset(batch: dict[str, Any], dataset: dict[str, Any]) -> bo
         return False
     selected_jobs = batch.get("generation_jobs")
     return selected_jobs is None or dataset.get("generation_job") in selected_jobs
+
+
+_INFERENCE_ATTRIBUTION_FIELDS = (
+    "dataset_id",
+    "batch_id",
+    "batch_kind",
+    "regime",
+    "run_id",
+    "tool_id",
+    "tool_origin",
+    "configuration_id",
+    "selection_role",
+    "algorithm_seed",
+    "algorithm_seed_parameter",
+    "family",
+    "configuration_sha256",
+    "execution_sha256",
+    "tool_image",
+)
+
+
+def _validate_state_artifact_reference(
+    store: ArtifactStore,
+    raw_reference: Any,
+    *,
+    expected_kind: str,
+    label: str,
+    validated: dict[tuple[str, str], Artifact] | None = None,
+) -> Artifact:
+    if not isinstance(raw_reference, dict) or set(raw_reference) != {
+        "kind",
+        "digest",
+        "key",
+        "path",
+        "cache_hit",
+    }:
+        raise BenchmarkConfigError(f"{label} has an invalid artifact reference")
+    if raw_reference.get("kind") != expected_kind or not isinstance(
+        raw_reference.get("cache_hit"), bool
+    ):
+        raise BenchmarkConfigError(f"{label} has an invalid artifact identity")
+    cache_key = (expected_kind, str(raw_reference.get("key")))
+    artifact = validated.get(cache_key) if validated is not None else None
+    if artifact is None:
+        artifact = _artifact_from_ref(store, raw_reference)
+        if validated is not None:
+            validated[cache_key] = artifact
+    elif raw_reference.get("digest") != artifact.key.digest:
+        raise BenchmarkConfigError(f"{label} artifact reference differs from its content key")
+    else:
+        recorded_path = path_below_no_symlinks(
+            Path(str(raw_reference.get("path", ""))),
+            artifact.path.parent,
+            f"{label} artifact reference path",
+            require_directory=True,
+        )
+        if recorded_path != artifact.path:
+            raise BenchmarkConfigError(f"{label} artifact reference differs from its content key")
+    if artifact.key.kind != expected_kind:
+        raise BenchmarkConfigError(f"{label} references a non-{expected_kind} artifact")
+    return artifact
+
+
+def _validate_generated_state_contract(
+    *,
+    state: dict[str, Any],
+    profile: dict[str, Any],
+    run_root: Path,
+    store: ArtifactStore,
+) -> None:
+    """Reconstruct generated-dataset attribution from immutable artifacts and inputs."""
+
+    raw_benchmarks = state.get("benchmarks")
+    raw_datasets = state.get("datasets")
+    if not isinstance(raw_benchmarks, list) or not isinstance(raw_datasets, list):
+        raise BenchmarkConfigError("Generated benchmark state has invalid collections")
+    jobs = {str(job["id"]): job for job in profile["generation_jobs"]}
+    if len(jobs) != len(profile["generation_jobs"]):
+        raise BenchmarkConfigError("Frozen profile contains duplicate generation jobs")
+    if len(raw_benchmarks) != len(jobs):
+        raise BenchmarkConfigError("Generated benchmark state does not cover every generation job")
+
+    datasets_by_id: dict[str, dict[str, Any]] = {}
+    for raw_dataset in raw_datasets:
+        if not isinstance(raw_dataset, dict):
+            raise BenchmarkConfigError("Generated benchmark state contains an invalid dataset")
+        dataset_id = raw_dataset.get("dataset_id")
+        if not isinstance(dataset_id, str) or not dataset_id or dataset_id in datasets_by_id:
+            raise BenchmarkConfigError(
+                f"Generated benchmark state has duplicate dataset {dataset_id!r}"
+            )
+        datasets_by_id[dataset_id] = raw_dataset
+
+    observed_jobs: set[str] = set()
+    expected_dataset_ids: set[str] = set()
+    dataset_hits = 0
+    validated_artifacts: dict[tuple[str, str], Artifact] = {}
+    generation_resources = profile["resources"]["generate_data"]
+    for raw_benchmark in raw_benchmarks:
+        if not isinstance(raw_benchmark, dict) or set(raw_benchmark) != {
+            "generation_job",
+            "benchmark_manifest",
+            "dataset_ids",
+            "artifact",
+        }:
+            raise BenchmarkConfigError("Generated benchmark state has an invalid benchmark record")
+        job_id = raw_benchmark.get("generation_job")
+        if not isinstance(job_id, str) or job_id not in jobs or job_id in observed_jobs:
+            raise BenchmarkConfigError(f"Generated benchmark state has invalid job {job_id!r}")
+        observed_jobs.add(job_id)
+        job = jobs[job_id]
+        artifact = _validate_state_artifact_reference(
+            store,
+            raw_benchmark.get("artifact"),
+            expected_kind="dataset",
+            label=f"Generation job {job_id!r}",
+            validated=validated_artifacts,
+        )
+        if raw_benchmark["artifact"]["cache_hit"]:
+            dataset_hits += 1
+
+        if "generator_request" in job:
+            request = frozen_path(run_root, job["generator_request"], "generator request")
+            expected_spec = _scale_stress_generation_spec(
+                state=state,
+                job=job,
+                request=request,
+                input_root=frozen_repository_root(run_root),
+                resources=generation_resources,
+            )
+        else:
+            scenario = frozen_path(run_root, job["scenario"], "scenario")
+            simulator_runs = frozen_path(run_root, job["simulator_runs"], "simulator runs")
+            expected_spec = _generation_spec(
+                state=state,
+                job=job,
+                scenario=scenario,
+                simulator_runs=simulator_runs,
+                input_root=frozen_repository_root(run_root),
+                resources=generation_resources,
+            )
+        expected_key = store.key_for("dataset", expected_spec)
+        if artifact.key != expected_key or artifact.manifest.get("spec") != expected_spec:
+            raise BenchmarkConfigError(
+                f"Generation job {job_id!r} artifact differs from its frozen request"
+            )
+
+        manifest_path = unique_direct_manifest(artifact.path / "output", "benchmark-manifest.json")
+        recorded_manifest = _artifact_member_from_state(
+            artifact,
+            raw_benchmark.get("benchmark_manifest"),
+            f"Generation job {job_id!r} benchmark manifest",
+        )
+        if recorded_manifest != manifest_path:
+            raise BenchmarkConfigError(
+                f"Generation job {job_id!r} records a non-canonical benchmark manifest"
+            )
+        expected_datasets = datasets_from_benchmark(manifest_path, job_id)
+        expected_ids = [item["dataset_id"] for item in expected_datasets]
+        if raw_benchmark.get("dataset_ids") != expected_ids:
+            raise BenchmarkConfigError(
+                f"Generation job {job_id!r} dataset IDs differ from its immutable manifest"
+            )
+        for expected in expected_datasets:
+            dataset_id = expected["dataset_id"]
+            if dataset_id in expected_dataset_ids:
+                raise BenchmarkConfigError(f"Generated benchmark repeats dataset {dataset_id!r}")
+            expected_dataset_ids.add(dataset_id)
+            actual = datasets_by_id.get(dataset_id)
+            if actual is None:
+                raise BenchmarkConfigError(f"Generated benchmark omits dataset {dataset_id!r}")
+            expected_record = {
+                **expected,
+                "dataset_role": job["dataset_role"],
+                "split_id": job["split_id"],
+                "condition_id": job["condition_id"],
+            }
+            expected_fields = set(expected_record) | {"dataset_artifact"}
+            if set(actual) != expected_fields or any(
+                actual.get(field) != value for field, value in expected_record.items()
+            ):
+                raise BenchmarkConfigError(
+                    f"Dataset {dataset_id!r} attribution differs from its frozen manifest"
+                )
+            if actual.get("dataset_artifact") != raw_benchmark["artifact"]:
+                raise BenchmarkConfigError(
+                    f"Dataset {dataset_id!r} references a different generation artifact"
+                )
+
+    if observed_jobs != set(jobs) or expected_dataset_ids != set(datasets_by_id):
+        raise BenchmarkConfigError("Generated benchmark state contains unplanned jobs or datasets")
+    cache = state.get("cache")
+    if not isinstance(cache, dict) or cache.get("dataset_hits") != dataset_hits:
+        raise BenchmarkConfigError("Generated benchmark cache attribution is inconsistent")
+
+
+def _validate_inference_state_contract(
+    *,
+    state: dict[str, Any],
+    profile_id: str,
+    run_root: Path,
+) -> dict[tuple[str, str, str], Artifact]:
+    """Rebuild every inference record from frozen requests and artifact specifications."""
+
+    frozen_root = frozen_repository_root(run_root)
+    profile = frozen_profile(run_root, profile_id)
+    store = _artifact_store(run_root)
+    _validate_generated_state_contract(
+        state=state,
+        profile=profile,
+        run_root=run_root,
+        store=store,
+    )
+    raw_runs = state.get("inference_runs")
+    if not isinstance(raw_runs, list):
+        raise BenchmarkConfigError("Inference state has no valid run collection")
+    actual_by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for actual in raw_runs:
+        if not isinstance(actual, dict):
+            raise BenchmarkConfigError("Inference state contains a non-object run")
+        identity = (
+            str(actual.get("dataset_id", "")),
+            str(actual.get("batch_id", "")),
+            str(actual.get("run_id", "")),
+        )
+        if not all(identity) or identity in actual_by_identity:
+            raise BenchmarkConfigError(
+                f"Inference state has invalid duplicate identity {identity!r}"
+            )
+        actual_by_identity[identity] = actual
+
+    resources = profile["resources"]["infer_network"]
+    per_run_resources = {
+        key: value for key, value in resources.items() if key != "max_parallel_runs"
+    }
+    expected_identities: set[tuple[str, str, str]] = set()
+    verified: dict[tuple[str, str, str], Artifact] = {}
+    validated_artifacts: dict[tuple[str, str], Artifact] = {}
+    inference_hits = 0
+    for dataset in state["datasets"]:
+        for batch in profile["inference_batches"]:
+            if not _batch_selects_dataset(batch, dataset):
+                continue
+            params_payload = load_json_object(
+                frozen_path(run_root, batch["tools_params"], "tools params"), "tools params"
+            )
+            metadata_payload = load_run_metadata(
+                frozen_root,
+                batch["run_metadata"],
+                f"{batch['id']} run metadata",
+            )
+            metadata_by_run = {item["run_id"]: item for item in metadata_payload["runs"]}
+            custom_payload = (
+                load_json_object(
+                    frozen_path(run_root, batch["custom_tools"], "custom tools"),
+                    "custom tools",
+                )
+                if batch.get("custom_tools")
+                else None
+            )
+            for run in params_payload["runs"]:
+                run_id = str(run["run_id"])
+                identity = (str(dataset["dataset_id"]), str(batch["id"]), run_id)
+                if identity in expected_identities:
+                    raise BenchmarkConfigError(
+                        f"Frozen profile repeats inference identity {identity!r}"
+                    )
+                expected_identities.add(identity)
+                actual = actual_by_identity.get(identity)
+                if actual is None:
+                    raise BenchmarkConfigError(f"Inference state omits planned run {identity!r}")
+                metadata = metadata_by_run.get(run_id)
+                if metadata is None:
+                    raise BenchmarkConfigError(
+                        f"Frozen metadata omits inference run {run_id!r} in batch {batch['id']!r}"
+                    )
+                custom_definition = (
+                    _single_custom_definition(custom_payload, run_id)
+                    if custom_payload is not None
+                    else None
+                )
+                if custom_definition is not None and batch["kind"] == "spathi":
+                    custom_definition = {
+                        **custom_definition,
+                        "docker_image": state["spathi_image"]["id"],
+                    }
+                tool_image = _runtime_image_contract(
+                    state=state,
+                    frozen_root=frozen_root,
+                    batch_kind=batch["kind"],
+                    run=run,
+                )
+                expected_spec = _inference_spec(
+                    state=state,
+                    dataset=dataset,
+                    batch=batch,
+                    run=run,
+                    metadata=metadata,
+                    custom_definition=custom_definition,
+                    tool_image=tool_image,
+                    resources=per_run_resources,
+                )
+                artifact = _validate_state_artifact_reference(
+                    store,
+                    actual.get("artifact"),
+                    expected_kind="inference",
+                    label=f"Inference run {identity!r}",
+                    validated=validated_artifacts,
+                )
+                expected_key = store.key_for("inference", expected_spec)
+                if artifact.key != expected_key or artifact.manifest.get("spec") != expected_spec:
+                    raise BenchmarkConfigError(
+                        f"Inference run {identity!r} artifact differs from its frozen request"
+                    )
+                canonical_report = unique_direct_manifest(
+                    artifact.path / "output", "run_report.json"
+                )
+                recorded_report = _artifact_member_from_state(
+                    artifact,
+                    actual.get("run_report"),
+                    f"Inference run {identity!r} report",
+                )
+                if recorded_report != canonical_report:
+                    raise BenchmarkConfigError(
+                        f"Inference run {identity!r} records a non-canonical run report"
+                    )
+                expected_origin = "custom" if batch["kind"] == "spathi" else "catalog"
+                report = _validate_single_run_report(
+                    canonical_report,
+                    run_id=run_id,
+                    dataset_id=dataset["dataset_id"],
+                    expected_origin=expected_origin,
+                )
+                _validate_single_run_preflight(
+                    artifact.file("request/preflight.json"),
+                    run_id=run_id,
+                    dataset_id=str(dataset["dataset_id"]),
+                    expected_origin=expected_origin,
+                )
+                configuration_sha256, execution_sha256 = _parameter_hashes(run, metadata)
+                expected_record = {
+                    "dataset_id": dataset["dataset_id"],
+                    "batch_id": batch["id"],
+                    "batch_kind": batch["kind"],
+                    "regime": batch["regime"],
+                    "run_id": run_id,
+                    "tool_id": run["tool_id"],
+                    "tool_origin": expected_origin,
+                    "configuration_id": metadata["configuration_id"],
+                    "selection_role": metadata["selection_role"],
+                    "algorithm_seed": metadata["algorithm_seed"],
+                    "algorithm_seed_parameter": metadata["algorithm_seed_parameter"],
+                    "family": metadata.get("family"),
+                    "configuration_sha256": configuration_sha256,
+                    "execution_sha256": execution_sha256,
+                    "dataset_fingerprint": (report.get("dataset") or {}).get("fingerprint"),
+                    "tool_image": tool_image,
+                    "run_report": str(canonical_report),
+                }
+                if set(actual) != set(expected_record) | {"artifact"} or any(
+                    actual.get(field) != value for field, value in expected_record.items()
+                ):
+                    raise BenchmarkConfigError(
+                        f"Inference run {identity!r} attribution differs from frozen inputs"
+                    )
+                if actual["artifact"]["cache_hit"]:
+                    inference_hits += 1
+                verified[identity] = artifact
+
+    if expected_identities != set(actual_by_identity):
+        raise BenchmarkConfigError("Inference state contains unplanned runs")
+    cache = state.get("cache")
+    if not isinstance(cache, dict) or cache.get("inference_hits") != inference_hits:
+        raise BenchmarkConfigError("Inference cache attribution is inconsistent")
+    if status_at_least(state, "evaluated"):
+        _validate_individual_evaluation_state_contract(
+            state=state,
+            store=store,
+            verified_inference=verified,
+        )
+    return verified
+
+
+def _validate_individual_evaluation_state_contract(
+    *,
+    state: dict[str, Any],
+    store: ArtifactStore,
+    verified_inference: dict[tuple[str, str, str], Artifact],
+) -> None:
+    """Require evaluation attribution to be an exact projection of inference state."""
+
+    raw_evaluations = state.get("evaluations")
+    if not isinstance(raw_evaluations, list):
+        raise BenchmarkConfigError("Evaluated state has no valid individual evaluations")
+    actual_by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for actual in raw_evaluations:
+        if not isinstance(actual, dict):
+            raise BenchmarkConfigError("Evaluated state contains a non-object evaluation")
+        identity = (
+            str(actual.get("dataset_id", "")),
+            str(actual.get("batch_id", "")),
+            str(actual.get("run_id", "")),
+        )
+        if not all(identity) or identity in actual_by_identity:
+            raise BenchmarkConfigError(
+                f"Evaluated state has invalid duplicate identity {identity!r}"
+            )
+        actual_by_identity[identity] = actual
+
+    datasets = {item["dataset_id"]: item for item in state["datasets"]}
+    inference_by_identity = {
+        (item["dataset_id"], item["batch_id"], item["run_id"]): item
+        for item in state["inference_runs"]
+    }
+    validated_artifacts: dict[tuple[str, str], Artifact] = {}
+    evaluation_hits = 0
+    for identity, inference in inference_by_identity.items():
+        actual = actual_by_identity.get(identity)
+        if actual is None:
+            raise BenchmarkConfigError(f"Evaluated state omits individual evaluation {identity!r}")
+        if identity not in verified_inference:
+            raise BenchmarkConfigError(f"Evaluation references unverified inference {identity!r}")
+        dataset = datasets[inference["dataset_id"]]
+        expected_spec = _evaluation_spec(state=state, dataset=dataset, inference=inference)
+        artifact = _validate_state_artifact_reference(
+            store,
+            actual.get("artifact"),
+            expected_kind="evaluation",
+            label=f"Individual evaluation {identity!r}",
+            validated=validated_artifacts,
+        )
+        expected_key = store.key_for("evaluation", expected_spec)
+        if artifact.key != expected_key or artifact.manifest.get("spec") != expected_spec:
+            raise BenchmarkConfigError(
+                f"Individual evaluation {identity!r} artifact differs from its inference"
+            )
+        canonical_report = unique_direct_manifest(
+            artifact.path / "output", "evaluation_report.json"
+        )
+        recorded_report = _artifact_member_from_state(
+            artifact,
+            actual.get("evaluation_report"),
+            f"Individual evaluation {identity!r} report",
+        )
+        if recorded_report != canonical_report:
+            raise BenchmarkConfigError(
+                f"Individual evaluation {identity!r} records a non-canonical report"
+            )
+        expected_record = {
+            **{field: inference[field] for field in _INFERENCE_ATTRIBUTION_FIELDS},
+            "run_report": inference["run_report"],
+            "evaluation_report": str(canonical_report),
+            "inference_artifact": inference["artifact"],
+        }
+        if set(actual) != set(expected_record) | {"artifact"} or any(
+            actual.get(field) != value for field, value in expected_record.items()
+        ):
+            raise BenchmarkConfigError(
+                f"Individual evaluation {identity!r} attribution differs from inference state"
+            )
+        if actual["artifact"]["cache_hit"]:
+            evaluation_hits += 1
+
+    if set(actual_by_identity) != set(inference_by_identity):
+        raise BenchmarkConfigError("Evaluated state contains unplanned individual evaluations")
+    cache = state.get("cache")
+    if not isinstance(cache, dict) or cache.get("evaluation_hits") != evaluation_hits:
+        raise BenchmarkConfigError("Evaluation cache attribution is inconsistent")
+
+
+def validate_inference_attribution_contract(
+    *, repo_root: Path, profile_id: str, run_root: Path
+) -> None:
+    """Fail closed if mutable state no longer describes the immutable inference artifacts."""
+
+    state = _load_existing_state(repo_root, profile_id, run_root)
+    if state is None or not status_at_least(state, "inferred"):
+        raise BenchmarkConfigError("Inference attribution validation requires completed inference")
+    _validate_inference_state_contract(state=state, profile_id=profile_id, run_root=run_root)
 
 
 def _execute_unique_missing_tasks(
@@ -1113,10 +2075,13 @@ def run_inference(
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
         raise BenchmarkConfigError("Inference requires a generated benchmark")
+    _validate_docker_runtime(state, docker_runtime_environment())
     if status_at_least(state, "inferred"):
-        store = _artifact_store(run_root)
-        for inference in state["inference_runs"]:
-            _artifact_from_ref(store, inference["artifact"])
+        _validate_inference_state_contract(
+            state=state,
+            profile_id=profile_id,
+            run_root=run_root,
+        )
         return state_path(run_root)
     require_status(state, "generated", "Inference")
     frozen_root = frozen_repository_root(run_root)
@@ -1129,6 +2094,12 @@ def run_inference(
         key: value for key, value in resources.items() if key != "max_parallel_runs"
     }
     store = _artifact_store(run_root)
+    _validate_generated_state_contract(
+        state=state,
+        profile=profile,
+        run_root=run_root,
+        store=store,
+    )
     inference_runs: list[dict[str, Any]] = []
     inference_hits = 0
     prepared: list[dict[str, Any]] = []
@@ -1292,6 +2263,11 @@ def validate_handoffs(
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
         raise BenchmarkConfigError("Handoff validation requires inference")
+    verified_inference = _validate_inference_state_contract(
+        state=state,
+        profile_id=profile_id,
+        run_root=run_root,
+    )
     report_path = run_root / "handoff-validation.json"
     if status_at_least(state, "validated"):
         report = load_json_object(report_path, "handoff validation")
@@ -1305,9 +2281,10 @@ def validate_handoffs(
     errors: list[str] = []
 
     for inference in state["inference_runs"]:
-        artifact = _artifact_from_ref(store, inference["artifact"])
+        identity = (inference["dataset_id"], inference["batch_id"], inference["run_id"])
+        artifact = verified_inference[identity]
         dataset = datasets[inference["dataset_id"]]
-        _dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
+        dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
         report_path_for_run = _artifact_member_from_state(
             artifact,
             inference.get("run_report"),
@@ -1321,11 +2298,38 @@ def validate_handoffs(
         )
         truth = load_json_object(ground_truth_manifest, "ground truth")
         local_errors: list[str] = []
+        calibration_context_contract: dict[str, Any] | None = None
         report_fingerprint = (report.get("dataset") or {}).get("fingerprint")
         if truth.get("dataset_id") != dataset["dataset_id"]:
             local_errors.append("ground-truth dataset ID differs from benchmark dataset ID")
         if report_fingerprint != truth.get("dataset_fingerprint"):
             local_errors.append("inference and ground-truth dataset fingerprints differ")
+        if state["purpose"] in {"calibration", "selection"}:
+            expected_role = "validation" if state["purpose"] == "selection" else "development"
+            if dataset.get("dataset_role") != expected_role:
+                local_errors.append(
+                    f"calibration dataset role must be {expected_role!r}, not "
+                    f"{dataset.get('dataset_role')!r}"
+                )
+            if inference.get("batch_kind") != "spathi" or inference.get("regime") != "group_only":
+                local_errors.append("calibration inference must be a SPATHI group_only execution")
+            try:
+                contract = load_dataset_group_contract(
+                    dataset_manifest,
+                    ground_truth_manifest,
+                    expected_dataset_id=dataset["dataset_id"],
+                )
+                completed_contexts = require_complete_group_contexts(
+                    report,
+                    inference["run_id"],
+                    contract.expected_group_contexts,
+                )
+                calibration_context_contract = {
+                    **contract.to_dict(),
+                    "completed_group_contexts": list(completed_contexts),
+                }
+            except BenchmarkConfigError as exc:
+                local_errors.append(str(exc))
         merged_raw = (report.get("outputs") or {}).get("merged_network_raw")
         try:
             merged_path = resolve_manifest_member(
@@ -1336,30 +2340,33 @@ def validate_handoffs(
         except BenchmarkConfigError as exc:
             local_errors.append(str(exc))
             merged_path = None
-        results.append(
-            {
-                "dataset_id": dataset["dataset_id"],
-                "run_id": inference["run_id"],
-                "artifact_key": inference["artifact"]["key"],
-                "merged_network_raw": str(merged_path) if merged_path else None,
-                "status": "passed" if not local_errors else "failed",
-                "errors": local_errors,
-            }
-        )
+        result = {
+            "dataset_id": dataset["dataset_id"],
+            "run_id": inference["run_id"],
+            "artifact_key": inference["artifact"]["key"],
+            "merged_network_raw": str(merged_path) if merged_path else None,
+            "status": "passed" if not local_errors else "failed",
+            "errors": local_errors,
+        }
+        if state["purpose"] in {"calibration", "selection"}:
+            result["calibration_context_contract"] = calibration_context_contract
+        results.append(result)
         errors.extend(
             f"[{dataset['dataset_id']}/{inference['run_id']}] {error}" for error in local_errors
         )
 
-    _write_json(
+    atomic_write_json(
         report_path,
         {
-            "schema_version": "2.0",
+            "schema_version": "1.0",
             "created_at": _utc_now(),
             "profile_id": profile_id,
             "status": "passed" if not errors else "failed",
             "results": results,
             "errors": errors,
         },
+        "handoff validation report",
+        boundary=run_root,
     )
     if errors:
         raise BenchmarkConfigError("Handoff validation failed: " + "; ".join(errors))
@@ -1503,6 +2510,11 @@ def integrate_inference(
     if state is None:
         raise BenchmarkConfigError("Inference integration requires validated inference")
     store = _artifact_store(run_root)
+    _validate_inference_state_contract(
+        state=state,
+        profile_id=profile_id,
+        run_root=run_root,
+    )
     if status_at_least(state, "integrated"):
         for integrated in state["integrated_inference_runs"]:
             artifact = _artifact_from_ref(store, integrated["artifact"])
@@ -1686,6 +2698,11 @@ def evaluate(
     state = _load_existing_state(repo_root, profile_id, run_root)
     if state is None:
         raise BenchmarkConfigError("Evaluation requires integrated inference")
+    _validate_inference_state_contract(
+        state=state,
+        profile_id=profile_id,
+        run_root=run_root,
+    )
     if status_at_least(state, "evaluated"):
         store = _artifact_store(run_root)
         for collection in (state["evaluations"], state["joint_evaluations"]):
@@ -2030,7 +3047,12 @@ def _materialize_exports(
             "profile_id": profile_id,
             "bundles": manifest_entries,
         }
-        _write_json(staging / "manifest.json", export_manifest)
+        atomic_write_json(
+            staging / "manifest.json",
+            export_manifest,
+            "analysis export manifest",
+            boundary=staging,
+        )
         expected_files = _tree_file_hashes(staging)
         if destination.exists():
             if _tree_file_hashes(destination) != expected_files:
@@ -2063,6 +3085,11 @@ def export_analysis(
     if state is None:
         raise BenchmarkConfigError("Analysis export requires completed evaluations")
     store = _artifact_store(run_root)
+    _validate_inference_state_contract(
+        state=state,
+        profile_id=profile_id,
+        run_root=run_root,
+    )
     if status_at_least(state, "exported"):
         state["exports_manifest"] = str(
             _materialize_exports(

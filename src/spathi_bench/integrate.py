@@ -91,10 +91,10 @@ def integrate_inference_runs(
 ) -> Path:
     """Create a deterministic joint infer-network ``analysis`` directory.
 
-    ``contract_validator`` can be the lazily imported
-    ``andrea.core.commands.evaluate_inference.validate_inference_analysis_inputs``.
-    It is optional because the benchmark's orchestration environment and the
-    locked ANDREA runtime may use different Python interpreters.
+    ``contract_validator`` is optional because the benchmark's orchestration
+    environment and the locked ANDREA runtime may use different Python
+    interpreters. The production pipeline supplies a validator through its
+    locked ANDREA subprocess bridge.
 
     The destination must not exist.  Publication is atomic, so neither source
     validation failures nor a failing external contract validator leave a
@@ -152,25 +152,6 @@ def integrate_inference_runs(
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return destination / "run_report.json"
-
-
-def lazy_andrea_contract_validator(run_report_path: Path) -> None:
-    """Validate with ANDREA when its locked Python package is importable.
-
-    Importing is deliberately deferred so importing :mod:`spathi_bench.integrate`
-    never couples the benchmark's own virtual environment to ANDREA's runtime.
-    """
-
-    try:
-        from andrea.core.commands.evaluate_inference import (  # type: ignore[import-not-found]
-            validate_inference_analysis_inputs,
-        )
-    except ImportError as exc:
-        raise IntegrationError(
-            "ANDREA is not importable in this Python interpreter; use its locked "
-            "runtime or pass another contract_validator"
-        ) from exc
-    validate_inference_analysis_inputs(run_report_path=run_report_path)
 
 
 def _load_source(report_path: Path) -> _SourceRun:
@@ -684,5 +665,4 @@ __all__ = [
     "ContractValidator",
     "IntegrationError",
     "integrate_inference_runs",
-    "lazy_andrea_contract_validator",
 ]

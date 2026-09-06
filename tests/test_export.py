@@ -5,7 +5,6 @@ import os
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -13,9 +12,6 @@ from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.export import (
     AnalysisExportError,
     export_analysis_resolution,
-    export_evaluate_inference_analysis,
-    export_generate_data_analysis,
-    export_infer_network_analysis,
 )
 
 
@@ -188,74 +184,3 @@ def test_export_rejects_non_analysis_resolution_and_empty_resolution(
             _Resolution(root=root, sources=()),
             tmp_path / "empty.zip",
         )
-
-
-def test_command_wrappers_use_the_official_resolver_signatures(tmp_path: Path) -> None:
-    root = tmp_path / "source"
-    resolution = _resolution(root, {"handoff.json": b"{}\n"})
-    calls: list[dict[str, Any]] = []
-
-    def resolver(**kwargs: Any) -> _Resolution:
-        calls.append(kwargs)
-        return resolution
-
-    generated = export_generate_data_analysis(
-        benchmark_root=root,
-        dataset_id="dataset_01",
-        output_zip=tmp_path / "dataset-analysis.zip",
-        resolver=resolver,
-    )
-    inferred = export_infer_network_analysis(
-        run_dir=root,
-        output_zip=tmp_path / "inference-analysis.zip",
-        resolver=resolver,
-    )
-    evaluated = export_evaluate_inference_analysis(
-        evaluation_dir=root,
-        output_zip=tmp_path / "evaluation-analysis.zip",
-        resolver=resolver,
-    )
-
-    assert calls == [
-        {
-            "bundle_id": "analysis",
-            "benchmark_root": root,
-            "dataset_id": "dataset_01",
-        },
-        {"bundle_id": "analysis", "run_dir": root},
-        {"bundle_id": "analysis", "evaluation_dir": root},
-    ]
-    assert generated.manifest["bundle"]["producer_command"] == "generate-data"
-    assert generated.manifest["bundle"]["dataset_id"] == "dataset_01"
-    assert inferred.manifest["bundle"]["producer_command"] == "infer-network"
-    assert evaluated.manifest["bundle"]["producer_command"] == "evaluate-inference"
-    for result in (generated, inferred, evaluated):
-        assert result.zip_path.is_file()
-        assert result.manifest_path.is_file()
-
-
-def test_wrapper_resolver_import_is_lazy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import spathi_bench.export as export_module
-
-    root = tmp_path / "source"
-    resolution = _resolution(root, {"evaluation_report.json": b"{}\n"})
-    imported: list[str] = []
-
-    class _Module:
-        @staticmethod
-        def resolve_bundle(**kwargs: Any) -> _Resolution:
-            assert kwargs == {"bundle_id": "analysis", "evaluation_dir": root}
-            return resolution
-
-    def fake_import(name: str) -> _Module:
-        imported.append(name)
-        return _Module()
-
-    monkeypatch.setattr(export_module, "import_module", fake_import)
-
-    export_evaluate_inference_analysis(
-        evaluation_dir=root,
-        output_zip=tmp_path / "evaluation-analysis.zip",
-    )
-
-    assert imported == ["andrea.core.commands.evaluate_inference.bundles"]

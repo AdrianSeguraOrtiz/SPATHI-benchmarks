@@ -2,9 +2,7 @@
 
 ANDREA owns the bundle contract: its command-specific resolvers decide which
 files belong in an analysis ZIP and which virtual paths they must have.  This
-module only validates a resolved contract and serializes it reproducibly.  The
-resolver imports are deliberately lazy so importing :mod:`spathi_bench` does
-not require ANDREA to be installed in the benchmark orchestrator environment.
+module only validates a resolved contract and serializes it reproducibly.
 """
 
 from __future__ import annotations
@@ -15,9 +13,8 @@ import os
 import stat
 import tempfile
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
@@ -66,9 +63,6 @@ class AnalysisBundleExport:
     manifest_sha256: str
     size: int
     manifest: Mapping[str, Any]
-
-
-Resolver = Callable[..., BundleResolutionLike]
 
 
 def _safe_virtual_path(raw_path: object) -> str:
@@ -310,96 +304,9 @@ def export_analysis_resolution(
     )
 
 
-def _andrea_resolver(module_name: str) -> Resolver:
-    try:
-        module = import_module(module_name)
-    except (ImportError, ModuleNotFoundError) as exc:
-        raise AnalysisExportError(
-            "ANDREA is not importable; run with the locked ANDREA repository on "
-            "PYTHONPATH or inject its official resolver"
-        ) from exc
-    resolver = getattr(module, "resolve_bundle", None)
-    if not callable(resolver):
-        raise AnalysisExportError(
-            f"Locked ANDREA module has no callable resolve_bundle: {module_name}"
-        )
-    return resolver
-
-
-def export_generate_data_analysis(
-    *,
-    benchmark_root: Path,
-    dataset_id: str,
-    output_zip: Path,
-    manifest_path: Path | None = None,
-    resolver: Resolver | None = None,
-) -> AnalysisBundleExport:
-    """Export one dataset-level ``generate-data`` analysis handoff."""
-
-    official_resolver = resolver or _andrea_resolver("andrea.core.commands.generate_data.bundles")
-    resolution = official_resolver(
-        bundle_id="analysis",
-        benchmark_root=Path(benchmark_root),
-        dataset_id=dataset_id,
-    )
-    return export_analysis_resolution(
-        resolution,
-        output_zip,
-        producer_command="generate-data",
-        dataset_id=dataset_id,
-        manifest_path=manifest_path,
-    )
-
-
-def export_infer_network_analysis(
-    *,
-    run_dir: Path,
-    output_zip: Path,
-    manifest_path: Path | None = None,
-    resolver: Resolver | None = None,
-) -> AnalysisBundleExport:
-    """Export an ``infer-network`` analysis handoff."""
-
-    official_resolver = resolver or _andrea_resolver("andrea.core.commands.infer_network.bundles")
-    resolution = official_resolver(bundle_id="analysis", run_dir=Path(run_dir))
-    return export_analysis_resolution(
-        resolution,
-        output_zip,
-        producer_command="infer-network",
-        manifest_path=manifest_path,
-    )
-
-
-def export_evaluate_inference_analysis(
-    *,
-    evaluation_dir: Path,
-    output_zip: Path,
-    manifest_path: Path | None = None,
-    resolver: Resolver | None = None,
-) -> AnalysisBundleExport:
-    """Export an ``evaluate-inference`` analysis handoff."""
-
-    official_resolver = resolver or _andrea_resolver(
-        "andrea.core.commands.evaluate_inference.bundles"
-    )
-    resolution = official_resolver(
-        bundle_id="analysis",
-        evaluation_dir=Path(evaluation_dir),
-    )
-    return export_analysis_resolution(
-        resolution,
-        output_zip,
-        producer_command="evaluate-inference",
-        manifest_path=manifest_path,
-    )
-
-
 __all__ = [
     "AnalysisBundleExport",
     "AnalysisExportError",
     "BundleResolutionLike",
     "export_analysis_resolution",
-    "export_evaluate_inference_analysis",
-    "export_generate_data_analysis",
-    "export_infer_network_analysis",
 ]

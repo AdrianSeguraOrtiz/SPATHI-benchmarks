@@ -15,6 +15,7 @@ from plotly.offline import get_plotlyjs
 
 from ..artifacts import canonical_json_sha256, sha256_file
 from ..config import BenchmarkConfigError, load_json_object
+from ..safe_io import atomic_write_text, path_below_no_symlinks, write_idempotent_text
 
 REPORT_SCHEMA_VERSION = "1.0"
 RENDERER_SCHEMA_VERSION = "1.0"
@@ -22,6 +23,9 @@ _REPORT_FLOW_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _REPORT_SCOPES = {
     "calibration": {"reduced", "full"},
     "comparison": {"reduced", "full"},
+    "dimensional_transfer": {"reduced", "full"},
+    "efficiency": {"reduced", "full"},
+    "scalability": {"reduced", "full"},
 }
 
 
@@ -37,32 +41,56 @@ def require_array(value: Any, label: str) -> list[Any]:
     return value
 
 
-def require_completed_workflow(path: Path, workflow_type: str) -> dict[str, Any]:
+def require_reportable_workflow(path: Path, workflow_type: str) -> dict[str, Any]:
+    """Load a workflow whose immutable results are ready for report publication.
+
+    ``publishing`` is deliberately distinct from ``complete``: report-producing
+    workflows enter it before writing their HTML bundle and become complete only
+    after the bundle references and hashes have been committed to ``workflow.json``.
+    """
+
     workflow = load_json_object(path, f"{workflow_type} workflow")
     if workflow.get("schema_version") != "1.0":
         raise BenchmarkConfigError(f"Unsupported {workflow_type} workflow schema")
     if workflow.get("workflow_type") != workflow_type:
         raise BenchmarkConfigError(f"Expected a {workflow_type} workflow: {path}")
-    if workflow.get("status") != "complete":
+    status = workflow.get("status")
+    if status not in {"publishing", "complete"}:
         raise BenchmarkConfigError(
-            f"Interactive {workflow_type} reports require a completed workflow: {path}"
+            f"Interactive {workflow_type} reports require a publishable workflow: {path}"
         )
+    if status == "publishing" and "reports" in workflow:
+        raise BenchmarkConfigError(
+            f"Publishing {workflow_type} workflow already records a report bundle"
+        )
+    if status == "complete":
+        require_mapping(workflow.get("reports"), f"completed {workflow_type} report bundle")
     if not isinstance(workflow.get("flow_id"), str) or not workflow["flow_id"]:
-        raise BenchmarkConfigError(f"Completed {workflow_type} workflow has no flow_id")
+        raise BenchmarkConfigError(f"Publishable {workflow_type} workflow has no flow_id")
     require_mapping(workflow.get("identity"), f"{workflow_type} workflow identity")
     return workflow
 
 
+def reconcile_report_bundle(
+    workflow: dict[str, Any], bundle: dict[str, Any], workflow_type: str
+) -> dict[str, Any]:
+    """Require a completed workflow to retain the exact deterministic bundle."""
+
+    if workflow["status"] == "complete" and workflow.get("reports") != bundle:
+        raise BenchmarkConfigError(
+            f"Rendered {workflow_type} report differs from its completed workflow record"
+        )
+    return bundle
+
+
 def path_below(path: Path, root: Path, label: str, *, file: bool = True) -> Path:
-    resolved = path.resolve()
-    resolved_root = root.resolve()
-    if not resolved.is_relative_to(resolved_root):
-        raise BenchmarkConfigError(f"{label} escapes {resolved_root}")
-    if file and not resolved.is_file():
-        raise BenchmarkConfigError(f"{label} is missing: {resolved}")
-    if not file and not resolved.is_dir():
-        raise BenchmarkConfigError(f"{label} directory is missing: {resolved}")
-    return resolved
+    return path_below_no_symlinks(
+        path,
+        root,
+        label,
+        require_file=file,
+        require_directory=not file,
+    )
 
 
 def repo_file(repo_root: Path, raw_path: Any, label: str, *, below: Path | None = None) -> Path:
@@ -157,7 +185,13 @@ def _text_sha256(content: str) -> str:
 def _renderer_material(kind: str) -> dict[str, Any]:
     """Load and fingerprint the exact renderer resources used for one report kind."""
 
-    if kind not in {"calibration", "comparison"}:
+    if kind not in {
+        "calibration",
+        "comparison",
+        "dimensional_transfer",
+        "efficiency",
+        "scalability",
+    }:
         raise ValueError(f"Unsupported report kind: {kind}")
     resource_names = (
         "common.py",
@@ -200,7 +234,16 @@ def _renderer_material(kind: str) -> dict[str, Any]:
     }
 
 
-def _render_html(*, kind: str, payload: dict[str, Any], renderer: dict[str, Any]) -> str:
+def render_html(
+    *,
+    kind: str,
+    payload: dict[str, Any],
+    renderer: dict[str, Any] | None = None,
+) -> str:
+    """Render a report, reusing preloaded renderer material when available."""
+
+    if renderer is None:
+        renderer = _renderer_material(kind)
     texts = renderer["texts"]
     environment = Environment(
         loader=DictLoader(
@@ -213,10 +256,15 @@ def _render_html(*, kind: str, payload: dict[str, Any], renderer: dict[str, Any]
         keep_trailing_newline=True,
     )
     template = environment.get_template(f"{kind}.html.j2")
+    titles = {
+        "calibration": "SPATHI calibration report",
+        "comparison": "SPATHI benchmark comparison",
+        "dimensional_transfer": "SPATHI dimensional accuracy transfer",
+        "efficiency": "SPATHI efficiency justification",
+        "scalability": "SPATHI computational scalability",
+    }
     return template.render(
-        title=(
-            "SPATHI calibration report" if kind == "calibration" else "SPATHI benchmark comparison"
-        ),
+        title=titles[kind],
         report_kind=kind,
         report_data_json=json_for_script(payload),
         plotly_js=renderer["plotly_js"],
@@ -226,15 +274,10 @@ def _render_html(*, kind: str, payload: dict[str, Any], renderer: dict[str, Any]
     )
 
 
-def render_html(*, kind: str, payload: dict[str, Any]) -> str:
-    return _render_html(kind=kind, payload=payload, renderer=_renderer_material(kind))
+def _publish_immutable_text(path: Path, content: str, label: str) -> None:
+    """Publish deterministic report material without overwriting existing bytes."""
 
-
-def _atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.replace(temporary, path)
+    write_idempotent_text(path, content, label)
 
 
 def write_report_bundle(
@@ -245,16 +288,19 @@ def write_report_bundle(
     payload: dict[str, Any],
     input_paths: list[Path],
     manifest_name: str,
+    immutable: bool = False,
 ) -> dict[str, Any]:
     """Write one deterministic, self-contained HTML document and its provenance manifest."""
 
-    root = repo_root.resolve()
-    output = output_path.resolve()
-    if not output.is_relative_to(root / "work"):
-        raise BenchmarkConfigError("Interactive reports must be written below repository work/")
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
+    output = path_below_no_symlinks(
+        output_path,
+        root / "work",
+        "Interactive report output",
+    )
     inputs = []
-    for source in sorted({path.resolve() for path in input_paths}, key=str):
-        path_below(source, root, "interactive report input")
+    for candidate in sorted({Path(os.path.abspath(path)) for path in input_paths}, key=str):
+        source = path_below(candidate, root, "interactive report input")
         inputs.append(
             {
                 "path": source.relative_to(root).as_posix(),
@@ -281,11 +327,11 @@ def write_report_bundle(
             "statistics_recomputed": False,
         },
     }
-    html = _render_html(kind=kind, payload=payload, renderer=renderer)
+    html = render_html(kind=kind, payload=payload, renderer=renderer)
     if not html.endswith("\n"):
         html += "\n"
-    _atomic_write(output, html)
     manifest_path = output.parent / manifest_name
+    output_sha256 = _text_sha256(html)
     manifest = {
         **report_identity,
         "fingerprint": scientific_fingerprint,
@@ -293,19 +339,26 @@ def write_report_bundle(
         "renderer": renderer["provenance"],
         "output": {
             "path": output.relative_to(root).as_posix(),
-            "sha256": sha256_file(output),
+            "sha256": output_sha256,
             "self_contained": True,
         },
     }
-    _atomic_write(
-        manifest_path,
-        json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n",
-    )
+    manifest_text = json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    if immutable:
+        _publish_immutable_text(output, html, f"{kind} report HTML")
+        _publish_immutable_text(
+            manifest_path,
+            manifest_text,
+            f"{kind} report manifest",
+        )
+    else:
+        atomic_write_text(output, html, f"{kind} report HTML")
+        atomic_write_text(manifest_path, manifest_text, f"{kind} report manifest")
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "html": {
             "path": output.relative_to(root).as_posix(),
-            "sha256": sha256_file(output),
+            "sha256": output_sha256,
         },
         "manifest": {
             "path": manifest_path.relative_to(root).as_posix(),

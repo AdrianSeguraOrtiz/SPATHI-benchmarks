@@ -93,10 +93,6 @@ def _runtime_profile() -> dict[str, Any]:
         },
         "statistics": {
             "status": "not_applicable",
-            "alpha": 0.05,
-            "random_seed": 1,
-            "permutations": 9999,
-            "bootstrap_resamples": 1000,
             "comparisons": [],
         },
     }
@@ -150,16 +146,10 @@ def _repository(
         },
     )
     _write_json(root, "experiments/v1/spathi/search-space.json", {})
-    _write_json(
-        root,
-        "experiments/v1/spathi/selected-config.json",
-        {"selection_evidence": None},
-    )
+    _write_json(root, "experiments/v1/seeds/seed-plan.json", {"schema_version": "1.0"})
     inputs: dict[str, Any] = {}
     if scientific_runtime_input:
-        inputs["regulatory_network"] = {
-            "path": str((root / "work/scientific-network.tsv").resolve())
-        }
+        inputs["regulatory_network"] = {"path": "../../../../work/scientific-network.tsv"}
     _write_json(
         root,
         "experiments/v1/simulations/fixture/scenario.json",
@@ -199,7 +189,7 @@ def test_runtime_profile_freezes_schema_two_with_source_kinds(tmp_path: Path) ->
         profile_file=profile_path,
     )
 
-    assert manifest["schema_version"] == "2.0"
+    assert manifest["schema_version"] == "1.0"
     assert manifest["profile_source"] == next(
         {
             "path": entry["path"],
@@ -306,3 +296,48 @@ def test_resume_rejects_a_different_runtime_profile_source(tmp_path: Path) -> No
             run_root,
             profile_file=other_profile,
         )
+
+
+def test_resume_rejects_a_symlink_alias_for_the_frozen_profile(tmp_path: Path) -> None:
+    root, profile_path = _repository(tmp_path)
+    run_root = root / "work/v1/calibration-runtime/resume-symlink"
+    freeze_run_inputs(root, PROFILE_ID, run_root, profile_file=profile_path)
+    alias = profile_path.with_name("profile-alias.json")
+    alias.symlink_to(profile_path)
+
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        freeze_run_inputs(
+            root,
+            PROFILE_ID,
+            run_root,
+            profile_file=alias,
+        )
+
+
+def test_validation_rejects_a_symlinked_snapshot_member(tmp_path: Path) -> None:
+    root, profile_path = _repository(tmp_path)
+    run_root = root / "work/v1/calibration-runtime/member-symlink"
+    freeze_run_inputs(root, PROFILE_ID, run_root, profile_file=profile_path)
+    repository = run_root / "input_snapshot/repository"
+    member = repository / "repos.lock.json"
+    replacement = repository / "repos-lock-copy.json"
+    replacement.write_bytes(member.read_bytes())
+    member.unlink()
+    member.symlink_to(replacement.name)
+
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        validate_run_inputs(root, PROFILE_ID, run_root)
+
+
+def test_validation_rejects_a_symlinked_snapshot_repository(tmp_path: Path) -> None:
+    root, profile_path = _repository(tmp_path)
+    run_root = root / "work/v1/calibration-runtime/repository-symlink"
+    freeze_run_inputs(root, PROFILE_ID, run_root, profile_file=profile_path)
+    snapshot_root = run_root / "input_snapshot"
+    repository = snapshot_root / "repository"
+    relocated = snapshot_root / "relocated-repository"
+    repository.rename(relocated)
+    repository.symlink_to(relocated.name, target_is_directory=True)
+
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        validate_run_inputs(root, PROFILE_ID, run_root)

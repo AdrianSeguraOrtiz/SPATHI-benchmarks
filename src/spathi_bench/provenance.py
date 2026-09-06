@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,8 @@ from .config import (
     profile_path,
     resolve_repo_path,
 )
+from .safe_io import path_below_no_symlinks, reject_symlink_components
+from .scenario_inputs import scenario_external_input_paths
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,59 @@ class SnapshotSource:
     path: Path
     relative: str
     kind: str
+
+
+_PRODUCTION_PROVENANCE_KEYS = {
+    "calibration_selection",
+    "efficiency_plan",
+    "efficiency_evidence",
+    "efficiency_results",
+}
+_SAFETY_PROVENANCE_KEYS = {"panel", "plan", "evidence", "results"}
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def production_provenance_artifacts(
+    production: dict[str, Any],
+) -> list[tuple[str, dict[str, str]]]:
+    """Return labeled v1 production-evidence leaves after strict shape validation."""
+
+    provenance = production.get("provenance")
+    if not isinstance(provenance, dict):
+        raise BenchmarkConfigError("SPATHI production policy has no provenance")
+    observed_keys = set(provenance)
+    allowed_keys = _PRODUCTION_PROVENANCE_KEYS | {"efficiency_safety"}
+    if not _PRODUCTION_PROVENANCE_KEYS.issubset(observed_keys) or not observed_keys.issubset(
+        allowed_keys
+    ):
+        raise BenchmarkConfigError("SPATHI production policy provenance is invalid")
+
+    raw_artifacts: list[tuple[str, Any]] = [
+        (key, provenance[key]) for key in sorted(_PRODUCTION_PROVENANCE_KEYS)
+    ]
+    safety = provenance.get("efficiency_safety")
+    if safety is not None:
+        if not isinstance(safety, dict) or set(safety) != _SAFETY_PROVENANCE_KEYS:
+            raise BenchmarkConfigError(
+                "SPATHI production policy efficiency-safety provenance is invalid"
+            )
+        raw_artifacts.extend(
+            (f"efficiency_safety_{key}", safety[key]) for key in sorted(_SAFETY_PROVENANCE_KEYS)
+        )
+
+    artifacts: list[tuple[str, dict[str, str]]] = []
+    for label, artifact in raw_artifacts:
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"path", "sha256"}
+            or not isinstance(artifact.get("path"), str)
+            or not artifact["path"]
+            or not isinstance(artifact.get("sha256"), str)
+            or _SHA256_RE.fullmatch(artifact["sha256"]) is None
+        ):
+            raise BenchmarkConfigError("SPATHI production policy provenance is invalid")
+        artifacts.append((label, artifact))
+    return artifacts
 
 
 def _git(repo: Path, *arguments: str) -> str:
@@ -125,31 +181,30 @@ def _snapshot_source_records(
         "images.lock.json",
         profile_relative,
         "experiments/v1/spathi/search-space.json",
+        "experiments/v1/seeds/seed-plan.json",
     }
     runtime_candidates: set[str] = set()
     if selected_profile.is_relative_to((repo_root / "work").resolve()):
         runtime_candidates.add(profile_relative)
 
-    selected_relative = profile.get("selected_config", "experiments/v1/spathi/selected-config.json")
-    if not isinstance(selected_relative, str):
-        raise BenchmarkConfigError("Profile selected_config must be a relative path")
-    selected_path = resolve_repo_path(repo_root, selected_relative, "SPATHI selected configuration")
-    relative_paths.add(selected_relative)
-    if selected_path.is_relative_to((repo_root / "work").resolve()):
-        runtime_candidates.add(selected_relative)
-    selected = load_json_object(
-        selected_path,
-        "SPATHI selected configuration",
-    )
-    evidence = selected.get("selection_evidence")
-    if isinstance(evidence, dict) and isinstance(evidence.get("validation_ranking"), str):
-        _add_ranking_chain(
-            repo_root,
-            relative_paths,
-            evidence["validation_ranking"],
-            runtime_candidates,
+    production_relative = profile.get("production_config")
+    if production_relative is not None:
+        if not isinstance(production_relative, str):
+            raise BenchmarkConfigError("Profile production_config must be a relative path")
+        production_path = resolve_repo_path(
+            repo_root, production_relative, "SPATHI production policy"
         )
-
+        relative_paths.add(production_relative)
+        if production_path.is_relative_to((repo_root / "work").resolve()):
+            runtime_candidates.add(production_relative)
+        production = load_json_object(production_path, "SPATHI production policy")
+        for _label, artifact in production_provenance_artifacts(production):
+            artifact_path = resolve_repo_path(
+                repo_root, artifact["path"], "production policy provenance"
+            )
+            relative_paths.add(artifact["path"])
+            if artifact_path.is_relative_to((repo_root / "work").resolve()):
+                runtime_candidates.add(artifact["path"])
     materialization_path = profile.get("materialization_manifest")
     if materialization_path is not None:
         if not isinstance(materialization_path, str):
@@ -165,45 +220,27 @@ def _snapshot_source_records(
         if isinstance(catalog_plan, dict) and isinstance(catalog_plan.get("path"), str):
             relative_paths.add(catalog_plan["path"])
     for job in profile["generation_jobs"]:
+        if "generator_request" in job:
+            generator_request = job["generator_request"]
+            relative_paths.add(generator_request)
+            resolved_request = resolve_repo_path(
+                repo_root,
+                generator_request,
+                f"{job['id']} generator request",
+            )
+            if resolved_request.is_relative_to((repo_root / "work").resolve()):
+                runtime_candidates.add(generator_request)
+            continue
         relative_paths.update((job["scenario"], job["simulator_runs"]))
         scenario_path = resolve_repo_path(
             repo_root,
             job["scenario"],
             f"{job['id']} scenario",
         )
-        scenario = load_json_object(scenario_path, f"{job['id']} scenario")
-        inputs = scenario.get("inputs", {})
-        if not isinstance(inputs, dict):
-            raise BenchmarkConfigError(f"{job['id']} scenario inputs must be an object")
-        for input_id, input_spec in inputs.items():
-            if not isinstance(input_id, str) or not isinstance(input_spec, dict):
-                raise BenchmarkConfigError(f"{job['id']} scenario contains an invalid input")
-            raw_path = input_spec.get("path")
-            if not isinstance(raw_path, str) or not raw_path:
-                raise BenchmarkConfigError(f"{job['id']} scenario input {input_id!r} has no path")
-            source = Path(raw_path)
-            if not source.is_absolute():
-                source = scenario_path.parent / source
-            source = source.resolve()
-            if not source.is_relative_to(repo_root):
-                raise BenchmarkConfigError(
-                    f"{job['id']} scenario input {input_id!r} must be inside the benchmark repository"
-                )
-            if source.is_file():
-                relative_paths.add(source.relative_to(repo_root).as_posix())
-            elif source.is_dir():
-                members = [member for member in sorted(source.rglob("*")) if member.is_file()]
-                if not members:
-                    raise BenchmarkConfigError(
-                        f"{job['id']} scenario input {input_id!r} directory is empty"
-                    )
-                relative_paths.update(
-                    member.relative_to(repo_root).as_posix() for member in members
-                )
-            else:
-                raise BenchmarkConfigError(
-                    f"{job['id']} scenario input {input_id!r} does not exist: {source}"
-                )
+        relative_paths.update(
+            source.relative_to(repo_root).as_posix()
+            for source in scenario_external_input_paths(scenario_path, repo_root)
+        )
     for batch in profile["inference_batches"]:
         relative_paths.update((batch["tools_params"], batch["run_metadata"]))
         derived_batch_paths = [batch["tools_params"], batch["run_metadata"]]
@@ -254,24 +291,6 @@ def _snapshot_source_records(
     return sources
 
 
-def _snapshot_sources(
-    repo_root: Path,
-    profile: dict[str, Any],
-    *,
-    profile_source: Path | None = None,
-) -> list[Path]:
-    """Compatibility helper used by focused provenance tests."""
-
-    return [
-        source.path
-        for source in _snapshot_source_records(
-            repo_root,
-            profile,
-            profile_source=profile_source,
-        )
-    ]
-
-
 def freeze_run_inputs(
     repo_root: Path,
     profile_id: str,
@@ -281,18 +300,28 @@ def freeze_run_inputs(
 ) -> dict[str, Any]:
     """Copy all run-defining files once and return their immutable manifest."""
 
+    run_root = reject_symlink_components(run_root, "run root")
     snapshot_root = run_root / "input_snapshot"
     manifest_path = snapshot_root / "manifest.json"
     if manifest_path.is_file():
         manifest = validate_run_inputs(repo_root, profile_id, run_root)
         if profile_file is not None:
-            requested = profile_file.absolute().resolve(strict=False)
-            try:
-                requested_relative = requested.relative_to(repo_root.resolve()).as_posix()
-            except ValueError as exc:
+            root = reject_symlink_components(repo_root, "repository root")
+            requested = path_below_no_symlinks(
+                Path(os.path.abspath(profile_file)),
+                root,
+                "requested profile source",
+            )
+            work_root = path_below_no_symlinks(
+                root / "work",
+                root,
+                "runtime work root",
+            )
+            if not requested.is_relative_to(work_root):
                 raise BenchmarkConfigError(
-                    "Requested profile source escapes the benchmark repository"
-                ) from exc
+                    f"Runtime profile must be stored below work/: {profile_file}"
+                )
+            requested_relative = requested.relative_to(root).as_posix()
             frozen_relative = (manifest.get("profile_source") or {}).get("path")
             if requested_relative != frozen_relative:
                 raise BenchmarkConfigError(
@@ -344,7 +373,7 @@ def freeze_run_inputs(
         ).as_posix()
         profile_entry = next(entry for entry in files if entry["path"] == selected_profile_relative)
         manifest = {
-            "schema_version": "2.0",
+            "schema_version": "1.0",
             "profile_id": profile_id,
             "profile_source": {
                 "path": profile_entry["path"],
@@ -369,15 +398,26 @@ def freeze_run_inputs(
 def validate_run_inputs(repo_root: Path, profile_id: str, run_root: Path) -> dict[str, Any]:
     """Verify a frozen snapshot and that the orchestrator code has not changed."""
 
-    snapshot_root = run_root / "input_snapshot"
-    manifest_path = snapshot_root / "manifest.json"
+    safe_run_root = reject_symlink_components(run_root, "run root")
+    snapshot_root = path_below_no_symlinks(
+        safe_run_root / "input_snapshot",
+        safe_run_root,
+        "frozen input snapshot",
+        require_directory=True,
+    )
+    manifest_path = path_below_no_symlinks(
+        snapshot_root / "manifest.json",
+        snapshot_root,
+        "frozen input manifest",
+        require_file=True,
+    )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BenchmarkConfigError(f"Cannot read frozen input manifest: {exc}") from exc
     if not isinstance(manifest, dict) or manifest.get("status") != "complete":
         raise BenchmarkConfigError("Frozen input snapshot is not complete")
-    if manifest.get("schema_version") != "2.0" or manifest.get("profile_id") != profile_id:
+    if manifest.get("schema_version") != "1.0" or manifest.get("profile_id") != profile_id:
         raise BenchmarkConfigError("Frozen input snapshot identity differs from this run")
     observed = observe_benchmark_repository(repo_root, require_clean=True)
     recorded = manifest.get("benchmark_repository")
@@ -390,6 +430,12 @@ def validate_run_inputs(repo_root: Path, profile_id: str, run_root: Path) -> dic
     raw_files = manifest.get("files")
     if not isinstance(raw_files, list) or not raw_files:
         raise BenchmarkConfigError("Frozen input snapshot contains no files")
+    repository_root = path_below_no_symlinks(
+        snapshot_root / "repository",
+        snapshot_root,
+        "frozen input repository",
+        require_directory=True,
+    )
     observed_paths: set[str] = set()
     for entry in raw_files:
         if (
@@ -399,10 +445,12 @@ def validate_run_inputs(repo_root: Path, profile_id: str, run_root: Path) -> dic
         ):
             raise BenchmarkConfigError("Frozen input snapshot has an invalid file entry")
         relative = entry["path"]
-        member = (snapshot_root / "repository" / relative).resolve()
-        repository_root = (snapshot_root / "repository").resolve()
-        if not member.is_relative_to(repository_root) or not member.is_file():
-            raise BenchmarkConfigError(f"Frozen input is missing or escapes its root: {relative}")
+        member = path_below_no_symlinks(
+            repository_root / relative,
+            repository_root,
+            f"frozen input {relative}",
+            require_file=True,
+        )
         if relative in observed_paths:
             raise BenchmarkConfigError(f"Frozen input is listed twice: {relative}")
         observed_paths.add(relative)
@@ -424,12 +472,32 @@ def validate_run_inputs(repo_root: Path, profile_id: str, run_root: Path) -> dic
 
 
 def frozen_repository_root(run_root: Path) -> Path:
-    return (run_root / "input_snapshot" / "repository").resolve()
+    safe_run_root = reject_symlink_components(run_root, "run root")
+    snapshot_root = path_below_no_symlinks(
+        safe_run_root / "input_snapshot",
+        safe_run_root,
+        "frozen input snapshot",
+        require_directory=True,
+    )
+    return path_below_no_symlinks(
+        snapshot_root / "repository",
+        snapshot_root,
+        "frozen input repository",
+        require_directory=True,
+    )
 
 
 def frozen_profile(run_root: Path, profile_id: str) -> dict[str, Any]:
+    safe_run_root = reject_symlink_components(run_root, "run root")
+    manifest_path = path_below_no_symlinks(
+        safe_run_root / "input_snapshot" / "manifest.json",
+        safe_run_root,
+        "frozen input manifest",
+        require_file=True,
+    )
     manifest = load_json_object(
-        run_root / "input_snapshot" / "manifest.json", "frozen input manifest"
+        manifest_path,
+        "frozen input manifest",
     )
     source = manifest.get("profile_source")
     if not isinstance(source, dict) or not isinstance(source.get("path"), str):

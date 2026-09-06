@@ -20,8 +20,17 @@ from typing import Any
 from .artifacts import canonical_json_sha256, sha256_file
 from .config import BenchmarkConfigError, load_json_object, resolve_repo_path
 
-IDENTITY_CONTRACT_VERSION = "1.1"
-PROTECTED_DATASET_ROLES = frozenset({"development", "validation", "test"})
+IDENTITY_CONTRACT_VERSION = "1.0"
+PROTECTED_DATASET_ROLES = frozenset(
+    {
+        "development",
+        "validation",
+        "efficiency_validation",
+        "efficiency_safety",
+        "test",
+        "dimensional_transfer",
+    }
+)
 _MAX_SEED_32BIT = 2_147_483_646
 _TRUTH_CONTEXT_ORDER = ("global", "group", "column")
 

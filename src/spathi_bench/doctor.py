@@ -52,25 +52,45 @@ required = {"SpathiConfig", "SpathiProgressEvent", "SpathiRunResult", "infer"}
 exports = set(getattr(module, "__all__", ()))
 config_type = getattr(module, "SpathiConfig")
 progress_type = getattr(module, "SpathiProgressEvent")
-required_config_fields = {
-    "bandwidth", "bootstrap", "distance_metric", "distance_space",
-    "distance_standardization", "expression", "group_size_correction", "groups",
-    "kernel", "max_depth", "max_features", "min_samples_leaf", "n_components",
-    "n_estimators", "output_dir", "pca_svd_solver", "random_seed", "report",
-    "tf_list", "threads", "tree_method", "weight_mode",
+config_field_partitions = {
+    "paths": {"expression", "tf_list", "groups", "output_dir"},
+    "scientific_inputs": {"target_list", "centroid_weights"},
+    "scientific_parameters": {
+        "adaptive_min_estimators", "adaptive_patience", "adaptive_tolerance",
+        "adaptive_tree_step", "adaptive_trees", "bandwidth", "bandwidth_scale", "bootstrap",
+        "distance_metric", "distance_space", "distance_standardization",
+        "group_size_correction", "kernel", "max_depth", "max_features",
+        "min_samples_leaf", "n_components", "min_target_detected_cells",
+        "min_target_detected_fraction", "min_target_weighted_detected_ess",
+        "min_target_weighted_detected_fraction", "n_estimators", "pca_svd_solver",
+        "random_seed", "target_eligibility", "tree_method", "weight_mode",
+    },
+    "operational_options": {"threads", "report"},
 }
 config_definition = dataclasses.fields(config_type)
 config_fields = {field.name for field in config_definition}
-unsupported_required_config_fields = sorted(
+expected_config_fields = set().union(*config_field_partitions.values())
+partition_owners = {
+    field_name: sorted(
+        partition_name
+        for partition_name, members in config_field_partitions.items()
+        if field_name in members
+    )
+    for field_name in expected_config_fields
+}
+config_partition_overlap = sorted(
+    field_name for field_name, owners in partition_owners.items() if len(owners) != 1
+)
+required_config_fields = {
     field.name
     for field in config_definition
     if field.default is dataclasses.MISSING
     and field.default_factory is dataclasses.MISSING
-    and field.name not in required_config_fields
-)
+}
+requiredness_mismatches = sorted(required_config_fields ^ config_field_partitions["paths"])
 progress_fields = {field.name for field in dataclasses.fields(progress_type)}
 missing_progress_members = sorted(
-    {"phase", "message", "model_fraction"}
+    {"phase", "message", "completed_models", "total_models"}
     - progress_fields
     - set(dir(progress_type))
 )
@@ -103,8 +123,13 @@ if len(result_defs) == 1:
 print(json.dumps({
     "module": str(module_file),
     "missing_exports": sorted(required - exports),
-    "missing_config_fields": sorted(required_config_fields - config_fields),
-    "unsupported_required_config_fields": unsupported_required_config_fields,
+    "config_field_partitions": {
+        name: sorted(members) for name, members in config_field_partitions.items()
+    },
+    "missing_config_fields": sorted(expected_config_fields - config_fields),
+    "unexpected_config_fields": sorted(config_fields - expected_config_fields),
+    "config_partition_overlap": config_partition_overlap,
+    "requiredness_mismatches": requiredness_mismatches,
     "missing_progress_members": missing_progress_members,
     "missing_result_fields": sorted({"network_path", "warnings"} - result_fields),
     "infer_signature_ok": infer_signature_ok,
@@ -452,14 +477,19 @@ def _spathi_api_check(
         module_path = Path(payload["module"]).resolve()
         missing_exports = payload["missing_exports"]
         missing_config_fields = payload["missing_config_fields"]
-        unsupported_required_config_fields = payload["unsupported_required_config_fields"]
+        unexpected_config_fields = payload["unexpected_config_fields"]
+        config_partition_overlap = payload["config_partition_overlap"]
+        requiredness_mismatches = payload["requiredness_mismatches"]
+        config_field_partitions = payload["config_field_partitions"]
         missing_progress_members = payload["missing_progress_members"]
         missing_result_fields = payload["missing_result_fields"]
         infer_signature_ok = payload["infer_signature_ok"]
         for key, values in (
             ("missing_exports", missing_exports),
             ("missing_config_fields", missing_config_fields),
-            ("unsupported_required_config_fields", unsupported_required_config_fields),
+            ("unexpected_config_fields", unexpected_config_fields),
+            ("config_partition_overlap", config_partition_overlap),
+            ("requiredness_mismatches", requiredness_mismatches),
             ("missing_progress_members", missing_progress_members),
             ("missing_result_fields", missing_result_fields),
         ):
@@ -467,6 +497,16 @@ def _spathi_api_check(
                 raise TypeError(f"{key} must be a list of strings")
         if not isinstance(infer_signature_ok, bool):
             raise TypeError("infer_signature_ok must be a boolean")
+        if (
+            not isinstance(config_field_partitions, dict)
+            or set(config_field_partitions)
+            != {"paths", "scientific_inputs", "scientific_parameters", "operational_options"}
+            or not all(
+                isinstance(values, list) and all(isinstance(name, str) for name in values)
+                for values in config_field_partitions.values()
+            )
+        ):
+            raise TypeError("config_field_partitions must be the exact four-way partition")
     except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return _failed(
             "spathi_api",
@@ -493,7 +533,9 @@ def _spathi_api_check(
         )
     if (
         missing_config_fields
-        or unsupported_required_config_fields
+        or unexpected_config_fields
+        or config_partition_overlap
+        or requiredness_mismatches
         or missing_progress_members
         or missing_result_fields
         or not infer_signature_ok
@@ -503,7 +545,10 @@ def _spathi_api_check(
             "SPATHI's public API contract is incompatible with its benchmark adapter",
             details={
                 "missing_config_fields": missing_config_fields,
-                "unsupported_required_config_fields": unsupported_required_config_fields,
+                "unexpected_config_fields": unexpected_config_fields,
+                "config_partition_overlap": config_partition_overlap,
+                "requiredness_mismatches": requiredness_mismatches,
+                "config_field_partitions": config_field_partitions,
                 "missing_progress_members": missing_progress_members,
                 "missing_result_fields": missing_result_fields,
                 "infer_signature_ok": infer_signature_ok,
@@ -514,7 +559,11 @@ def _spathi_api_check(
     return _passed(
         "spathi_api",
         "SPATHI exposes the public API required by its benchmark adapter",
-        details={"repository": str(expected_repo), "module": str(module_path)},
+        details={
+            "repository": str(expected_repo),
+            "module": str(module_path),
+            "config_field_partitions": config_field_partitions,
+        },
     )
 
 

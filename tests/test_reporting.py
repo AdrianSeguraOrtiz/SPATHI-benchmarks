@@ -14,7 +14,7 @@ from plotly.offline import get_plotlyjs
 import spathi_bench.reporting.calibration as calibration_reporting
 import spathi_bench.reporting.common as reporting_common
 import spathi_bench.reporting.comparison as comparison_reporting
-from spathi_bench.artifacts import ArtifactStore, sha256_file
+from spathi_bench.artifacts import ArtifactStore, canonical_json_sha256, sha256_file
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.reporting.common import json_for_script, render_html, write_report_bundle
 
@@ -265,7 +265,7 @@ def _calibration_fixture(
         _write_json(
             version_root / f"calibration-{stage_id}" / "state.json",
             {
-                "schema_version": "3.0",
+                "schema_version": "1.0",
                 "status": "completed",
                 "profile_id": ranking["profile_id"],
                 "artifact_store": str((version_root / "artifacts").resolve()),
@@ -276,17 +276,32 @@ def _calibration_fixture(
         )
 
     assert winning_candidate is not None
+    group_policy = {
+        "routing_parameter": "group_count",
+        "branches": {
+            "single_group": {
+                "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
+                "parameters": winning_candidate["parameters"],
+            },
+            "multi_group": {
+                "condition": {"minimum_group_count": 2},
+                "parameters": winning_candidate["parameters"],
+            },
+        },
+    }
     selected = {
         "schema_version": "1.0",
         "status": "selected",
         "phase": "frozen",
         "calibration_budget": "reduced",
         "test_accessed_before_freeze": False,
-        "selected_candidate": {
-            "candidate_id": winning_candidate["configuration_id"],
-            "configuration_sha256": winning_candidate["configuration_sha256"],
+        "selected_policy": {
+            "policy_id": "spathi_conditional_v1",
+            "source_candidate_id": winning_candidate["configuration_id"],
+            "source_configuration_sha256": winning_candidate["configuration_sha256"],
             "spathi_commit": spathi_commit,
-            "parameters": winning_candidate["parameters"],
+            "policy_sha256": canonical_json_sha256(group_policy),
+            "group_policy": group_policy,
         },
     }
     selected_path = _write_json(workflow_root / "selected-config.json", selected)
@@ -294,7 +309,7 @@ def _calibration_fixture(
         "schema_version": "1.0",
         "workflow_type": "calibration",
         "flow_id": "calibration-fixture",
-        "status": "complete",
+        "status": "publishing",
         "calibration_budget": "reduced",
         "identity": {
             "spathi_commit": spathi_commit,
@@ -303,6 +318,11 @@ def _calibration_fixture(
         "stages": stage_records,
         "selected_config": selected_path.relative_to(repo_root).as_posix(),
         "selected_config_sha256": sha256_file(selected_path),
+        "interactive_report": (
+            version_root / "reports/reduced/calibration-fixture/calibration.html"
+        )
+        .relative_to(repo_root)
+        .as_posix(),
     }
     _write_json(workflow_root / "workflow.json", workflow)
     return repo_root, workflow_root, selected
@@ -361,7 +381,7 @@ def _comparison_fixture(
         writer.writerow(runtime_row)
 
     summary = {
-        "schema_version": "3.0",
+        "schema_version": "1.0",
         "profile_id": "reduced-v1",
         "purpose": "regression",
         "aggregates": [{"marker": "published-summary"}],
@@ -471,7 +491,7 @@ def _comparison_fixture(
         seed=11001,
     )
     state = {
-        "schema_version": "3.0",
+        "schema_version": "1.0",
         "status": "completed",
         "profile_id": "reduced-v1",
         "purpose": "regression",
@@ -491,16 +511,25 @@ def _comparison_fixture(
         "exports_manifest": str(exports_path.resolve()),
     }
     _write_json(run_root / "state.json", state)
+    production = _write_json(
+        version_root / "workflows/efficiency/reduced/efficiency-fixture/production-config.json",
+        {"artifact_type": "spathi_production_policy", "budget": "reduced"},
+    )
     workflow = {
         "schema_version": "1.0",
         "workflow_type": "comparison",
         "flow_id": "comparison-fixture",
-        "status": "complete",
+        "status": "publishing",
         "profile": "reduced",
         "profile_file": profile.relative_to(repo_root).as_posix(),
         "profile_sha256": sha256_file(profile),
-        "calibration_flow_id": "calibration-fixture",
+        "efficiency_flow_id": "efficiency-fixture",
+        "production_config": production.relative_to(repo_root).as_posix(),
+        "production_config_sha256": sha256_file(production),
         "identity": {"spathi_commit": "2" * 40, "fingerprint": "5" * 64},
+        "interactive_report": (version_root / "reports/reduced/comparison-fixture/comparison.html")
+        .relative_to(repo_root)
+        .as_posix(),
         "stages": {
             "comparison": {
                 "status": "complete",
@@ -704,7 +733,10 @@ def test_calibration_report_preserves_frozen_ranking_selection_and_null_memory(
         version_root / "reports/reduced/calibration-fixture/calibration.html"
     )
     assert captured["output_path"] != workflow_root / "reports/calibration.html"
+    assert captured["manifest_name"] == "calibration-report.manifest.json"
+    assert captured["immutable"] is True
     payload = captured["payload"]
+    assert payload["workflow"]["status"] == "complete"
     assert payload["selected"] == selected
     assert [stage["id"] for stage in payload["stages"]] == list(
         calibration_reporting.CALIBRATION_STAGE_ORDER
@@ -765,10 +797,13 @@ def test_comparison_report_uses_published_inputs_joint_links_and_deduplicated_ru
     )
 
     assert result == {"captured": True}
-    report_path = version_root / "reports/reduced/calibration-fixture/comparison.html"
+    report_path = version_root / "reports/reduced/comparison-fixture/comparison.html"
     assert captured["output_path"] == report_path
     assert captured["output_path"] != run_root / "reports/comparison.html"
+    assert captured["manifest_name"] == "comparison-report.manifest.json"
+    assert captured["immutable"] is True
     payload = captured["payload"]
+    assert payload["workflow"]["status"] == "complete"
     expected_statistics = json.loads(json.dumps(published_statistics))
     expected_statistics["inputs"]["benchmark_environment"] = {
         "fingerprint": "f" * 64,
@@ -856,6 +891,46 @@ def test_comparison_report_uses_published_inputs_joint_links_and_deduplicated_ru
 
 
 @pytest.mark.parametrize("workflow_kind", ["calibration", "comparison"])
+def test_report_bundle_is_identical_while_publishing_and_after_completion(
+    tmp_path: Path,
+    workflow_kind: str,
+) -> None:
+    if workflow_kind == "calibration":
+        repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
+        renderer = calibration_reporting.render_calibration_report
+        kwargs: dict[str, Any] = {"version_root": workflow_root.parents[3]}
+    else:
+        repo_root, workflow_root, run_root, _statistics = _comparison_fixture(tmp_path)
+        renderer = comparison_reporting.render_comparison_report
+        kwargs = {"version_root": workflow_root.parents[3], "run_root": run_root}
+
+    publishing_bundle = renderer(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        **kwargs,
+    )
+    workflow_path = workflow_root / "workflow.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert workflow["status"] == "publishing"
+    workflow["status"] = "complete"
+    workflow["reports"] = publishing_bundle
+    _write_json(workflow_path, workflow)
+
+    completed_bundle = renderer(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        **kwargs,
+    )
+
+    assert completed_bundle == publishing_bundle
+    for member in ("html", "manifest"):
+        assert (
+            sha256_file(repo_root / completed_bundle[member]["path"])
+            == (publishing_bundle[member]["sha256"])
+        )
+
+
+@pytest.mark.parametrize("workflow_kind", ["calibration", "comparison"])
 def test_reporting_rejects_a_flow_id_that_disagrees_with_its_workflow_directory(
     tmp_path: Path,
     workflow_kind: str,
@@ -910,7 +985,7 @@ def test_reporting_rejects_incomplete_workflows(
     workflow["status"] = "running"
     _write_json(workflow_path, workflow)
 
-    with pytest.raises(BenchmarkConfigError, match="require a completed workflow"):
+    with pytest.raises(BenchmarkConfigError, match="require a publishable workflow"):
         renderer(repo_root=repo_root, workflow_root=workflow_root, **kwargs)
 
 

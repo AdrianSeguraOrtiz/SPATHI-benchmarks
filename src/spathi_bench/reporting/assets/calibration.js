@@ -2,108 +2,462 @@
   "use strict";
 
   const R = window.SpathiReport;
-  const STAGE_ORDER = ["convergence", "structure", "estimator", "validation"];
+  const STAGE_ORDER = ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"];
+  const REPORT_KEYS = [
+    "schema_version", "report_type", "workflow", "integrity", "objective",
+    "dataset_partition", "datasets", "selected", "stages", "links", "report",
+  ];
+  const REPORT_METADATA_KEYS = [
+    "schema_version", "fingerprint", "fingerprint_scope", "renderer",
+    "self_contained", "statistics_recomputed",
+  ];
+  const WORKFLOW_KEYS = ["flow_id", "status", "calibration_budget", "identity"];
+  const IDENTITY_KEYS = [
+    "benchmark_commit", "benchmark_origin", "spathi_commit", "andrea_commit",
+    "search_space_sha256", "calibration_budget", "fingerprint",
+  ];
+  const INTEGRITY_KEYS = [
+    "stage_order", "all_stages_ranked", "test_data_accessed_before_freeze",
+    "single_spathi_commit", "selection_frozen",
+  ];
+  const STAGE_KEYS = [
+    "id", "order", "purpose", "dataset_role", "primary_metric", "strategy",
+    "advance_limit", "candidates", "observations", "varying_parameters",
+    "compared_parameters", "selected_ids", "winner", "test_data_accessed",
+    "memory_available",
+  ];
+  const CANDIDATE_KEYS = [
+    "rank", "configuration_id", "configuration_sha256", "variant_id",
+    "parent_configuration_id", "parameters", "score", "stability",
+    "median_wall_time_seconds", "median_peak_memory_mb", "simplicity",
+    "dataset_count", "algorithm_seed_count", "selected", "rationale",
+  ];
+  const OBSERVATION_KEYS = [
+    "configuration_id", "configuration_sha256", "dataset_role", "dataset_id",
+    "algorithm_seed", "aupr_directed", "wall_time_seconds", "peak_memory_mb",
+    "n_group_contexts", "group_contexts", "spathi_commit",
+    "spathi_build_fingerprint", "spathi_image_id", "run_id", "execution_sha256",
+  ];
+  const SELECTED_KEYS = [
+    "schema_version", "id", "search_space", "calibration_budget", "status",
+    "phase", "selected_policy", "selection_evidence", "test_accessed_before_freeze",
+    "notes",
+  ];
+  const POLICY_KEYS = [
+    "policy_id", "source_candidate_id", "spathi_commit",
+    "source_configuration_sha256", "policy_sha256", "group_policy",
+  ];
+  const EVIDENCE_KEYS = [
+    "calibration_budget", "validation_ranking", "validation_ranking_sha256",
+    "search_space_sha256", "validation_manifest_sha256", "benchmark_summary_sha256",
+    "spathi_build_fingerprint", "spathi_image_id", "primary_metric",
+    "hierarchical_score", "winner_candidate_id", "winner_configuration_sha256",
+    "winner_policy_sha256", "tie_breakers_applied", "frozen_at",
+  ];
+  const DATASET_SUMMARY_KEYS = [
+    "dataset_count", "total_cells", "simulators", "roles", "genes_min",
+    "genes_max", "cells_min", "cells_max", "groups_min", "groups_max",
+    "transcription_factors_min", "transcription_factors_max",
+  ];
+  const DATASET_ROW_KEYS = [
+    "dataset_id", "simulator_id", "condition_id", "dataset_role", "split_id",
+    "seed", "genes", "cells", "column_kind", "groups", "group_labels",
+    "transcription_factors",
+  ];
 
-  function asArray(value) {
-    if (Array.isArray(value)) return value;
-    if (value && typeof value === "object") return Object.entries(value).map(([id, item]) => Object.assign({ id }, item));
-    return [];
+  function contractError(path, expectation) {
+    throw new Error(`Invalid calibration report payload: ${path} ${expectation}.`);
   }
 
-  function firstDefined() {
-    for (let index = 0; index < arguments.length; index += 1) {
-      const value = arguments[index];
-      if (value !== null && value !== undefined) return value;
+  function requireObject(value, path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      contractError(path, "must be an object");
     }
-    return null;
+    return value;
   }
 
-  function normalizeCandidate(row, rank, winnerId) {
-    const candidate = row.candidate || row.configuration || row;
-    const id = firstDefined(
-      candidate.configuration_id,
-      candidate.candidate_id,
-      candidate.id,
-      row.configuration_id,
-      row.candidate_id,
-      row.id,
-      `candidate-${rank + 1}`,
+  function requireArray(value, path) {
+    if (!Array.isArray(value)) contractError(path, "must be an array");
+    return value;
+  }
+
+  function requireExactKeys(value, path, expectedKeys) {
+    const object = requireObject(value, path);
+    const observed = Object.keys(object);
+    const missing = expectedKeys.filter((key) => !Object.prototype.hasOwnProperty.call(object, key));
+    const unexpected = observed.filter((key) => !expectedKeys.includes(key));
+    if (missing.length) contractError(path, `is missing ${missing.join(", ")}`);
+    if (unexpected.length) contractError(path, `contains unexpected fields ${unexpected.join(", ")}`);
+    return object;
+  }
+
+  function requireString(value, path) {
+    if (typeof value !== "string" || !value) contractError(path, "must be a non-empty string");
+    return value;
+  }
+
+  function requireBoolean(value, path) {
+    if (typeof value !== "boolean") contractError(path, "must be a boolean");
+    return value;
+  }
+
+  function requireNumber(value, path, nullable) {
+    if (nullable && value === null) return value;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      contractError(path, nullable ? "must be a finite number or null" : "must be a finite number");
+    }
+    return value;
+  }
+
+  function requireInteger(value, path) {
+    if (!Number.isInteger(value)) contractError(path, "must be an integer");
+    return value;
+  }
+
+  function requireLiteral(value, expected, path) {
+    if (value !== expected) contractError(path, `must equal ${JSON.stringify(expected)}`);
+  }
+
+  function validateCandidate(candidate, path) {
+    requireExactKeys(candidate, path, CANDIDATE_KEYS);
+    requireInteger(candidate.rank, `${path}.rank`);
+    requireString(candidate.configuration_id, `${path}.configuration_id`);
+    requireString(candidate.configuration_sha256, `${path}.configuration_sha256`);
+    requireString(candidate.variant_id, `${path}.variant_id`);
+    if (candidate.parent_configuration_id !== null) {
+      requireString(candidate.parent_configuration_id, `${path}.parent_configuration_id`);
+    }
+    const parameters = requireObject(candidate.parameters, `${path}.parameters`);
+    if (!Object.keys(parameters).length) contractError(`${path}.parameters`, "must not be empty");
+    requireNumber(candidate.score, `${path}.score`);
+    requireNumber(candidate.stability, `${path}.stability`);
+    requireNumber(candidate.median_wall_time_seconds, `${path}.median_wall_time_seconds`);
+    requireNumber(candidate.median_peak_memory_mb, `${path}.median_peak_memory_mb`, true);
+    requireInteger(candidate.simplicity, `${path}.simplicity`);
+    requireInteger(candidate.dataset_count, `${path}.dataset_count`);
+    requireInteger(candidate.algorithm_seed_count, `${path}.algorithm_seed_count`);
+    requireBoolean(candidate.selected, `${path}.selected`);
+    requireString(candidate.rationale, `${path}.rationale`);
+  }
+
+  function validateObservation(row, path) {
+    requireExactKeys(row, path, OBSERVATION_KEYS);
+    requireString(row.configuration_id, `${path}.configuration_id`);
+    requireString(row.configuration_sha256, `${path}.configuration_sha256`);
+    requireString(row.dataset_role, `${path}.dataset_role`);
+    requireString(row.dataset_id, `${path}.dataset_id`);
+    requireInteger(row.algorithm_seed, `${path}.algorithm_seed`);
+    requireNumber(row.aupr_directed, `${path}.aupr_directed`);
+    requireNumber(row.wall_time_seconds, `${path}.wall_time_seconds`);
+    requireNumber(row.peak_memory_mb, `${path}.peak_memory_mb`, true);
+    requireInteger(row.n_group_contexts, `${path}.n_group_contexts`);
+    requireArray(row.group_contexts, `${path}.group_contexts`).forEach((group, index) => {
+      requireString(group, `${path}.group_contexts[${index}]`);
+    });
+    ["spathi_commit", "spathi_build_fingerprint", "spathi_image_id", "run_id", "execution_sha256"]
+      .forEach((key) => requireString(row[key], `${path}.${key}`));
+  }
+
+  function validateSelected(selected) {
+    requireExactKeys(selected, "selected", SELECTED_KEYS);
+    requireLiteral(selected.schema_version, "1.0", "selected.schema_version");
+    requireLiteral(selected.id, "spathi_selected_v1", "selected.id");
+    requireLiteral(selected.search_space, "experiments/v1/spathi/search-space.json", "selected.search_space");
+    requireLiteral(selected.status, "selected", "selected.status");
+    requireLiteral(selected.phase, "frozen", "selected.phase");
+    requireLiteral(selected.test_accessed_before_freeze, false, "selected.test_accessed_before_freeze");
+    requireArray(selected.notes, "selected.notes").forEach((note, index) => {
+      requireString(note, `selected.notes[${index}]`);
+    });
+
+    const policy = requireExactKeys(selected.selected_policy, "selected.selected_policy", POLICY_KEYS);
+    ["policy_id", "source_candidate_id", "spathi_commit", "source_configuration_sha256", "policy_sha256"]
+      .forEach((key) => requireString(policy[key], `selected.selected_policy.${key}`));
+    requireLiteral(policy.policy_id, "spathi_conditional_v1", "selected.selected_policy.policy_id");
+    const groupPolicy = requireExactKeys(
+      policy.group_policy,
+      "selected.selected_policy.group_policy",
+      ["routing_parameter", "shared_parameters", "branches"],
     );
+    requireLiteral(groupPolicy.routing_parameter, "group_count", "selected.selected_policy.group_policy.routing_parameter");
+    requireArray(groupPolicy.shared_parameters, "selected.selected_policy.group_policy.shared_parameters")
+      .forEach((parameter, index) => {
+        requireString(parameter, `selected.selected_policy.group_policy.shared_parameters[${index}]`);
+      });
+    const branches = requireExactKeys(
+      groupPolicy.branches,
+      "selected.selected_policy.group_policy.branches",
+      ["single_group", "multi_group"],
+    );
+    ["single_group", "multi_group"].forEach((branchName) => {
+      const branchPath = `selected.selected_policy.group_policy.branches.${branchName}`;
+      const branch = requireExactKeys(branches[branchName], branchPath, ["condition", "parameters"]);
+      const conditionKeys = branchName === "single_group"
+        ? ["minimum_group_count", "maximum_group_count"]
+        : ["minimum_group_count"];
+      const condition = requireExactKeys(branch.condition, `${branchPath}.condition`, conditionKeys);
+      requireLiteral(condition.minimum_group_count, branchName === "single_group" ? 1 : 2, `${branchPath}.condition.minimum_group_count`);
+      if (branchName === "single_group") {
+        requireLiteral(condition.maximum_group_count, 1, `${branchPath}.condition.maximum_group_count`);
+      }
+      const parameters = requireObject(branch.parameters, `${branchPath}.parameters`);
+      if (!Object.keys(parameters).length) contractError(`${branchPath}.parameters`, "must not be empty");
+    });
+
+    const evidence = requireExactKeys(selected.selection_evidence, "selected.selection_evidence", EVIDENCE_KEYS);
+    [
+      "calibration_budget", "validation_ranking", "validation_ranking_sha256",
+      "search_space_sha256", "validation_manifest_sha256", "benchmark_summary_sha256",
+      "spathi_build_fingerprint", "spathi_image_id", "primary_metric",
+      "winner_candidate_id", "winner_configuration_sha256", "winner_policy_sha256",
+      "frozen_at",
+    ].forEach((key) => requireString(evidence[key], `selected.selection_evidence.${key}`));
+    requireNumber(evidence.hierarchical_score, "selected.selection_evidence.hierarchical_score");
+    const tieBreakers = requireArray(evidence.tie_breakers_applied, "selected.selection_evidence.tie_breakers_applied");
+    if (JSON.stringify(tieBreakers) !== JSON.stringify(["stability", "simplicity", "canonical_configuration_id"])) {
+      contractError("selected.selection_evidence.tie_breakers_applied", "must equal stability, simplicity, canonical configuration ID");
+    }
+  }
+
+  function validateDatasets(datasets) {
+    requireExactKeys(datasets, "datasets", ["summary", "rows"]);
+    const summary = requireExactKeys(datasets.summary, "datasets.summary", DATASET_SUMMARY_KEYS);
+    [
+      "dataset_count", "total_cells", "genes_min", "genes_max", "cells_min",
+      "cells_max", "groups_min", "groups_max", "transcription_factors_min",
+      "transcription_factors_max",
+    ].forEach((key) => requireInteger(summary[key], `datasets.summary.${key}`));
+    ["simulators", "roles"].forEach((collection) => {
+      requireArray(summary[collection], `datasets.summary.${collection}`).forEach((entry, index) => {
+        const path = `datasets.summary.${collection}[${index}]`;
+        requireExactKeys(entry, path, ["id", "count"]);
+        requireString(entry.id, `${path}.id`);
+        requireInteger(entry.count, `${path}.count`);
+      });
+    });
+    const rows = requireArray(datasets.rows, "datasets.rows");
+    if (!rows.length) contractError("datasets.rows", "must not be empty");
+    rows.forEach((row, index) => {
+      const path = `datasets.rows[${index}]`;
+      requireExactKeys(row, path, DATASET_ROW_KEYS);
+      ["dataset_id", "simulator_id", "condition_id", "dataset_role", "split_id", "column_kind"]
+        .forEach((key) => requireString(row[key], `${path}.${key}`));
+      ["seed", "genes", "cells", "groups", "transcription_factors"]
+        .forEach((key) => requireInteger(row[key], `${path}.${key}`));
+      requireArray(row.group_labels, `${path}.group_labels`).forEach((group, groupIndex) => {
+        requireString(group, `${path}.group_labels[${groupIndex}]`);
+      });
+    });
+    if (summary.dataset_count !== rows.length) {
+      contractError("datasets.summary.dataset_count", "must equal datasets.rows.length");
+    }
+  }
+
+  function validateStage(stage, index) {
+    const path = `stages[${index}]`;
+    requireExactKeys(stage, path, STAGE_KEYS);
+    requireLiteral(stage.id, STAGE_ORDER[index], `${path}.id`);
+    requireLiteral(stage.order, index + 1, `${path}.order`);
+    requireString(stage.purpose, `${path}.purpose`);
+    requireLiteral(stage.dataset_role, stage.id === "validation" ? "validation" : "development", `${path}.dataset_role`);
+    requireLiteral(stage.primary_metric, "aupr_directed", `${path}.primary_metric`);
+    requireString(stage.strategy, `${path}.strategy`);
+    requireInteger(stage.advance_limit, `${path}.advance_limit`);
+    const candidates = requireArray(stage.candidates, `${path}.candidates`);
+    if (!candidates.length) contractError(`${path}.candidates`, "must not be empty");
+    candidates.forEach((candidate, candidateIndex) => {
+      validateCandidate(candidate, `${path}.candidates[${candidateIndex}]`);
+      requireLiteral(candidate.rank, candidateIndex + 1, `${path}.candidates[${candidateIndex}].rank`);
+    });
+    const observations = requireArray(stage.observations, `${path}.observations`);
+    if (!observations.length) contractError(`${path}.observations`, "must not be empty");
+    observations.forEach((row, rowIndex) => validateObservation(row, `${path}.observations[${rowIndex}]`));
+    const varying = requireArray(stage.varying_parameters, `${path}.varying_parameters`);
+    varying.forEach((key, keyIndex) => requireString(key, `${path}.varying_parameters[${keyIndex}]`));
+    const compared = requireArray(stage.compared_parameters, `${path}.compared_parameters`);
+    compared.forEach((entry, entryIndex) => {
+      const entryPath = `${path}.compared_parameters[${entryIndex}]`;
+      requireExactKeys(entry, entryPath, ["name", "values"]);
+      requireString(entry.name, `${entryPath}.name`);
+      requireArray(entry.values, `${entryPath}.values`).forEach((value, valueIndex) => {
+        requireString(value, `${entryPath}.values[${valueIndex}]`);
+      });
+    });
+    if (JSON.stringify(varying) !== JSON.stringify(compared.map((entry) => entry.name))) {
+      contractError(path, "must reconcile varying_parameters with compared_parameters");
+    }
+    requireArray(stage.selected_ids, `${path}.selected_ids`).forEach((id, idIndex) => {
+      requireString(id, `${path}.selected_ids[${idIndex}]`);
+    });
+    const candidateIds = new Set(candidates.map((candidate) => candidate.configuration_id));
+    const selectedFromCandidates = candidates
+      .filter((candidate) => candidate.selected)
+      .map((candidate) => candidate.configuration_id)
+      .sort();
+    if (JSON.stringify(selectedFromCandidates) !== JSON.stringify(stage.selected_ids)) {
+      contractError(path, "must reconcile selected_ids with candidate selection flags");
+    }
+    observations.forEach((row) => {
+      if (!candidateIds.has(row.configuration_id)) {
+        contractError(path, `contains an observation for unknown configuration ${row.configuration_id}`);
+      }
+    });
+    if (stage.id === "validation") {
+      const winner = requireExactKeys(stage.winner, `${path}.winner`, ["candidate_id", "configuration_sha256", "hierarchical_score"]);
+      requireString(winner.candidate_id, `${path}.winner.candidate_id`);
+      requireString(winner.configuration_sha256, `${path}.winner.configuration_sha256`);
+      requireNumber(winner.hierarchical_score, `${path}.winner.hierarchical_score`);
+    } else if (stage.winner !== null) {
+      contractError(`${path}.winner`, "must be null outside validation");
+    }
+    requireLiteral(stage.test_data_accessed, false, `${path}.test_data_accessed`);
+    requireBoolean(stage.memory_available, `${path}.memory_available`);
+  }
+
+  function validateCalibrationPayload(data) {
+    requireExactKeys(data, "report", REPORT_KEYS);
+    requireLiteral(data.schema_version, "1.0", "schema_version");
+    requireLiteral(data.report_type, "calibration", "report_type");
+    const report = requireExactKeys(data.report, "report", REPORT_METADATA_KEYS);
+    requireLiteral(report.schema_version, "1.0", "report.schema_version");
+    requireString(report.fingerprint, "report.fingerprint");
+    requireLiteral(report.fingerprint_scope, "scientific_inputs", "report.fingerprint_scope");
+    const renderer = requireExactKeys(
+      report.renderer,
+      "report.renderer",
+      ["schema_version", "report_type", "dependencies", "resources", "fingerprint"],
+    );
+    requireLiteral(renderer.schema_version, "1.0", "report.renderer.schema_version");
+    requireLiteral(renderer.report_type, "calibration", "report.renderer.report_type");
+    requireString(renderer.fingerprint, "report.renderer.fingerprint");
+    const dependencies = requireExactKeys(
+      renderer.dependencies,
+      "report.renderer.dependencies",
+      ["jinja2", "plotly"],
+    );
+    requireString(dependencies.jinja2, "report.renderer.dependencies.jinja2");
+    requireString(dependencies.plotly, "report.renderer.dependencies.plotly");
+    const resourceNames = [
+      "common.py", "calibration.py", "templates/base.html.j2",
+      "templates/calibration.html.j2", "assets/report.css", "assets/common.js",
+      "assets/calibration.js", "vendor/plotly.js",
+    ];
+    const reportResources = requireExactKeys(renderer.resources, "report.renderer.resources", resourceNames);
+    resourceNames.forEach((name) => {
+      const path = `report.renderer.resources.${name}`;
+      const resource = requireExactKeys(reportResources[name], path, ["sha256", "size_bytes"]);
+      requireString(resource.sha256, `${path}.sha256`);
+      requireInteger(resource.size_bytes, `${path}.size_bytes`);
+    });
+    requireLiteral(report.self_contained, true, "report.self_contained");
+    requireLiteral(report.statistics_recomputed, false, "report.statistics_recomputed");
+    const workflow = requireExactKeys(data.workflow, "workflow", WORKFLOW_KEYS);
+    requireString(workflow.flow_id, "workflow.flow_id");
+    requireLiteral(workflow.status, "complete", "workflow.status");
+    if (!["reduced", "full"].includes(workflow.calibration_budget)) {
+      contractError("workflow.calibration_budget", "must be reduced or full");
+    }
+    const identity = requireExactKeys(workflow.identity, "workflow.identity", IDENTITY_KEYS);
+    IDENTITY_KEYS.forEach((key) => requireString(identity[key], `workflow.identity.${key}`));
+    requireLiteral(identity.calibration_budget, workflow.calibration_budget, "workflow.identity.calibration_budget");
+
+    const integrity = requireExactKeys(data.integrity, "integrity", INTEGRITY_KEYS);
+    const stageOrder = requireArray(integrity.stage_order, "integrity.stage_order");
+    if (JSON.stringify(stageOrder) !== JSON.stringify(STAGE_ORDER)) {
+      contractError("integrity.stage_order", `must equal ${STAGE_ORDER.join(", ")}`);
+    }
+    requireLiteral(integrity.all_stages_ranked, true, "integrity.all_stages_ranked");
+    requireLiteral(integrity.test_data_accessed_before_freeze, false, "integrity.test_data_accessed_before_freeze");
+    requireLiteral(integrity.single_spathi_commit, true, "integrity.single_spathi_commit");
+    requireLiteral(integrity.selection_frozen, true, "integrity.selection_frozen");
+    requireExactKeys(data.objective, "objective", [
+      "primary_metric", "edge_semantics", "direction", "aggregation",
+      "tie_breakers", "forbidden_shortcuts",
+    ]);
+    requireExactKeys(data.dataset_partition, "dataset_partition", [
+      "assignment_unit", "stratify_by", "roles", "constraints",
+    ]);
+    validateDatasets(data.datasets);
+    validateSelected(data.selected);
+    requireArray(data.links, "links").forEach((link, index) => {
+      const path = `links[${index}]`;
+      requireExactKeys(link, path, ["label", "href"]);
+      requireString(link.label, `${path}.label`);
+      requireString(link.href, `${path}.href`);
+    });
+    const stages = requireArray(data.stages, "stages");
+    if (stages.length !== STAGE_ORDER.length) {
+      contractError("stages", `must contain exactly ${STAGE_ORDER.length} stages`);
+    }
+    stages.forEach(validateStage);
+
+    const validation = stages[STAGE_ORDER.length - 1];
+    const policy = data.selected.selected_policy;
+    const evidence = data.selected.selection_evidence;
+    const validationSelected = validation.candidates.filter((candidate) => candidate.selected);
+    if (
+      data.selected.calibration_budget !== workflow.calibration_budget
+      || evidence.calibration_budget !== workflow.calibration_budget
+      || policy.spathi_commit !== identity.spathi_commit
+      || evidence.search_space_sha256 !== identity.search_space_sha256
+      || validation.winner.candidate_id !== policy.source_candidate_id
+      || validation.winner.configuration_sha256 !== policy.source_configuration_sha256
+      || evidence.winner_candidate_id !== policy.source_candidate_id
+      || evidence.winner_configuration_sha256 !== policy.source_configuration_sha256
+      || evidence.winner_policy_sha256 !== policy.policy_sha256
+      || validationSelected.length !== 1
+      || validationSelected[0].configuration_id !== policy.source_candidate_id
+    ) {
+      contractError("selected", "must reconcile with the validation winner");
+    }
+    return data;
+  }
+
+  function buildCandidate(candidate) {
     return {
-      id: String(id),
-      rank: firstDefined(row.rank, rank + 1),
-      score: R.number(firstDefined(row.hierarchical_aupr, row.hierarchical_score, row.score, row.primary_score, candidate.score), NaN),
-      stability: R.number(firstDefined(row.stability, candidate.stability), NaN),
-      time: R.number(firstDefined(row.median_wall_time_seconds, row.wall_time_seconds, row.runtime_seconds, candidate.median_wall_time_seconds), NaN),
-      memory: R.number(firstDefined(row.median_peak_memory_mb, row.peak_memory_mb, candidate.median_peak_memory_mb), NaN),
-      simplicity: firstDefined(row.simplicity, candidate.simplicity),
-      datasetCount: firstDefined(row.dataset_count, row.n_datasets, candidate.dataset_count),
-      seedCount: firstDefined(row.algorithm_seed_count, row.n_seeds, candidate.algorithm_seed_count),
-      role: firstDefined(candidate.selection_role, row.selection_role, candidate.variant_id),
-      parameters: candidate.parameters || row.parameters || {},
-      selected: Boolean(row.selected) || String(id) === String(winnerId),
-      sha256: firstDefined(candidate.configuration_sha256, row.configuration_sha256),
+      id: candidate.configuration_id,
+      rank: candidate.rank,
+      score: candidate.score,
+      stability: candidate.stability,
+      time: candidate.median_wall_time_seconds,
+      memory: candidate.median_peak_memory_mb,
+      simplicity: candidate.simplicity,
+      datasetCount: candidate.dataset_count,
+      seedCount: candidate.algorithm_seed_count,
+      parameters: candidate.parameters,
+      selected: candidate.selected,
     };
   }
 
-  function normalizeStage(stage, index) {
-    const document = stage.ranking_document || stage.ranking_data || stage.document || stage;
-    const rawRanking = Array.isArray(document.ranking)
-      ? document.ranking
-      : Array.isArray(stage.candidates)
-        ? stage.candidates
-        : Array.isArray(stage.ranking)
-          ? stage.ranking
-          : [];
-    const rawWinner = document.winner || stage.winner || {};
-    const winnerCandidate = rawWinner.candidate || rawWinner;
-    const winnerId = firstDefined(
-      winnerCandidate.configuration_id,
-      winnerCandidate.candidate_id,
-      winnerCandidate.id,
-      document.winner_candidate_id,
-      stage.winner_id,
-    );
-    const candidates = rawRanking.map((row, rank) => normalizeCandidate(row, rank, winnerId));
-    const summary = stage.summary || document.summary || {};
-    const observations = asArray(firstDefined(
-      stage.observations,
-      stage.calibration_rows,
-      summary.calibration_rows,
-      document.observations,
-      [],
-    ));
-    const normalized = {
-      id: String(firstDefined(stage.id, stage.stage_id, document.stage_id, `stage-${index + 1}`)),
-      profileId: firstDefined(stage.profile_id, document.profile_id),
-      status: firstDefined(stage.status, document.status, candidates.length ? "ranked" : "incomplete"),
-      datasetRole: firstDefined(document.dataset_role, stage.dataset_role),
-      primaryMetric: firstDefined(document.primary_metric, stage.primary_metric, "aupr_directed"),
-      testAccessed: Boolean(firstDefined(document.test_data_accessed, stage.test_data_accessed, false)),
-      candidates,
-      observations,
-      winnerId: winnerId || (candidates[0] && candidates[0].id),
-      purpose: firstDefined(stage.purpose, document.purpose),
-      strategy: firstDefined(stage.strategy, document.strategy),
-      varyingParameters: firstDefined(stage.varying_parameters, document.varying_parameters, []),
-      selectedIds: firstDefined(stage.selected_ids, document.selected_ids, []),
-      memoryAvailable: Boolean(firstDefined(stage.memory_available, document.memory_available, false)),
-      tieBreakers: document.tie_breakers || stage.tie_breakers || [],
-      selectedCandidates: document.selected_candidates || stage.selected_candidates || [],
-      source: document,
+  function buildStage(stage) {
+    const model = {
+      id: stage.id,
+      status: "ranked",
+      datasetRole: stage.dataset_role,
+      primaryMetric: stage.primary_metric,
+      candidates: stage.candidates.map(buildCandidate),
+      observations: stage.observations,
+      purpose: stage.purpose,
+      strategy: stage.strategy,
+      varyingParameters: stage.varying_parameters,
+      selectedIds: stage.selected_ids,
+      memoryAvailable: stage.memory_available,
+      parameterCompetition: stage.compared_parameters.map((entry) => ({
+        key: entry.name,
+        label: R.humanize(entry.name),
+        values: entry.values.map((value) => displayParameterValue(value === "null" ? null : value)),
+      })),
     };
-    const competition = parameterCompetition(normalized);
-    normalized.parameterCompetition = competition;
-    const rawLabels = normalized.candidates.map((candidate) => candidateParameterLabel(candidate, competition));
+    const rawLabels = model.candidates.map((candidate) => candidateParameterLabel(candidate, model.parameterCompetition));
     const occurrences = new Map();
     rawLabels.forEach((label) => occurrences.set(label, (occurrences.get(label) || 0) + 1));
-    normalized.candidates.forEach((candidate, candidateIndex) => {
+    model.candidates.forEach((candidate, candidateIndex) => {
       const rawLabel = rawLabels[candidateIndex];
       candidate.displayLabel = occurrences.get(rawLabel) > 1
-        ? `${rawLabel} · candidate ${candidate.rank}`
+        ? `${rawLabel} · configuration ${candidate.rank}`
         : rawLabel;
     });
-    return normalized;
+    return model;
   }
 
   function scalarKey(value) {
@@ -120,43 +474,11 @@
     return R.humanize(String(value));
   }
 
-  function parameterCompetition(stage) {
-    const candidates = stage.candidates || [];
-    const configured = Array.isArray(stage.varyingParameters) ? stage.varyingParameters : [];
-    const allKeys = R.unique(candidates.flatMap((candidate) => Object.keys(candidate.parameters || {})));
-    const changing = allKeys.filter((key) => (
-      R.unique(candidates.map((candidate) => scalarKey(candidate.parameters[key]))).length > 1
-    ));
-    const keys = configured.length
-      ? configured.filter((key) => changing.includes(key))
-      : changing;
-    return keys.map((key) => ({
-      key,
-      label: R.humanize(key),
-      values: R.unique(candidates.map((candidate) => scalarKey(candidate.parameters[key])))
-        .map((value) => displayParameterValue(value === "null" ? null : value)),
-    }));
-  }
-
   function candidateParameterLabel(candidate, competition) {
-    const parameters = candidate.parameters || {};
-    let dimensions = competition;
-    if (!dimensions.length) {
-      const fallbackKeys = [
-        "n_estimators",
-        "distance_metric",
-        "weight_mode",
-        "group_size_correction",
-        "tree_method",
-        "max_features",
-        "min_samples_leaf",
-      ].filter((key) => Object.prototype.hasOwnProperty.call(parameters, key));
-      dimensions = fallbackKeys.slice(0, 2).map((key) => ({ key, label: R.humanize(key) }));
-    }
-    const label = dimensions.map((dimension) => (
-      `${dimension.label}: ${displayParameterValue(parameters[dimension.key])}`
+    const label = competition.map((dimension) => (
+      `${dimension.label}: ${displayParameterValue(candidate.parameters[dimension.key])}`
     )).join(" · ");
-    return label || `Candidate ${candidate.rank}`;
+    return label || "Fixed parameterization";
   }
 
   function competitionSummary(stage) {
@@ -166,65 +488,45 @@
       .join(" · ");
   }
 
-  function stageSort(left, right) {
-    const leftIndex = STAGE_ORDER.indexOf(left.id);
-    const rightIndex = STAGE_ORDER.indexOf(right.id);
-    if (leftIndex === -1 && rightIndex === -1) return left.id.localeCompare(right.id);
-    if (leftIndex === -1) return 1;
-    if (rightIndex === -1) return -1;
-    return leftIndex - rightIndex;
+  function selectionParts(selected) {
+    const policy = selected.selected_policy;
+    return {
+      selected,
+      evidence: selected.selection_evidence,
+      candidate: {
+        id: policy.source_candidate_id,
+        parameters: policy.group_policy.branches.multi_group.parameters,
+        policyId: policy.policy_id,
+      },
+    };
   }
 
-  function selectionParts(selectedConfig) {
-    const selected = selectedConfig || {};
-    const candidate = selected.selected_candidate || selected.candidate || selected.selected_config || selected;
-    const evidence = selected.selection_evidence || selected.evidence || {};
-    return { selected, candidate, evidence };
-  }
-
-  function renderStatus(data, stages) {
-    const target = R.query("#status-banner");
-    const workflow = data.workflow || {};
-    const integrity = data.integrity || {};
-    const selected = selectionParts(data.selected || data.selected_config).selected;
-    const incomplete = stages.filter((stage) => !["ranked", "complete", "completed", "selected", "tested"].includes(String(stage.status).toLowerCase()));
-    const expectedTrue = ["all_stages_ranked", "single_spathi_commit", "selection_frozen"];
-    const integrityFailed = expectedTrue.some((key) => Object.prototype.hasOwnProperty.call(integrity, key) && integrity[key] !== true)
-      || (Object.prototype.hasOwnProperty.call(integrity, "test_data_accessed_before_freeze") && integrity.test_data_accessed_before_freeze !== false);
-    const testAccessed = Boolean(selected.test_accessed_before_freeze) || Boolean(integrity.test_data_accessed_before_freeze) || stages.some((stage) => stage.testAccessed);
-    if (testAccessed) {
-      R.notice(target, "error", "Possible information leakage", "The artifact records access to test data before the configuration was frozen. Do not interpret this selection as valid.");
-    } else if (integrityFailed || (integrity.status && ["failed", "invalid", "error"].includes(String(integrity.status).toLowerCase()))) {
-      R.notice(target, "error", "Integrity not validated", integrity.message || "At least one report integrity check failed.");
-    } else if (incomplete.length || !["complete", "completed"].includes(String(workflow.status || "").toLowerCase())) {
-      R.notice(target, "warning", "Incomplete calibration", `${incomplete.length || "One or more"} stages are not closed. Candidates are shown, but they do not constitute a final selection.`);
-    } else {
-      R.notice(target, "success", "Calibration complete", "The selection is frozen, and development remains separate from validation throughout the report.");
-    }
+  function renderStatus() {
+    R.notice(
+      R.query("#status-banner"),
+      "success",
+      "Calibration complete",
+      "The selection is frozen, and development remains separate from validation throughout the report.",
+    );
   }
 
   function renderOverview(data, stages) {
-    const selectedParts = selectionParts(data.selected || data.selected_config);
+    const selectedParts = selectionParts(data.selected);
     const evidence = selectedParts.evidence;
     const totalCandidates = stages.reduce((sum, stage) => sum + stage.candidates.length, 0);
     const totalObservations = stages.reduce((sum, stage) => sum + stage.observations.length, 0);
-    const completeStages = stages.filter((stage) => ["ranked", "complete", "completed", "selected", "tested"].includes(String(stage.status).toLowerCase())).length;
     R.addStatCards(R.query("#overview-cards"), [
-      { label: "Completed stages", value: `${completeStages}/${stages.length || 0}`, detail: stages.map((stage) => R.humanize(stage.id)).join(" · ") || "No stages" },
+      { label: "Completed stages", value: `${stages.length}/${STAGE_ORDER.length}`, detail: stages.map((stage) => R.humanize(stage.id)).join(" · ") },
       { label: "Evaluated candidates", value: R.formatInteger(totalCandidates), detail: "Sum of each stage's search space" },
       { label: "Observations", value: R.formatInteger(totalObservations), detail: "Recorded datasets and algorithm seeds" },
-      { label: "Primary metric", value: R.humanize(firstDefined(evidence.primary_metric, stages[0] && stages[0].primaryMetric)), detail: "Canonical hierarchical selection criterion" },
-      { label: "Frozen score", value: R.formatNumber(evidence.hierarchical_score), detail: (data.selected || data.selected_config) && (data.selected || data.selected_config).status ? R.statusLabel((data.selected || data.selected_config).status) : "—" },
+      { label: "Primary metric", value: R.humanize(evidence.primary_metric), detail: "Canonical hierarchical selection criterion" },
+      { label: "Frozen score", value: R.formatNumber(evidence.hierarchical_score), detail: R.statusLabel(data.selected.status) },
     ]);
   }
 
   function parameterGrid(parameters) {
     const list = R.element("dl", { className: "parameter-grid" });
-    const entries = Object.entries(parameters || {});
-    if (!entries.length) {
-      const note = R.element("p", { text: "The artifact does not include this configuration's parameters." });
-      return note;
-    }
+    const entries = Object.entries(parameters);
     entries.forEach(([key, value]) => {
       const item = R.element("div", { className: "parameter-item" });
       item.appendChild(R.element("dt", { text: R.humanize(key) }));
@@ -237,34 +539,23 @@
   function renderSelection(data, stages) {
     const target = R.query("#selection-card");
     R.clear(target);
-    const parts = selectionParts(data.selected || data.selected_config);
-    const candidate = parts.candidate || {};
-    const evidence = parts.evidence || {};
-    const id = firstDefined(candidate.candidate_id, candidate.configuration_id, candidate.id, evidence.winner_candidate_id);
-    if (!id) {
-      R.empty(target, "No selected configuration yet", "The selection will appear after validation has completed and been frozen.");
-      return;
-    }
+    const parts = selectionParts(data.selected);
+    const candidate = parts.candidate;
+    const evidence = parts.evidence;
 
     const hero = R.element("article", { className: "selection-hero" });
-    hero.appendChild(R.badge(parts.selected.status || parts.selected.phase || "selected"));
-    const validationStage = stages.find((stage) => stage.id === "validation") || stages[stages.length - 1];
-    const normalizedWinner = validationStage && validationStage.candidates.find((item) => (
-      String(item.id) === String(id)
-      || (candidate.configuration_sha256 && item.sha256 === candidate.configuration_sha256)
-    ));
+    hero.appendChild(R.badge(parts.selected.status));
+    const validationStage = stages[STAGE_ORDER.length - 1];
+    const selectedCandidate = validationStage.candidates.find((item) => item.id === candidate.id);
     hero.appendChild(R.element("h3", {
-      text: normalizedWinner
-        ? normalizedWinner.displayLabel
-        : candidateParameterLabel(
-          { rank: 1, parameters: candidate.parameters || {} },
-          validationStage ? validationStage.parameterCompetition : [],
-        ),
+      text: selectedCandidate.displayLabel,
     }));
-    hero.appendChild(R.element("p", { text: "Winner of the frozen validation stage" }));
+    hero.appendChild(R.element("p", {
+      text: `Frozen conditional policy ${candidate.policyId}: single-group datasets use the dedicated cell-distance branch; the parameters below are the calibrated multi-group branch.`,
+    }));
     const score = R.element("div", { className: "selection-score" });
     score.appendChild(R.element("strong", { text: R.formatNumber(evidence.hierarchical_score, { maximumFractionDigits: 6 }) }));
-    score.appendChild(R.element("span", { text: R.humanize(evidence.primary_metric || "score") }));
+    score.appendChild(R.element("span", { text: R.humanize(evidence.primary_metric) }));
     hero.appendChild(score);
 
     const parameters = R.element("article", { className: "card" });
@@ -274,7 +565,7 @@
     headingCopy.appendChild(R.element("h3", { text: "Complete configuration" }));
     heading.appendChild(headingCopy);
     parameters.appendChild(heading);
-    parameters.appendChild(parameterGrid(candidate.parameters || {}));
+    parameters.appendChild(parameterGrid(candidate.parameters));
     target.appendChild(hero);
     target.appendChild(parameters);
   }
@@ -285,14 +576,13 @@
     const copy = R.element("div", { className: "stage-intro__copy" });
     copy.appendChild(R.element("h3", { text: R.humanize(stage.id) }));
     const details = [
-      stage.profileId,
       `${stage.candidates.length} candidates`,
       `${stage.observations.length} observations`,
-      stage.datasetRole ? `${R.humanize(stage.datasetRole)} partition` : null,
-    ].filter(Boolean).join(" · ");
+      `${R.humanize(stage.datasetRole)} partition`,
+    ].join(" · ");
     copy.appendChild(R.element("p", { text: details }));
-    if (stage.purpose) copy.appendChild(R.element("p", { text: stage.purpose }));
-    if (stage.strategy) copy.appendChild(R.element("p", { text: `Strategy: ${R.humanize(stage.strategy)}` }));
+    copy.appendChild(R.element("p", { text: stage.purpose }));
+    copy.appendChild(R.element("p", { text: `Strategy: ${R.humanize(stage.strategy)}` }));
     const competition = R.element("div", { className: "parameter-competition" });
     competition.appendChild(R.element("span", {
       className: "parameter-competition__heading",
@@ -316,24 +606,20 @@
     copy.appendChild(competition);
     const badges = R.element("div", { className: "badge-row" });
     badges.appendChild(R.badge(stage.status));
-    if (stage.datasetRole) badges.appendChild(R.badge(stage.datasetRole === "test" ? "warning" : "neutral", R.humanize(stage.datasetRole)));
+    badges.appendChild(R.badge("neutral", R.humanize(stage.datasetRole)));
     if (stage.selectedIds.length) badges.appendChild(R.badge("selected", `${stage.selectedIds.length} advance`));
     if (!stage.memoryAvailable) badges.appendChild(R.badge("warning", "Memory not measured"));
     R.append(target, copy, badges);
   }
 
   function candidateLabel(candidate) {
-    const label = candidate.displayLabel || `Candidate ${candidate.rank}`;
+    const label = candidate.displayLabel;
     return label.length > 52 ? `${label.slice(0, 49)}…` : label;
   }
 
   function renderRanking(stage) {
     const target = R.query("#ranking-chart");
     const candidates = stage.candidates.filter((candidate) => Number.isFinite(candidate.score)).slice(0, 25).reverse();
-    if (!candidates.length) {
-      R.empty(target, "Ranking unavailable", "This stage does not contain canonical accuracy scores.");
-      return;
-    }
     R.plot(target, [{
       type: "bar",
       orientation: "h",
@@ -463,21 +749,17 @@
 
   function observationFields(row) {
     return {
-      configurationId: firstDefined(row.configuration_id, row.candidate_id, row.id),
-      datasetId: firstDefined(row.dataset_id, row.block_id, row.condition_id, "unknown dataset"),
-      seed: firstDefined(row.algorithm_seed, row.seed, row.replicate),
-      score: R.number(firstDefined(row.aupr_directed, row.hierarchical_aupr, row.score, row.primary_score), NaN),
-      time: R.number(firstDefined(row.wall_time_seconds, row.runtime_seconds), NaN),
+      configurationId: row.configuration_id,
+      datasetId: row.dataset_id,
+      seed: row.algorithm_seed,
+      score: row.aupr_directed,
+      time: row.wall_time_seconds,
     };
   }
 
   function renderObservations(stage) {
     const target = R.query("#observations-chart");
     const observations = stage.observations.map(observationFields).filter((row) => row.configurationId && Number.isFinite(row.score));
-    if (!observations.length) {
-      R.empty(target, "Observations unavailable", "The artifact only preserves the aggregate ranking for this stage.");
-      return;
-    }
     const labels = new Map(stage.candidates.map((candidate) => [candidate.id, candidate.displayLabel]));
     const ids = R.unique(observations.map((row) => row.configurationId));
     const traces = ids.map((id, index) => {
@@ -487,7 +769,7 @@
         name: candidateLabel({ id, rank: index + 1, displayLabel: labels.get(id) }),
         y: rows.map((row) => row.score),
         text: rows.map((row) => row.datasetId),
-        customdata: rows.map((row) => [row.seed, row.time, labels.get(id) || `Candidate ${index + 1}`]),
+        customdata: rows.map((row) => [row.seed, row.time, labels.get(id)]),
         boxpoints: "all",
         jitter: 0.26,
         pointpos: 0,
@@ -819,10 +1101,7 @@
       R.empty(target, "Search space unavailable", "At least two scored candidates are required to compare parameters.");
       return;
     }
-    const configuredKeys = Array.isArray(stage.varyingParameters) && stage.varyingParameters.length
-      ? stage.varyingParameters
-      : R.unique(candidates.flatMap((candidate) => Object.keys(candidate.parameters || {})));
-    const keys = configuredKeys
+    const keys = stage.varyingParameters
       .filter((key) => R.unique(candidates.map((candidate) => scalarKey(candidate.parameters[key]))).length > 1);
     if (!keys.length) {
       R.empty(target, "No varying parameters", "Candidates in this stage share the same recorded parameterization.");
@@ -866,7 +1145,7 @@
     });
     const actions = R.query("#candidate-table-actions");
     R.clear(actions);
-    if (stage.candidates.length) actions.appendChild(R.csvButton("Export CSV", `calibration-${stage.id}-candidates.csv`, columns, stage.candidates));
+    actions.appendChild(R.csvButton("Export CSV", `calibration-${stage.id}-candidates.csv`, columns, stage.candidates));
   }
 
   function renderStage(stage) {
@@ -881,10 +1160,6 @@
   function renderTabs(stages) {
     const target = R.query("#stage-tabs");
     R.clear(target);
-    if (!stages.length) {
-      R.empty(R.query("#stage-panel"), "No stages", "The calibration workflow records no stage results.");
-      return;
-    }
     stages.forEach((stage, index) => {
       const button = R.element("button", {
         className: "tab-button",
@@ -929,41 +1204,31 @@
     renderStage(stages[0]);
   }
 
-  function normalizeLinks(value) {
-    if (Array.isArray(value)) return value;
-    if (!value || typeof value !== "object") return [];
-    return Object.entries(value).flatMap(([label, href]) => {
-      if (Array.isArray(href)) return href.map((item, index) => ({ label: `${R.humanize(label)} ${index + 1}`, href: item }));
-      if (href && typeof href === "object") return Object.entries(href).map(([childLabel, childHref]) => ({ label: `${R.humanize(label)} · ${R.humanize(childLabel)}`, href: childHref }));
-      return [{ label: R.humanize(label), href }];
-    });
-  }
-
   function renderProvenance(data) {
-    const workflow = data.workflow || {};
-    const identity = workflow.identity || data.provenance || {};
-    const selected = selectionParts(data.selected || data.selected_config);
+    const workflow = data.workflow;
+    const identity = workflow.identity;
+    const selected = selectionParts(data.selected);
     R.renderKeyValues(R.query("#provenance"), "Reproducible identity", [
       { label: "Flow ID", value: workflow.flow_id },
       { label: "Evidence budget", value: workflow.calibration_budget },
-      { label: "SPATHI commit", value: identity.spathi_commit || selected.candidate.spathi_commit },
+      { label: "SPATHI commit", value: identity.spathi_commit },
       { label: "ANDREA commit", value: identity.andrea_commit },
       { label: "Benchmark commit", value: identity.benchmark_commit },
       { label: "Fingerprint", value: identity.fingerprint },
-      { label: "Search space SHA-256", value: identity.search_space_sha256 || selected.evidence.search_space_sha256 },
+      { label: "Search space SHA-256", value: identity.search_space_sha256 },
       { label: "Ranking SHA-256", value: selected.evidence.validation_ranking_sha256 },
       { label: "Frozen at", value: selected.evidence.frozen_at },
     ]);
-    R.renderLinks(R.query("#report-links"), "Artifacts", normalizeLinks(data.links || data.artifacts));
+    R.renderLinks(R.query("#report-links"), "Artifacts", data.links);
   }
 
   R.boot((data) => {
-    const workflow = data.workflow || {};
-    const rawStages = data.stages || workflow.stages || [];
-    const stages = asArray(rawStages).map(normalizeStage).sort(stageSort);
-    R.renderHeader(workflow, "calibration", data.integrity || {});
-    renderStatus(data, stages);
-    R.renderDatasetOverview(R.query("#dataset-overview"), data.datasets || {});
+    validateCalibrationPayload(data);
+    const workflow = data.workflow;
+    const stages = data.stages.map(buildStage);
+    R.renderHeader(workflow, "calibration", data.integrity);
+    renderStatus();
+    R.renderDatasetOverview(R.query("#dataset-overview"), data.datasets);
     renderOverview(data, stages);
     renderSelection(data, stages);
     renderTabs(stages);

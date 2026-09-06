@@ -18,7 +18,7 @@ from spathi_bench.state import (
 
 def test_state_round_trip_is_atomic_and_stable(tmp_path: Path) -> None:
     state = {
-        "schema_version": "3.0",
+        "schema_version": "1.0",
         "profile_id": "smoke",
         "status": "generated",
         "datasets": [],
@@ -28,7 +28,7 @@ def test_state_round_trip_is_atomic_and_stable(tmp_path: Path) -> None:
 
     assert written == state_path(tmp_path / "run")
     assert load_state(tmp_path / "run", "smoke") == state
-    assert not (tmp_path / "run" / ".state.json.tmp").exists()
+    assert not list((tmp_path / "run").glob(".state.json-*"))
     assert written.read_text(encoding="utf-8").endswith("\n")
 
 
@@ -36,10 +36,10 @@ def test_write_state_replaces_prior_state(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     write_state(
         run_root,
-        {"schema_version": "3.0", "profile_id": "smoke", "status": "generated"},
+        {"schema_version": "1.0", "profile_id": "smoke", "status": "generated"},
     )
     replacement = {
-        "schema_version": "3.0",
+        "schema_version": "1.0",
         "profile_id": "smoke",
         "status": "inferred",
     }
@@ -52,14 +52,14 @@ def test_load_state_rejects_wrong_schema_and_profile(tmp_path: Path) -> None:
     run_root = tmp_path / "run"
     write_state(
         run_root,
-        {"schema_version": "1.0", "profile_id": "smoke", "status": "generated"},
+        {"schema_version": "invalid", "profile_id": "smoke", "status": "generated"},
     )
     with pytest.raises(BenchmarkConfigError, match="Unsupported benchmark state schema"):
         load_state(run_root, "smoke")
 
     write_state(
         run_root,
-        {"schema_version": "3.0", "profile_id": "reduced", "status": "generated"},
+        {"schema_version": "1.0", "profile_id": "reduced", "status": "generated"},
     )
     with pytest.raises(BenchmarkConfigError, match="State profile mismatch"):
         load_state(run_root, "smoke")
@@ -99,3 +99,54 @@ def test_run_lock_rejects_concurrent_mutation_of_one_run(tmp_path: Path) -> None
 
     with run_lock(run_root):
         assert (run_root / ".run.lock").is_file()
+
+
+def test_state_rejects_a_symlinked_run_directory(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    run_root = tmp_path / "run"
+    run_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        write_state(
+            run_root,
+            {"schema_version": "1.0", "profile_id": "smoke", "status": "generated"},
+        )
+    assert not (outside / "state.json").exists()
+
+
+def test_state_does_not_follow_a_precreated_static_temporary_symlink(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"untouched":true}\n', encoding="utf-8")
+    (run_root / ".state.json.tmp").symlink_to(outside)
+
+    write_state(
+        run_root,
+        {"schema_version": "1.0", "profile_id": "smoke", "status": "generated"},
+    )
+
+    assert load_state(run_root, "smoke")["status"] == "generated"
+    assert outside.read_text(encoding="utf-8") == '{"untouched":true}\n'
+
+
+def test_state_reader_and_lock_reject_symlinked_files(tmp_path: Path) -> None:
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text(
+        '{"schema_version":"1.0","profile_id":"smoke","status":"generated"}\n',
+        encoding="utf-8",
+    )
+    (run_root / "state.json").symlink_to(outside)
+
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        load_state(run_root, "smoke")
+
+    (run_root / ".run.lock").symlink_to(outside)
+    with pytest.raises(BenchmarkConfigError, match="contains a symlink"):
+        with run_lock(run_root):
+            pass

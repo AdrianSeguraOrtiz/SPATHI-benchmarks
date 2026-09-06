@@ -18,6 +18,21 @@ from .artifacts import canonical_json_sha256, sha256_file
 from .config import BenchmarkConfigError
 
 
+class CommandExecutionError(RuntimeError):
+    """A streamed external command exited unsuccessfully.
+
+    Keeping the exit code and log path structured lets workflow-specific code
+    distinguish an observed tool failure from a malformed or inconsistent
+    benchmark artifact.  The latter must continue to fail closed.
+    """
+
+    def __init__(self, *, command: Sequence[str], return_code: int, log_path: Path) -> None:
+        self.command = tuple(str(item) for item in command)
+        self.return_code = int(return_code)
+        self.log_path = log_path.resolve()
+        super().__init__(f"Command failed with exit code {self.return_code}; see {self.log_path}")
+
+
 def _docker_tag_lock_root() -> Path:
     """Return a host-wide lock directory shared by benchmark run IDs.
 
@@ -184,7 +199,11 @@ def stream_command(
             log.write(line)
         return_code = process.wait()
     if return_code != 0:
-        raise RuntimeError(f"Command failed with exit code {return_code}; see {log_path}")
+        raise CommandExecutionError(
+            command=command,
+            return_code=return_code,
+            log_path=log_path,
+        )
 
 
 def andrea_command(
@@ -282,11 +301,41 @@ print(json.dumps({
 
 
 def benchmark_host_environment() -> dict[str, Any]:
-    """Fingerprint the Python interpreter executing SPATHI-benchmarks itself."""
+    """Fingerprint the software and hardware executing SPATHI-benchmarks.
 
+    The benchmark process participates in dataset materialisation, statistical
+    analysis and resource measurement.  An interpreter-only fingerprint would
+    therefore allow cached artifacts to cross NumPy/package, kernel or machine
+    boundaries even though those changes can alter either values or timings.
+    """
+
+    import importlib.metadata
     import platform
 
     executable = Path(os.path.abspath(sys.executable))
+    packages = sorted(
+        {
+            str(distribution.metadata.get("Name") or "").lower(): distribution.version
+            for distribution in importlib.metadata.distributions()
+            if distribution.metadata.get("Name")
+        }.items()
+    )
+    cpu_model = platform.processor().strip()
+    cpuinfo = Path("/proc/cpuinfo")
+    if cpuinfo.is_file():
+        for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lower().startswith("model name") and ":" in line:
+                cpu_model = line.split(":", 1)[1].strip()
+                break
+    memory_bytes: int | None = None
+    meminfo = Path("/proc/meminfo")
+    if meminfo.is_file():
+        for line in meminfo.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("MemTotal:"):
+                fields = line.split()
+                if len(fields) >= 2 and fields[1].isdigit():
+                    memory_bytes = int(fields[1]) * 1024
+                break
     details: dict[str, Any] = {
         "python_executable": str(executable),
         "python_executable_sha256": sha256_file(executable),
@@ -295,7 +344,13 @@ def benchmark_host_environment() -> dict[str, Any]:
         "python_version": platform.python_version(),
         "python_implementation": platform.python_implementation(),
         "system": platform.system(),
+        "kernel_release": platform.release(),
+        "kernel_version": platform.version(),
         "machine": platform.machine(),
+        "cpu_model": cpu_model or "unreported",
+        "logical_cpus": os.cpu_count(),
+        "host_memory_bytes": memory_bytes,
+        "packages": [{"name": name, "version": version} for name, version in packages],
     }
     details["fingerprint"] = canonical_json_sha256(details)
     return details
@@ -314,6 +369,53 @@ def check_docker() -> None:
         raise BenchmarkConfigError(
             "Docker daemon is unavailable: " + (completed.stderr or completed.stdout).strip()
         )
+
+
+def docker_runtime_environment() -> dict[str, Any]:
+    """Fingerprint stable client and daemon build information.
+
+    Cost measurements may differ after a Docker Engine, container runtime, or
+    daemon-kernel change.  ``docker version`` exposes those build contracts
+    without the volatile container/image counts reported by ``docker info``.
+    The active context name is deliberately omitted: it is an alias rather
+    than a runtime property, while the server details identify the runtime
+    actually serving the request.
+    """
+
+    executable_raw = shutil.which("docker")
+    if executable_raw is None:
+        raise BenchmarkConfigError("Docker CLI is unavailable")
+    executable = Path(os.path.abspath(executable_raw))
+    completed = subprocess.run(
+        [str(executable), "version", "--format", "{{json .}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise BenchmarkConfigError(
+            "Cannot inspect the Docker runtime: " + (completed.stderr or completed.stdout).strip()
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise BenchmarkConfigError("Docker runtime probe returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise BenchmarkConfigError("Docker runtime probe returned an invalid payload")
+    client = payload.get("Client")
+    server = payload.get("Server")
+    if not isinstance(client, dict) or not isinstance(server, dict):
+        raise BenchmarkConfigError("Docker runtime probe omitted client or server details")
+    stable_client = dict(client)
+    stable_client.pop("Context", None)
+    details: dict[str, Any] = {
+        "docker_executable": str(executable),
+        "docker_executable_sha256": sha256_file(executable),
+        "client": stable_client,
+        "server": server,
+    }
+    details["fingerprint"] = canonical_json_sha256(details)
+    return details
 
 
 def docker_image_details(reference: str) -> dict[str, Any] | None:

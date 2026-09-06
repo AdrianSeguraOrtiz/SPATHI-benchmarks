@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .benchmark_materialization import materialize_benchmark_plan
-from .calibration_materialization import (
-    freeze_calibration_selection,
-    materialize_calibration_stage,
-    rank_calibration_stage,
-)
 from .config import BenchmarkConfigError
+from .dimensional_transfer_workflow import run_dimensional_transfer_workflow
 from .doctor import run_doctor
+from .efficiency_workflow import run_efficiency_workflow
 from .pipeline import (
     build_spathi_image,
     evaluate,
@@ -27,6 +24,8 @@ from .pipeline import (
     run_inference,
     validate_handoffs,
 )
+from .reproducibility import write_reproducibility_audit
+from .scalability_workflow import run_scalability_workflow
 from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
@@ -39,7 +38,7 @@ from .workflows import (
 
 
 def _path(value: str) -> Path:
-    return Path(value).resolve()
+    return Path(os.path.abspath(value))
 
 
 def _add_common(
@@ -73,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     calibrate_parser = subparsers.add_parser(
         "calibrate",
-        help="run or resume the complete adaptive SPATHI calibration",
+        help="run or resume the bounded six-stage SPATHI calibration",
     )
     calibrate_parser.add_argument("--repo-root", type=_path, required=True)
     calibrate_parser.add_argument("--andrea-repo", type=_path, required=True)
@@ -96,65 +95,52 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--spathi-repo", type=_path, required=True)
     compare_parser.add_argument("--work-root", type=_path)
     compare_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
-    compare_parser.add_argument("--calibration-run-id")
+    compare_parser.add_argument("--efficiency-run-id")
     compare_parser.add_argument(
         "--report-only",
         action="store_true",
         help="rebuild HTML from one completed comparison without running experiments",
     )
 
-    calibration_plan = subparsers.add_parser(
-        "calibration-plan",
-        help="materialize one bounded SPATHI calibration stage as ANDREA requests",
+    efficiency = subparsers.add_parser(
+        "justify-efficiency",
+        help="run or resume the independent SPATHI efficiency study",
     )
-    calibration_plan.add_argument("--repo-root", type=_path, required=True)
-    calibration_plan.add_argument(
-        "--stage",
-        choices=("convergence", "structure", "estimator", "validation"),
-        required=True,
-    )
-    calibration_plan.add_argument(
-        "--calibration-budget", choices=("reduced", "full"), required=True
-    )
-    calibration_plan.add_argument("--parents", type=_path)
-    calibration_plan.add_argument("--output-dir", type=_path, required=True)
-    calibration_plan.add_argument("--profile-output", type=_path, required=True)
+    efficiency.add_argument("--repo-root", type=_path, required=True)
+    efficiency.add_argument("--andrea-repo", type=_path, required=True)
+    efficiency.add_argument("--spathi-repo", type=_path, required=True)
+    efficiency.add_argument("--work-root", type=_path)
+    efficiency.add_argument("--profile", choices=("reduced", "full"), default="full")
+    efficiency.add_argument("--calibration-run-id")
 
-    calibration_rank = subparsers.add_parser(
-        "calibration-rank",
-        help="rank a complete calibration stage without accessing test data",
+    scalability = subparsers.add_parser(
+        "scalability",
+        help="measure the frozen SPATHI policy across a public synthetic scale grid",
     )
-    calibration_rank.add_argument("--repo-root", type=_path, required=True)
-    calibration_rank.add_argument(
-        "--stage",
-        choices=("convergence", "structure", "estimator", "validation"),
-        required=True,
-    )
-    calibration_rank.add_argument(
-        "--calibration-budget", choices=("reduced", "full"), required=True
-    )
-    calibration_rank.add_argument("--manifest", type=_path, required=True)
-    calibration_rank.add_argument("--summary", type=_path, required=True)
-    calibration_rank.add_argument("--output", type=_path, required=True)
+    scalability.add_argument("--repo-root", type=_path, required=True)
+    scalability.add_argument("--andrea-repo", type=_path, required=True)
+    scalability.add_argument("--spathi-repo", type=_path, required=True)
+    scalability.add_argument("--work-root", type=_path)
+    scalability.add_argument("--profile", choices=("reduced", "full"), default="full")
+    scalability.add_argument("--efficiency-run-id")
 
-    calibration_freeze = subparsers.add_parser(
-        "calibration-freeze",
-        help="freeze selected-config from a reconciled validation ranking",
+    dimensional_transfer = subparsers.add_parser(
+        "dimensional-transfer",
+        help="measure post-freeze SPATHI accuracy transfer along separate scale axes",
     )
-    calibration_freeze.add_argument("--repo-root", type=_path, required=True)
-    calibration_freeze.add_argument("--ranking", type=_path, required=True)
-    calibration_freeze.add_argument("--output", type=_path, required=True)
+    dimensional_transfer.add_argument("--repo-root", type=_path, required=True)
+    dimensional_transfer.add_argument("--andrea-repo", type=_path, required=True)
+    dimensional_transfer.add_argument("--spathi-repo", type=_path, required=True)
+    dimensional_transfer.add_argument("--work-root", type=_path)
+    dimensional_transfer.add_argument("--profile", choices=("reduced", "full"), default="full")
+    dimensional_transfer.add_argument("--efficiency-run-id")
 
-    benchmark_plan = subparsers.add_parser(
-        "benchmark-plan",
-        help="materialize a post-freeze SPATHI bundle and runnable benchmark profile",
+    audit = subparsers.add_parser(
+        "audit-reproducibility",
+        help="verify every committed stochastic seed assignment",
     )
-    benchmark_plan.add_argument("--repo-root", type=_path, required=True)
-    benchmark_plan.add_argument("--template-profile", choices=("reduced", "full"), required=True)
-    benchmark_plan.add_argument("--baseline-plan", type=_path, required=True)
-    benchmark_plan.add_argument("--output-dir", type=_path, required=True)
-    benchmark_plan.add_argument("--profile-output", type=_path, required=True)
-    benchmark_plan.add_argument("--selected-config", type=_path)
+    audit.add_argument("--repo-root", type=_path, required=True)
+    audit.add_argument("--output", type=_path, required=True)
 
     preflight_parser = subparsers.add_parser("preflight", help="validate locks and plan generation")
     _add_common(
@@ -197,40 +183,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     statistics_parser = subparsers.add_parser(
         "statistics",
-        help="rank predeclared tools with paired non-parametric tests",
+        help=("run predeclared paired analyses; inferential tests only when authorized"),
     )
     _add_common(statistics_parser)
     return parser
-
-
-def _write_calibration_plan(args: argparse.Namespace) -> tuple[Path, Path]:
-    return materialize_calibration_stage(
-        repo_root=args.repo_root,
-        stage_id=args.stage,
-        calibration_budget=args.calibration_budget,
-        parent_ranking_path=args.parents,
-        output_dir=args.output_dir,
-        profile_output=args.profile_output,
-    )
-
-
-def _write_calibration_ranking(args: argparse.Namespace) -> Path:
-    return rank_calibration_stage(
-        repo_root=args.repo_root,
-        stage_id=args.stage,
-        calibration_budget=args.calibration_budget,
-        manifest_path=args.manifest,
-        summary_path=args.summary,
-        output_path=args.output,
-    )
-
-
-def _write_frozen_selection(args: argparse.Namespace) -> Path:
-    return freeze_calibration_selection(
-        repo_root=args.repo_root,
-        ranking_path=args.ranking,
-        output_path=args.output,
-    )
 
 
 def _dispatch(
@@ -267,7 +223,7 @@ def _dispatch(
                 repo_root=args.repo_root,
                 work_root=args.work_root or args.repo_root / "work",
                 profile=args.profile,
-                calibration_run_id=args.calibration_run_id,
+                efficiency_run_id=args.efficiency_run_id,
             )
         return "SPATHI comparison completed", run_comparison_workflow(
             repo_root=args.repo_root,
@@ -275,22 +231,39 @@ def _dispatch(
             spathi_repo=args.spathi_repo,
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
+            efficiency_run_id=args.efficiency_run_id,
+        )
+    if args.command == "justify-efficiency":
+        return "SPATHI efficiency study completed", run_efficiency_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
             calibration_run_id=args.calibration_run_id,
         )
-    if args.command == "calibration-plan":
-        return "Calibration plan written", _write_calibration_plan(args)
-    if args.command == "calibration-rank":
-        return "Calibration ranking written", _write_calibration_ranking(args)
-    if args.command == "calibration-freeze":
-        return "SPATHI selection frozen", _write_frozen_selection(args)
-    if args.command == "benchmark-plan":
-        return "Benchmark plan written", materialize_benchmark_plan(
+    if args.command == "scalability":
+        return "SPATHI scalability study completed", run_scalability_workflow(
             repo_root=args.repo_root,
-            template_profile_id=args.template_profile,
-            baseline_plan_path=args.baseline_plan,
-            output_dir=args.output_dir,
-            profile_output=args.profile_output,
-            selected_config_path=args.selected_config,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
+            efficiency_run_id=args.efficiency_run_id,
+        )
+    if args.command == "dimensional-transfer":
+        return "SPATHI dimensional transfer completed", run_dimensional_transfer_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
+            efficiency_run_id=args.efficiency_run_id,
+        )
+    if args.command == "audit-reproducibility":
+        return "Reproducibility audit written", write_reproducibility_audit(
+            args.repo_root,
+            args.output,
         )
     common = {
         "repo_root": args.repo_root,
@@ -357,10 +330,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "doctor",
             "calibrate",
             "compare",
-            "calibration-plan",
-            "calibration-rank",
-            "calibration-freeze",
-            "benchmark-plan",
+            "justify-efficiency",
+            "scalability",
+            "dimensional-transfer",
+            "audit-reproducibility",
         }:
             message, result = _dispatch(args)
         else:

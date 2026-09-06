@@ -52,15 +52,37 @@ def test_search_stages_cannot_use_validation_or_test_data() -> None:
     assert errors
 
 
-def test_unselected_configuration_cannot_claim_a_candidate() -> None:
+def test_unselected_configuration_cannot_claim_a_policy() -> None:
     schema = _load_json("schemas/spathi-selected-config.schema.json")
     document = copy.deepcopy(_load_json("experiments/v1/spathi/selected-config.json"))
     search_space = _load_json("experiments/v1/spathi/search-space.json")
-    document["selected_candidate"] = {
-        "candidate_id": "invented_winner",
+    multi = search_space["base_configuration"]
+    single = {
+        **multi,
+        "weight_mode": "cell-distance",
+        "distance_metric": "euclidean",
+        "group_size_correction": "none",
+    }
+    document["selected_policy"] = {
+        "policy_id": "spathi_conditional_v1",
+        "source_candidate_id": "invented_winner",
         "spathi_commit": "0" * 40,
-        "configuration_sha256": "0" * 64,
-        "parameters": search_space["reference_configuration"],
+        "source_configuration_sha256": "0" * 64,
+        "policy_sha256": "0" * 64,
+        "group_policy": {
+            "routing_parameter": "group_count",
+            "shared_parameters": search_space["conditional_group_policy"]["shared_parameters"],
+            "branches": {
+                "single_group": {
+                    "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
+                    "parameters": single,
+                },
+                "multi_group": {
+                    "condition": {"minimum_group_count": 2},
+                    "parameters": multi,
+                },
+            },
+        },
     }
 
     errors = list(Draft202012Validator(schema).iter_errors(document))
@@ -72,16 +94,40 @@ def test_schema_accepts_a_fully_evidenced_future_frozen_selection() -> None:
     schema = _load_json("schemas/spathi-selected-config.schema.json")
     document = copy.deepcopy(_load_json("experiments/v1/spathi/selected-config.json"))
     search_space = _load_json("experiments/v1/spathi/search-space.json")
+    multi = search_space["base_configuration"]
+    single = {
+        **multi,
+        "weight_mode": "cell-distance",
+        "distance_metric": "euclidean",
+        "group_size_correction": "none",
+    }
     document.update(
         {
             "status": "selected",
             "phase": "frozen",
             "calibration_budget": "full",
-            "selected_candidate": {
-                "candidate_id": "future_evidenced_candidate",
+            "selected_policy": {
+                "policy_id": "spathi_conditional_v1",
+                "source_candidate_id": "future_evidenced_candidate",
                 "spathi_commit": "a" * 40,
-                "configuration_sha256": "b" * 64,
-                "parameters": search_space["reference_configuration"],
+                "source_configuration_sha256": "b" * 64,
+                "policy_sha256": "2" * 64,
+                "group_policy": {
+                    "routing_parameter": "group_count",
+                    "shared_parameters": search_space["conditional_group_policy"][
+                        "shared_parameters"
+                    ],
+                    "branches": {
+                        "single_group": {
+                            "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
+                            "parameters": single,
+                        },
+                        "multi_group": {
+                            "condition": {"minimum_group_count": 2},
+                            "parameters": multi,
+                        },
+                    },
+                },
             },
             "selection_evidence": {
                 "calibration_budget": "full",
@@ -96,7 +142,8 @@ def test_schema_accepts_a_fully_evidenced_future_frozen_selection() -> None:
                 "hierarchical_score": 0.5,
                 "winner_candidate_id": "future_evidenced_candidate",
                 "winner_configuration_sha256": "b" * 64,
-                "tie_breakers_applied": ["stability", "cost", "simplicity"],
+                "winner_policy_sha256": "2" * 64,
+                "tie_breakers_applied": ["stability", "simplicity", "canonical_configuration_id"],
                 "frozen_at": "2026-08-28T12:00:00Z",
             },
         }
@@ -112,10 +159,12 @@ def test_search_budget_is_bounded_and_test_is_reserved() -> None:
     document = _load_json("experiments/v1/spathi/search-space.json")
 
     assert [stage["id"] for stage in document["stages"]] == [
-        "convergence",
-        "structure",
+        "geometry",
         "estimator",
+        "interaction",
+        "estimator_scale_transfer",
+        "convergence",
     ]
-    assert all(stage["candidate_budget_per_parent"] <= 8 for stage in document["stages"])
+    assert all(stage["candidate_budget_per_parent"] <= 14 for stage in document["stages"])
     assert document["selection_protocol"]["maximum_validation_finalists"] == 3
     assert document["selection_protocol"]["test_results_can_change_selection"] is False

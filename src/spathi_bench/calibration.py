@@ -27,20 +27,66 @@ from .config import (
     resolve_repo_path,
     validate_json,
 )
+from .seeds import SeedPlanError, derive_plan_seed, load_seed_plan
 
 SEARCH_SPACE_PATH = Path("experiments/v1/spathi/search-space.json")
 SEARCH_SPACE_SCHEMA_PATH = Path("schemas/spathi-search-space.schema.json")
 RANKING_SCHEMA_PATH = Path("schemas/calibration-ranking.schema.json")
 MANIFEST_SCHEMA_PATH = Path("schemas/calibration-manifest.schema.json")
 SELECTED_CONFIG_SCHEMA_PATH = Path("schemas/spathi-selected-config.schema.json")
+SEED_PLAN_PATH = Path("experiments/v1/seeds/seed-plan.json")
 
 _CALIBRATION_BUDGETS = frozenset({"reduced", "full"})
-_CALIBRATION_STAGES = frozenset({"convergence", "structure", "estimator", "validation"})
+_SEARCH_STAGES = (
+    "geometry",
+    "estimator",
+    "interaction",
+    "estimator_scale_transfer",
+    "convergence",
+)
+_CALIBRATION_STAGES = frozenset((*_SEARCH_STAGES, "validation"))
 _PARENT_STAGES = {
-    "convergence": None,
-    "structure": "convergence",
-    "estimator": "structure",
-    "validation": "estimator",
+    "geometry": None,
+    "estimator": "geometry",
+    "interaction": "estimator",
+    "estimator_scale_transfer": "interaction",
+    "convergence": "estimator_scale_transfer",
+    "validation": "convergence",
+}
+_FIXED_CALIBRATION_PARAMETERS: Mapping[str, Any] = {
+    "pca_svd_solver": "auto",
+    "bandwidth": "auto",
+    "target_eligibility": "all",
+    "adaptive_trees": False,
+}
+_GEOMETRY_DEVELOPMENT_SELECTOR: Mapping[str, Any] = {
+    "split_id": "development_v1",
+    "condition_ids": [
+        "linear_baseline",
+        "linear_noisy",
+        "bifurcating_baseline",
+        "bifurcating_noisy",
+        "scmultisim_dynamic",
+        "scmultisim_imbalanced",
+        "scmultisim_single_group",
+    ],
+}
+_MULTISCALE_DEVELOPMENT_SELECTOR: Mapping[str, Any] = {
+    "split_id": "development_v1",
+    "condition_ids": [
+        "linear_baseline",
+        "linear_noisy",
+        "bifurcating_baseline",
+        "bifurcating_noisy",
+        "scmultisim_dynamic",
+        "scmultisim_imbalanced",
+        "scmultisim_single_group",
+        "scmultisim_medium",
+    ],
+}
+_SCALE_TRANSFER_SELECTOR: Mapping[str, Any] = {
+    "split_id": "development_estimator_scale_transfer_v1",
+    "condition_ids": ["scmultisim_estimator_scale_transfer"],
 }
 _GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 
@@ -60,7 +106,7 @@ class CandidateConfiguration:
     parent_configuration_id: str | None
     variant_id: str
     parameters: Mapping[str, Any]
-    nonreference_parameter_changes: int
+    base_parameter_changes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +145,7 @@ def candidate_to_dict(candidate: CandidateConfiguration) -> dict[str, Any]:
         "parent_configuration_id": candidate.parent_configuration_id,
         "variant_id": candidate.variant_id,
         "parameters": copy.deepcopy(dict(candidate.parameters)),
-        "nonreference_parameter_changes": candidate.nonreference_parameter_changes,
+        "base_parameter_changes": candidate.base_parameter_changes,
     }
 
 
@@ -118,8 +164,8 @@ def candidate_from_dict(payload: Mapping[str, Any]) -> CandidateConfiguration:
             parent_configuration_id=parent,
             variant_id=str(payload["variant_id"]),
             parameters=copy.deepcopy(dict(_mapping(payload["parameters"], "candidate parameters"))),
-            nonreference_parameter_changes=_integer(
-                payload["nonreference_parameter_changes"],
+            base_parameter_changes=_integer(
+                payload["base_parameter_changes"],
                 "candidate simplicity",
                 minimum=0,
             ),
@@ -152,7 +198,7 @@ def _score_from_dict(payload: object) -> CandidateScore:
         )
         candidate = candidate_from_dict(_mapping(raw["candidate"], "score candidate"))
         simplicity = _integer(raw["simplicity"], "score simplicity", minimum=0)
-        if simplicity != candidate.nonreference_parameter_changes:
+        if simplicity != candidate.base_parameter_changes:
             raise CalibrationError("Score simplicity differs from its candidate")
         return CandidateScore(
             candidate=candidate,
@@ -181,15 +227,94 @@ def _score_from_dict(payload: object) -> CandidateScore:
         raise CalibrationError(f"Calibration score is missing {exc.args[0]!r}") from exc
 
 
-def _score_sort_key(score: CandidateScore) -> tuple[float, float, float, float, int, str]:
+def _score_sort_key(score: CandidateScore) -> tuple[float, float, int, str]:
     return (
         -score.hierarchical_aupr,
         score.stability,
-        score.median_wall_time_seconds,
-        score.median_peak_memory_mb if score.median_peak_memory_mb is not None else math.inf,
         score.simplicity,
         score.candidate.configuration_id,
     )
+
+
+def _rank_convergence_scores(
+    stage: Mapping[str, Any],
+    scores: Sequence[CandidateScore],
+) -> list[CandidateScore]:
+    """Put one smallest non-inferior stable ceiling per parent first.
+
+    The largest requested forest within each inherited estimator policy is the
+    preregistered numerical reference.  This prevents small Monte Carlo AUPR
+    fluctuations from turning the convergence stage into a maximize-tree-count
+    search while still preserving a complete deterministic ranking artifact.
+    """
+
+    rule = _mapping(stage.get("selection_rule"), "convergence selection rule")
+    if rule.get("method") != "smallest_noninferior_stable_per_parent":
+        raise CalibrationError("Convergence stage has an unsupported selection rule")
+    aupr_margin = _finite_number(
+        rule.get("absolute_aupr_margin"),
+        "convergence absolute AUPR margin",
+        minimum=0,
+        maximum=1,
+    )
+    stability_increase = _finite_number(
+        rule.get("maximum_stability_increase"),
+        "convergence maximum stability increase",
+        minimum=0,
+        maximum=1,
+    )
+    by_parent: dict[str, list[CandidateScore]] = defaultdict(list)
+    for score in scores:
+        parent = score.candidate.parent_configuration_id
+        if parent is None:
+            raise CalibrationError("Convergence candidates must identify an inherited parent")
+        by_parent[parent].append(score)
+
+    references: dict[str, CandidateScore] = {}
+    eligible: set[str] = set()
+    representatives: list[CandidateScore] = []
+    for parent, parent_scores in sorted(by_parent.items()):
+        reference = min(
+            parent_scores,
+            key=lambda item: (
+                -int(item.candidate.parameters["n_estimators"]),
+                *_score_sort_key(item),
+            ),
+        )
+        references[parent] = reference
+        parent_eligible = [
+            item
+            for item in parent_scores
+            if item.hierarchical_aupr >= reference.hierarchical_aupr - aupr_margin
+            and item.stability <= reference.stability + stability_increase
+        ]
+        if not parent_eligible:
+            raise CalibrationError(
+                f"Convergence parent {parent!r} has no candidate satisfying its frozen rule"
+            )
+        eligible.update(item.candidate.configuration_id for item in parent_eligible)
+        representatives.append(
+            min(
+                parent_eligible,
+                key=lambda item: (
+                    int(item.candidate.parameters["n_estimators"]),
+                    *_score_sort_key(item),
+                ),
+            )
+        )
+
+    representatives.sort(key=_score_sort_key)
+    representative_ids = {item.candidate.configuration_id for item in representatives}
+    remaining = sorted(
+        (item for item in scores if item.candidate.configuration_id not in representative_ids),
+        key=lambda item: (
+            item.candidate.configuration_id not in eligible,
+            -references[str(item.candidate.parent_configuration_id)].hierarchical_aupr,
+            int(item.candidate.parameters["n_estimators"]),
+            *_score_sort_key(item),
+        ),
+    )
+    return [*representatives, *remaining]
 
 
 def locked_spathi_identity(repo_root: Path) -> dict[str, str]:
@@ -267,7 +392,82 @@ def load_search_space(repo_root: Path) -> dict[str, Any]:
         "SPATHI search space",
     )
     _validate_search_semantics(search_space)
+    _validate_seed_contract(root, search_space)
     return search_space
+
+
+def materialize_group_policy(
+    search_space: Mapping[str, Any],
+    multi_group_parameters: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the complete deterministic one/many-group policy for a candidate."""
+
+    base = _mapping(search_space.get("base_configuration"), "base_configuration")
+    parameters = copy.deepcopy(dict(multi_group_parameters))
+    if set(parameters) != set(base):
+        raise CalibrationError("Policy parameters must contain the complete SPATHI parameter set")
+    template = _mapping(
+        search_space.get("conditional_group_policy"),
+        "conditional_group_policy",
+    )
+    branches = _mapping(template.get("branches"), "conditional group policy branches")
+    single_template = _mapping(branches.get("single_group"), "single-group policy branch")
+    multi_template = _mapping(branches.get("multi_group"), "multi-group policy branch")
+    overrides = _mapping(
+        single_template.get("parameter_overrides"),
+        "single-group parameter overrides",
+    )
+    single_parameters = {**parameters, **copy.deepcopy(dict(overrides))}
+    shared = tuple(
+        str(item)
+        for item in _sequence(template.get("shared_parameters"), "shared policy parameters")
+    )
+    if set(shared) != set(parameters) - set(overrides):
+        raise CalibrationError(
+            "Conditional policy shared_parameters must be every parameter not overridden "
+            "by the single-group branch"
+        )
+    if any(single_parameters[key] != parameters[key] for key in shared):
+        raise CalibrationError("Conditional group policy changed a shared parameter")
+    return {
+        "routing_parameter": "group_count",
+        "shared_parameters": list(shared),
+        "branches": {
+            "single_group": {
+                "condition": copy.deepcopy(single_template["condition"]),
+                "parameters": single_parameters,
+            },
+            "multi_group": {
+                "condition": copy.deepcopy(multi_template["condition"]),
+                "parameters": parameters,
+            },
+        },
+    }
+
+
+def resolve_group_policy(policy: Mapping[str, Any], group_count: int) -> dict[str, Any]:
+    """Resolve a frozen policy to plain SPATHI parameters for one dataset."""
+
+    if type(group_count) is not int or group_count < 1:
+        raise CalibrationError("group_count must be a positive integer")
+    branches = _mapping(policy.get("branches"), "group policy branches")
+    branch_id = "single_group" if group_count == 1 else "multi_group"
+    branch = _mapping(branches.get(branch_id), f"{branch_id} policy branch")
+    condition = _mapping(branch.get("condition"), f"{branch_id} policy condition")
+    minimum = _integer(
+        condition.get("minimum_group_count"),
+        f"{branch_id} minimum_group_count",
+        minimum=1,
+    )
+    maximum_value = condition.get("maximum_group_count")
+    maximum = (
+        None
+        if maximum_value is None
+        else _integer(maximum_value, f"{branch_id} maximum_group_count", minimum=1)
+    )
+    if group_count < minimum or (maximum is not None and group_count > maximum):
+        raise CalibrationError(f"Policy branch {branch_id!r} does not cover {group_count} groups")
+    return copy.deepcopy(dict(_mapping(branch.get("parameters"), f"{branch_id} parameters")))
 
 
 def stage_profile_id(stage_id: str, calibration_budget: str) -> str:
@@ -303,6 +503,7 @@ def build_stage_profile(
     calibration_budget: str,
     *,
     bundle_path: str,
+    search_space: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Materialize one stage-specific runnable profile from its planned template."""
 
@@ -321,6 +522,37 @@ def build_stage_profile(
     raw_jobs = template.get("generation_jobs")
     if not isinstance(raw_jobs, list) or not raw_jobs:
         raise CalibrationError(f"The {expected_purpose} template has no frozen generation jobs")
+    if stage_id != "validation":
+        if search_space is None:
+            raise CalibrationError(f"Stage {stage_id!r} requires its frozen dataset selector")
+        stage = _stage(search_space, stage_id)
+        selector = _mapping(stage.get("dataset_selector"), f"{stage_id} dataset selector")
+        split_id = selector.get("split_id")
+        condition_ids = selector.get("condition_ids")
+        if (
+            not isinstance(split_id, str)
+            or not split_id
+            or not isinstance(condition_ids, list)
+            or not condition_ids
+            or not all(isinstance(item, str) and item for item in condition_ids)
+        ):
+            raise CalibrationError(f"Stage {stage_id!r} has an invalid dataset selector")
+        allowed_conditions = set(condition_ids)
+        raw_jobs = [
+            job
+            for job in raw_jobs
+            if isinstance(job, Mapping)
+            and job.get("split_id") == split_id
+            and job.get("condition_id") in allowed_conditions
+        ]
+        observed_conditions = {
+            str(job.get("condition_id")) for job in raw_jobs if isinstance(job, Mapping)
+        }
+        if observed_conditions != allowed_conditions:
+            raise CalibrationError(
+                f"Stage {stage_id!r} dataset selector expected conditions "
+                f"{sorted(allowed_conditions)}; found {sorted(observed_conditions)}"
+            )
     observed_roles = {job.get("dataset_role") for job in raw_jobs if isinstance(job, Mapping)}
     if observed_roles != {expected_role}:
         raise CalibrationError(
@@ -331,6 +563,7 @@ def build_stage_profile(
         raise CalibrationError("Calibration profile requires a repository-relative bundle path")
 
     profile = copy.deepcopy(dict(template))
+    profile["generation_jobs"] = copy.deepcopy(raw_jobs)
     profile.update(
         {
             "id": profile_id,
@@ -379,7 +612,7 @@ def load_parent_ranking(
     expected_stage = _PARENT_STAGES[stage_id]
     if expected_stage is None:
         if ranking_path is not None:
-            raise CalibrationError("The convergence stage cannot receive --parents")
+            raise CalibrationError("The geometry stage cannot receive --parents")
         return (), None
     if ranking_path is None:
         raise CalibrationError(f"Stage {stage_id!r} requires --parents from {expected_stage!r}")
@@ -436,17 +669,20 @@ def expand_stage_candidates(
 ) -> tuple[CandidateConfiguration, ...]:
     """Expand one stage into a deterministic, bounded set of configurations.
 
-    ``convergence`` starts from ``reference_configuration`` and takes no parents.
+    ``geometry`` starts from ``base_configuration`` and takes no parents.
     Later stages require the selected/shortlisted candidates from the preceding
     stage. Parent input order is ignored so repeated expansion is stable.
     """
 
     stage = _stage(search_space, stage_id)
-    reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
     parent_items = _validated_parents(stage, parents)
     _validate_candidate_integrity(
         tuple(parent for parent in parent_items if parent is not None),
-        reference,
+        base_configuration,
     )
     variants = [
         (str(item["id"]), _mapping(item["parameter_overrides"], "parameter_overrides"))
@@ -462,9 +698,11 @@ def expand_stage_candidates(
 
     candidates: list[CandidateConfiguration] = []
     for parent in parent_items:
-        base = dict(reference if parent is None else parent.parameters)
-        prefix = stage_id if parent is None else f"{stage_id}__{parent.configuration_id}"
-        inherited_variant = "reference" if parent is None else "inherited"
+        base = dict(base_configuration if parent is None else parent.parameters)
+        prefix = (
+            stage_id if parent is None else f"{stage_id}__from_{parent.configuration_sha256[:12]}"
+        )
+        inherited_variant = "base" if parent is None else "inherited"
         if stage["include_inherited_configuration"]:
             candidates.append(
                 _candidate(
@@ -474,7 +712,7 @@ def expand_stage_candidates(
                     parent=parent,
                     variant_id=inherited_variant,
                     parameters=base,
-                    reference=reference,
+                    base_configuration=base_configuration,
                 )
             )
         for variant_id, overrides in variants:
@@ -487,17 +725,17 @@ def expand_stage_candidates(
                     parent=parent,
                     variant_id=variant_id,
                     parameters=parameters,
-                    reference=reference,
+                    base_configuration=base_configuration,
                 )
             )
 
     identifiers = [candidate.configuration_id for candidate in candidates]
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError(f"Stage {stage_id!r} generated duplicate configuration IDs")
-    digests = [candidate.configuration_sha256 for candidate in candidates]
-    if len(set(digests)) != len(digests):
-        raise CalibrationError(f"Stage {stage_id!r} generated duplicate parameter configurations")
-    return tuple(candidates)
+    deduplicated: dict[str, CandidateConfiguration] = {}
+    for candidate in candidates:
+        deduplicated.setdefault(candidate.configuration_sha256, candidate)
+    return tuple(deduplicated.values())
 
 
 def expand_stage_runs(
@@ -520,7 +758,10 @@ def expand_stage_runs(
             stage_id=stage_id,
             dataset_role=candidate.dataset_role,
             algorithm_seed=seed,
-            parameters={**copy.deepcopy(dict(candidate.parameters)), "random_seed": seed},
+            parameters={
+                "group_policy": materialize_group_policy(search_space, candidate.parameters),
+                "random_seed": seed,
+            },
         )
         for candidate in candidates
         for seed in seeds
@@ -532,7 +773,7 @@ def expand_validation_runs(
     finalists: Sequence[CandidateConfiguration],
     calibration_budget: str,
 ) -> tuple[CalibrationRun, ...]:
-    """Expand the bounded estimator finalists on validation-only algorithm seeds."""
+    """Expand the bounded convergence finalists on validation-only algorithm seeds."""
 
     protocol = _mapping(search_space.get("selection_protocol"), "selection_protocol")
     maximum = _integer(
@@ -542,13 +783,16 @@ def expand_validation_runs(
     )
     if not 2 <= len(finalists) <= maximum:
         raise CalibrationError(
-            f"Validation requires between 2 and {maximum} estimator finalists; "
+            f"Validation requires between 2 and {maximum} convergence finalists; "
             f"received {len(finalists)}"
         )
-    if any(candidate.stage_id != "estimator" for candidate in finalists):
-        raise CalibrationError("Validation finalists must come from the estimator stage")
-    reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
-    _validate_candidate_integrity(finalists, reference)
+    if any(candidate.stage_id != "convergence" for candidate in finalists):
+        raise CalibrationError("Validation finalists must come from the convergence stage")
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
+    _validate_candidate_integrity(finalists, base_configuration)
     seeds = _algorithmic_seeds(search_space, calibration_budget, "validation")
     return tuple(
         CalibrationRun(
@@ -558,7 +802,10 @@ def expand_validation_runs(
             stage_id="validation",
             dataset_role="validation",
             algorithm_seed=seed,
-            parameters={**copy.deepcopy(dict(candidate.parameters)), "random_seed": seed},
+            parameters={
+                "group_policy": materialize_group_policy(search_space, candidate.parameters),
+                "random_seed": seed,
+            },
         )
         for candidate in sorted(finalists, key=lambda item: item.configuration_id)
         for seed in seeds
@@ -632,8 +879,9 @@ def validate_calibration_manifest(
 def reconcile_summary_runs(
     manifest: Mapping[str, Any],
     summary_rows: Iterable[Mapping[str, Any]],
-) -> list[Mapping[str, Any]]:
-    """Require every summary row to originate from exactly one frozen manifest run."""
+    calibration_panel: object,
+) -> tuple[list[Mapping[str, Any]], dict[str, Any]]:
+    """Reconcile every dataset/run/context cell with the frozen stage manifest."""
 
     rows = list(summary_rows)
     expected_items = manifest.get("runs")
@@ -674,13 +922,132 @@ def reconcile_summary_runs(
     missing = sorted(set(expected) - observed)
     if missing:
         raise CalibrationError(f"Summary is missing manifest runs: {missing}")
-    return rows
+    panel = validate_calibration_panel(
+        calibration_panel,
+        rows,
+        expected_role=str(manifest.get("dataset_role")),
+        expected_run_ids=tuple(sorted(expected)),
+    )
+    return rows, panel
+
+
+def validate_calibration_panel(
+    calibration_panel: object,
+    summary_rows: Iterable[Mapping[str, Any]],
+    *,
+    expected_role: str,
+    expected_run_ids: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """Validate a closed Cartesian dataset/run panel and its context inventories."""
+
+    panel = _mapping(calibration_panel, "calibration panel")
+    if panel.get("schema_version") != "1.0" or panel.get("dataset_role") != expected_role:
+        raise CalibrationError("Calibration panel identity differs from its stage")
+    dataset_ids = panel.get("dataset_ids")
+    run_ids = panel.get("run_ids")
+    if (
+        not isinstance(dataset_ids, list)
+        or not dataset_ids
+        or not all(isinstance(item, str) and item for item in dataset_ids)
+        or dataset_ids != sorted(set(dataset_ids))
+    ):
+        raise CalibrationError("Calibration panel dataset_ids must be sorted and unique")
+    if (
+        not isinstance(run_ids, list)
+        or not run_ids
+        or not all(isinstance(item, str) and item for item in run_ids)
+        or run_ids != sorted(set(run_ids))
+    ):
+        raise CalibrationError("Calibration panel run_ids must be sorted and unique")
+    if expected_run_ids is not None and tuple(run_ids) != expected_run_ids:
+        raise CalibrationError("Calibration panel run IDs differ from the stage manifest")
+    if panel.get("n_expected_executions") != len(dataset_ids) * len(run_ids):
+        raise CalibrationError("Calibration panel has an invalid execution count")
+    handoff_digest = panel.get("handoff_validation_sha256")
+    if not isinstance(handoff_digest, str) or re.fullmatch(r"[0-9a-f]{64}", handoff_digest) is None:
+        raise CalibrationError("Calibration panel has an invalid handoff digest")
+
+    raw_datasets = panel.get("datasets")
+    if not isinstance(raw_datasets, list) or len(raw_datasets) != len(dataset_ids):
+        raise CalibrationError("Calibration panel dataset contracts are incomplete")
+    contexts_by_dataset: dict[str, tuple[str, ...]] = {}
+    required_dataset_fields = {
+        "dataset_id",
+        "expected_group_contexts",
+        "n_group_contexts",
+        "dataset_manifest_sha256",
+        "group_assignments_sha256",
+        "ground_truth_manifest_sha256",
+        "truth_network_sha256",
+    }
+    for index, raw_dataset in enumerate(raw_datasets):
+        dataset = _mapping(raw_dataset, f"calibration panel dataset {index}")
+        if set(dataset) != required_dataset_fields:
+            raise CalibrationError(
+                f"Calibration panel dataset {index} has an invalid evidence shape"
+            )
+        dataset_id = dataset.get("dataset_id")
+        raw_contexts = dataset.get("expected_group_contexts")
+        if (
+            not isinstance(dataset_id, str)
+            or dataset_id not in dataset_ids
+            or dataset_id in contexts_by_dataset
+            or not isinstance(raw_contexts, list)
+            or not raw_contexts
+            or not all(
+                isinstance(context, str) and context.startswith("group:") and context != "group:"
+                for context in raw_contexts
+            )
+            or raw_contexts != sorted(set(raw_contexts))
+            or dataset.get("n_group_contexts") != len(raw_contexts)
+        ):
+            raise CalibrationError(
+                f"Calibration panel dataset {index} has an invalid context inventory"
+            )
+        for field in required_dataset_fields - {
+            "dataset_id",
+            "expected_group_contexts",
+            "n_group_contexts",
+        }:
+            digest = dataset.get(field)
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise CalibrationError(f"Calibration panel dataset {index} has an invalid {field}")
+        contexts_by_dataset[dataset_id] = tuple(raw_contexts)
+    if set(contexts_by_dataset) != set(dataset_ids):
+        raise CalibrationError("Calibration panel omits dataset context contracts")
+
+    rows = list(summary_rows)
+    observed: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for index, raw_row in enumerate(rows):
+        row = _mapping(raw_row, f"summary row {index}")
+        key = (str(row.get("dataset_id")), str(row.get("run_id")))
+        if key in observed:
+            raise CalibrationError(f"Calibration summary duplicates dataset/run execution {key!r}")
+        if key[0] not in contexts_by_dataset or key[1] not in run_ids:
+            raise CalibrationError(f"Calibration summary contains an unplanned execution {key!r}")
+        if row.get("dataset_role") != expected_role:
+            raise CalibrationError(f"Calibration summary row {index} has the wrong dataset role")
+        if tuple(row.get("group_contexts", ())) != contexts_by_dataset[key[0]]:
+            raise CalibrationError(
+                f"Calibration summary row {index} does not cover its declared group contexts"
+            )
+        if row.get("n_group_contexts") != len(contexts_by_dataset[key[0]]):
+            raise CalibrationError(
+                f"Calibration summary row {index} has the wrong group-context count"
+            )
+        observed[key] = row
+    expected = {(dataset_id, run_id) for dataset_id in dataset_ids for run_id in run_ids}
+    if set(observed) != expected:
+        missing = sorted(expected - set(observed))
+        raise CalibrationError(f"Calibration summary omits planned executions: {missing}")
+    return copy.deepcopy(dict(panel))
 
 
 def build_andrea_requests(
     runs: Sequence[CalibrationRun],
     *,
     docker_image: str,
+    calibration_budget: str,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Render calibration runs as ANDREA tools, custom-tool and metadata requests."""
 
@@ -691,6 +1058,14 @@ def build_andrea_requests(
     run_ids = [run.run_id for run in runs]
     if len(set(run_ids)) != len(run_ids):
         raise CalibrationError("Calibration runs contain duplicate run IDs")
+    stage_ids = {run.stage_id for run in runs}
+    dataset_roles = {run.dataset_role for run in runs}
+    if len(stage_ids) != 1 or len(dataset_roles) != 1:
+        raise CalibrationError("One calibration request bundle must use one stage and role")
+    stage_id = next(iter(stage_ids))
+    dataset_role = next(iter(dataset_roles))
+    seed_order = tuple(dict.fromkeys(run.algorithm_seed for run in runs))
+    seed_indexes = {seed: index for index, seed in enumerate(seed_order, start=1)}
     tools_params = {
         "runs": [
             {
@@ -721,43 +1096,26 @@ def build_andrea_requests(
             {
                 "run_id": run.run_id,
                 "configuration_id": run.configuration_id,
-                "selection_role": "reference"
-                if run.configuration_id.endswith("__reference")
+                "selection_role": "base"
+                if run.configuration_id.endswith("__base")
                 else "candidate",
                 "algorithm_seed": run.algorithm_seed,
                 "algorithm_seed_parameter": "random_seed",
                 "family": "spathi",
+                "seed_derivation": {
+                    "namespace": f"{calibration_budget}.{dataset_role}",
+                    "stream": "inference",
+                    "coordinates": {
+                        "phase": "calibration",
+                        "stage": stage_id,
+                        "replicate": seed_indexes[run.algorithm_seed],
+                    },
+                },
             }
             for run in runs
         ],
     }
     return tools_params, custom_tools, metadata
-
-
-def select_stage_candidates(
-    search_space: Mapping[str, Any],
-    stage_id: str,
-    candidates: Sequence[CandidateConfiguration],
-    summary_rows: Iterable[Mapping[str, Any]],
-    *,
-    calibration_budget: str,
-) -> tuple[CandidateScore, ...]:
-    """Rank a complete development-stage batch and return its bounded shortlist."""
-
-    scores = rank_stage_candidates(
-        search_space,
-        stage_id,
-        candidates,
-        summary_rows,
-        calibration_budget=calibration_budget,
-    )
-    stage = _stage(search_space, stage_id)
-    limit = _integer(stage.get("advance_limit"), f"{stage_id} advance limit", minimum=1)
-    if limit > len(scores):
-        raise CalibrationError(
-            f"Stage {stage_id!r} advance limit {limit} exceeds its {len(scores)} candidates"
-        )
-    return scores[:limit]
 
 
 def rank_stage_candidates(
@@ -771,8 +1129,11 @@ def rank_stage_candidates(
     """Return the complete ordered ranking for one development stage."""
 
     stage = _stage(search_space, stage_id)
-    reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
-    _validate_candidate_integrity(candidates, reference)
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
+    _validate_candidate_integrity(candidates, base_configuration)
     _validate_stage_candidate_set(stage, candidates)
     expected_seeds = _algorithmic_seeds(search_space, calibration_budget, stage_id)
     scores = _rank_balanced_rows(
@@ -781,28 +1142,9 @@ def rank_stage_candidates(
         expected_role="development",
         expected_seeds=expected_seeds,
     )
+    if stage_id == "convergence":
+        scores = _rank_convergence_scores(stage, scores)
     return tuple(scores)
-
-
-def select_validation_candidate(
-    search_space: Mapping[str, Any],
-    finalists: Sequence[CandidateConfiguration],
-    summary_rows: Iterable[Mapping[str, Any]],
-    *,
-    calibration_budget: str,
-) -> CandidateScore:
-    """Select one global candidate using validation rows, never test rows.
-
-    This function returns evidence in memory; it does not freeze or modify
-    ``selected-config.json``.
-    """
-
-    return rank_validation_candidates(
-        search_space,
-        finalists,
-        summary_rows,
-        calibration_budget=calibration_budget,
-    )[0]
 
 
 def rank_validation_candidates(
@@ -825,10 +1167,13 @@ def rank_validation_candidates(
             f"Validation requires between 2 and {maximum} predeclared finalists; "
             f"received {len(finalists)}"
         )
-    if any(candidate.stage_id != "estimator" for candidate in finalists):
-        raise CalibrationError("Validation finalists must come from the estimator stage")
-    reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
-    _validate_candidate_integrity(finalists, reference)
+    if any(candidate.stage_id != "convergence" for candidate in finalists):
+        raise CalibrationError("Validation finalists must come from the convergence stage")
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
+    _validate_candidate_integrity(finalists, base_configuration)
     expected_seeds = _algorithmic_seeds(search_space, calibration_budget, "validation")
     return tuple(
         _rank_balanced_rows(
@@ -846,6 +1191,7 @@ def build_calibration_ranking(
     candidates: Sequence[CandidateConfiguration],
     summary_rows: Iterable[Mapping[str, Any]],
     *,
+    calibration_panel: Mapping[str, Any],
     calibration_budget: str,
     profile_id: str,
     parent_ranking: Mapping[str, Any] | None,
@@ -867,14 +1213,20 @@ def build_calibration_ranking(
     expected_parent_stage = _PARENT_STAGES[stage_id]
     if expected_parent_stage is None:
         if parent_ranking is not None:
-            raise CalibrationError("Convergence ranking cannot link a parent ranking")
+            raise CalibrationError("Geometry ranking cannot link a parent ranking")
     else:
         parent = _mapping(parent_ranking, "ranking parent link")
         if parent.get("stage_id") != expected_parent_stage:
             raise CalibrationError("Calibration ranking links the wrong parent stage")
         if parent.get("calibration_budget") != budget:
             raise CalibrationError("Calibration ranking links a different calibration budget")
-    evidence_rows = _normalized_evidence_rows(summary_rows)
+    raw_evidence_rows = list(summary_rows)
+    normalized_panel = validate_calibration_panel(
+        calibration_panel,
+        raw_evidence_rows,
+        expected_role="validation" if stage_id == "validation" else "development",
+    )
+    evidence_rows = _normalized_evidence_rows(raw_evidence_rows)
     if stage_id == "validation":
         scores = rank_validation_candidates(
             search_space,
@@ -916,6 +1268,7 @@ def build_calibration_ranking(
         "spathi_image_ids": sorted({str(row["spathi_image_id"]) for row in evidence_rows}),
         "primary_metric": "aupr_directed",
         "tie_breakers": [item["id"] for item in search_space["objective"]["tie_breakers"]],
+        "calibration_panel": normalized_panel,
         "calibration_rows": evidence_rows,
         "ranking": [score_to_dict(score) for score in scores],
         "selected_candidates": [candidate_to_dict(score.candidate) for score in selected_scores],
@@ -982,7 +1335,7 @@ def validate_ranking_artifact(
     parent_ranking = ranking.get("parent_ranking")
     if expected_parent_stage is None:
         if parent_ranking is not None:
-            raise CalibrationError("Convergence ranking cannot link a parent ranking")
+            raise CalibrationError("Geometry ranking cannot link a parent ranking")
     else:
         parent = _mapping(parent_ranking, "ranking parent link")
         if parent.get("stage_id") != expected_parent_stage:
@@ -992,7 +1345,7 @@ def validate_ranking_artifact(
     if stage_id == "validation":
         if role != "validation":
             raise CalibrationError("Validation ranking has the wrong dataset role")
-    elif stage_id in {"convergence", "structure", "estimator"}:
+    elif stage_id in set(_SEARCH_STAGES):
         if role != "development":
             raise CalibrationError("Development ranking has the wrong dataset role")
     else:
@@ -1010,9 +1363,12 @@ def validate_ranking_artifact(
     if not isinstance(raw_scores, list) or not raw_scores:
         raise CalibrationError("Calibration ranking contains no scores")
     serialized_scores = tuple(_score_from_dict(item) for item in raw_scores)
-    reference = _mapping(search_space.get("reference_configuration"), "reference_configuration")
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
     candidates = tuple(score.candidate for score in serialized_scores)
-    _validate_candidate_integrity(candidates, reference)
+    _validate_candidate_integrity(candidates, base_configuration)
     identifiers = [candidate.configuration_id for candidate in candidates]
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError("Calibration ranking contains duplicate candidates")
@@ -1025,6 +1381,11 @@ def validate_ranking_artifact(
     raw_rows = ranking.get("calibration_rows")
     if not isinstance(raw_rows, list) or not raw_rows:
         raise CalibrationError("Calibration ranking contains no auditable calibration rows")
+    validate_calibration_panel(
+        ranking.get("calibration_panel"),
+        raw_rows,
+        expected_role=str(role),
+    )
     for index, row_value in enumerate(raw_rows):
         row = _mapping(row_value, f"ranking calibration row {index}")
         if any(row.get(field) != expected for field, expected in expected_provenance.items()):
@@ -1041,8 +1402,8 @@ def validate_ranking_artifact(
         maximum = int(protocol["maximum_validation_finalists"])
         if not 2 <= len(serialized_scores) <= maximum:
             raise CalibrationError(f"Validation ranking requires between 2 and {maximum} finalists")
-        if any(candidate.stage_id != "estimator" for candidate in candidates):
-            raise CalibrationError("Validation ranking contains a non-estimator candidate")
+        if any(candidate.stage_id != "convergence" for candidate in candidates):
+            raise CalibrationError("Validation ranking contains a non-convergence candidate")
         recomputed_scores = rank_validation_candidates(
             search_space,
             candidates,
@@ -1094,7 +1455,7 @@ def validate_ranking_chain(
     expected_calibration_budget: str | None = None,
     _visited: frozenset[str] = frozenset(),
 ) -> tuple[CandidateScore, ...]:
-    """Validate a ranking and every content-addressed predecessor back to convergence."""
+    """Validate a ranking and every content-addressed predecessor back to geometry."""
 
     root = repo_root.resolve()
     scores = validate_ranking_artifact(
@@ -1109,7 +1470,7 @@ def validate_ranking_chain(
     parent_value = ranking.get("parent_ranking")
     if expected_parent_stage is None:
         if parent_value is not None:
-            raise CalibrationError("Convergence ranking has an unexpected parent link")
+            raise CalibrationError("Geometry ranking has an unexpected parent link")
         return scores
     parent = _mapping(parent_value, "ranking parent link")
     raw_path = parent.get("path")
@@ -1159,7 +1520,7 @@ def validate_ranking_chain(
         }
         if observed != expected:
             raise CalibrationError(
-                "Validation ranking finalists differ from the estimator shortlist"
+                "Validation ranking finalists differ from the convergence shortlist"
             )
     else:
         expected_parent_ids = {candidate.configuration_id for candidate in selected_parents}
@@ -1204,6 +1565,8 @@ def build_frozen_selected_config(
     if ranking["stage_id"] != "validation":
         raise CalibrationError("Only a validation ranking can freeze selected-config")
     winner = scores[0]
+    group_policy = materialize_group_policy(search, winner.candidate.parameters)
+    policy_sha256 = canonical_json_sha256(group_policy)
     timestamp = frozen_at or datetime.now(UTC).isoformat().replace("+00:00", "Z")
     relative_ranking = resolved_ranking.relative_to(root).as_posix()
     evidence = {
@@ -1219,6 +1582,7 @@ def build_frozen_selected_config(
         "hierarchical_score": winner.hierarchical_aupr,
         "winner_candidate_id": winner.candidate.configuration_id,
         "winner_configuration_sha256": winner.candidate.configuration_sha256,
+        "winner_policy_sha256": policy_sha256,
         "tie_breakers_applied": ranking["tie_breakers"],
         "frozen_at": timestamp,
     }
@@ -1229,17 +1593,19 @@ def build_frozen_selected_config(
         "calibration_budget": ranking["calibration_budget"],
         "status": "selected",
         "phase": "frozen",
-        "selected_candidate": {
-            "candidate_id": winner.candidate.configuration_id,
+        "selected_policy": {
+            "policy_id": "spathi_conditional_v1",
+            "source_candidate_id": winner.candidate.configuration_id,
             "spathi_commit": ranking["spathi_commit"],
-            "configuration_sha256": winner.candidate.configuration_sha256,
-            "parameters": copy.deepcopy(dict(winner.candidate.parameters)),
+            "source_configuration_sha256": winner.candidate.configuration_sha256,
+            "policy_sha256": policy_sha256,
+            "group_policy": group_policy,
         },
         "selection_evidence": evidence,
         "test_accessed_before_freeze": False,
         "notes": [
             "Generated from the cryptographically linked validation ranking.",
-            "Test results cannot change this frozen global configuration.",
+            "Test results cannot change this frozen conditional group policy.",
         ],
     }
     validate_json(selected, root / SELECTED_CONFIG_SCHEMA_PATH, "frozen selected configuration")
@@ -1280,17 +1646,19 @@ def reconcile_frozen_selection(
     if ranking["stage_id"] != "validation":
         raise CalibrationError("Frozen selection evidence is not a validation ranking")
     winner = scores[0]
-    selected_candidate = _mapping(selected.get("selected_candidate"), "selected candidate")
-    expected_candidate = {
-        "candidate_id": winner.candidate.configuration_id,
+    group_policy = materialize_group_policy(search_space, winner.candidate.parameters)
+    policy_sha256 = canonical_json_sha256(group_policy)
+    selected_policy = _mapping(selected.get("selected_policy"), "selected policy")
+    expected_policy = {
+        "policy_id": "spathi_conditional_v1",
+        "source_candidate_id": winner.candidate.configuration_id,
         "spathi_commit": ranking["spathi_commit"],
-        "configuration_sha256": winner.candidate.configuration_sha256,
-        "parameters": dict(winner.candidate.parameters),
+        "source_configuration_sha256": winner.candidate.configuration_sha256,
+        "policy_sha256": policy_sha256,
+        "group_policy": group_policy,
     }
-    if dict(selected_candidate) != expected_candidate:
-        raise CalibrationError(
-            "Frozen selected candidate is not reconciled with validation ranking"
-        )
+    if dict(selected_policy) != expected_policy:
+        raise CalibrationError("Frozen selected policy is not reconciled with validation ranking")
     expected_evidence = {
         "calibration_budget": ranking["calibration_budget"],
         "validation_ranking": ranking_path.relative_to(root).as_posix(),
@@ -1304,6 +1672,7 @@ def reconcile_frozen_selection(
         "hierarchical_score": winner.hierarchical_aupr,
         "winner_candidate_id": winner.candidate.configuration_id,
         "winner_configuration_sha256": winner.candidate.configuration_sha256,
+        "winner_policy_sha256": policy_sha256,
         "tie_breakers_applied": ranking["tie_breakers"],
     }
     for field, expected in expected_evidence.items():
@@ -1329,11 +1698,6 @@ def _validate_search_semantics(search_space: Mapping[str, Any]) -> None:
     for stage_value in stages:
         stage = _mapping(stage_value, "stage")
         stage_id = str(stage.get("id"))
-        if "algorithmic_seeds" in stage:
-            raise CalibrationError(
-                f"Stage {stage_id!r} contains legacy algorithmic_seeds; "
-                "seeds must be declared per calibration budget"
-            )
         candidate_values = _sequence(stage.get("candidates"), f"{stage_id}.candidates")
         candidate_ids = [str(_mapping(item, "candidate").get("id")) for item in candidate_values]
         if len(set(candidate_ids)) != len(candidate_ids):
@@ -1352,18 +1716,95 @@ def _validate_search_semantics(search_space: Mapping[str, Any]) -> None:
         if stage_id in seen:
             raise CalibrationError(f"Duplicate calibration stage: {stage_id!r}")
         seen.add(stage_id)
-    if seen != _CALIBRATION_STAGES - {"validation"}:
-        raise CalibrationError(
-            "Calibration search stages must be exactly convergence, structure and estimator"
+    if seen != set(_SEARCH_STAGES):
+        raise CalibrationError(f"Calibration search stages must be exactly {list(_SEARCH_STAGES)}")
+
+    ordered = tuple(
+        str(_mapping(item, "stage")["id"])
+        for item in sorted(
+            stages,
+            key=lambda item: int(_mapping(item, "stage")["order"]),
         )
+    )
+    if ordered != _SEARCH_STAGES:
+        raise CalibrationError(f"Calibration stage order must be {list(_SEARCH_STAGES)}")
+
+    base_configuration = _mapping(
+        search_space.get("base_configuration"),
+        "base_configuration",
+    )
+    fixed_parameters = _mapping(
+        _mapping(
+            search_space.get("calibration_constraints"),
+            "calibration_constraints",
+        ).get("fixed_parameters"),
+        "fixed calibration parameters",
+    )
+    if dict(fixed_parameters) != dict(_FIXED_CALIBRATION_PARAMETERS):
+        raise CalibrationError("Fixed calibration parameters differ from the v1 contract")
+    if any(base_configuration.get(key) != value for key, value in fixed_parameters.items()):
+        raise CalibrationError("Base configuration violates fixed calibration parameters")
+    for stage_value in stages:
+        stage = _mapping(stage_value, "stage")
+        stage_id = str(stage.get("id"))
+        expected_selector = {
+            "geometry": _GEOMETRY_DEVELOPMENT_SELECTOR,
+            "estimator": _MULTISCALE_DEVELOPMENT_SELECTOR,
+            "interaction": _MULTISCALE_DEVELOPMENT_SELECTOR,
+            "estimator_scale_transfer": _SCALE_TRANSFER_SELECTOR,
+            "convergence": _MULTISCALE_DEVELOPMENT_SELECTOR,
+        }[stage_id]
+        if stage.get("dataset_selector") != expected_selector:
+            raise CalibrationError(
+                f"Stage {stage_id!r} changes its frozen development dataset selector"
+            )
+        for candidate_value in _sequence(stage.get("candidates"), "stage candidates"):
+            candidate = _mapping(candidate_value, "candidate")
+            overrides = _mapping(candidate.get("parameter_overrides"), "parameter overrides")
+            forbidden = sorted(set(overrides) & set(fixed_parameters))
+            if forbidden:
+                raise CalibrationError(
+                    f"Calibration candidate {candidate.get('id')!r} overrides fixed "
+                    f"parameters: {forbidden}"
+                )
+    materialize_group_policy(search_space, base_configuration)
 
     for stage_id in sorted(_CALIBRATION_STAGES):
         reduced = set(_algorithmic_seeds(search_space, "reduced", stage_id))
         full = set(_algorithmic_seeds(search_space, "full", stage_id))
-        if not reduced < full:
-            raise CalibrationError(
-                f"Reduced {stage_id!r} seeds must be a strict subset of the full budget"
-            )
+        if reduced & full:
+            raise CalibrationError(f"Reduced and full {stage_id!r} seeds must be disjoint")
+
+
+def _validate_seed_contract(repo_root: Path, search_space: Mapping[str, Any]) -> None:
+    """Recalculate every declared inference seed from the canonical seed ledger."""
+
+    try:
+        plan = load_seed_plan(repo_root / SEED_PLAN_PATH)
+        for budget in sorted(_CALIBRATION_BUDGETS):
+            for stage_id in (*_SEARCH_STAGES, "validation"):
+                role = "validation" if stage_id == "validation" else "development"
+                declared = _algorithmic_seeds(search_space, budget, stage_id)
+                expected = tuple(
+                    derive_plan_seed(
+                        plan,
+                        namespace=f"{budget}.{role}",
+                        stream="inference",
+                        coordinates={
+                            "phase": "calibration",
+                            "stage": stage_id,
+                            "replicate": replicate,
+                        },
+                    )
+                    for replicate in range(1, len(declared) + 1)
+                )
+                if declared != expected:
+                    raise CalibrationError(
+                        f"Calibration seeds for {budget}.{stage_id} differ from the "
+                        "canonical seed ledger derivation"
+                    )
+    except SeedPlanError as exc:
+        raise CalibrationError(f"Invalid benchmark seed contract: {exc}") from exc
 
 
 def _validated_parents(
@@ -1371,9 +1812,9 @@ def _validated_parents(
     parents: Sequence[CandidateConfiguration],
 ) -> tuple[CandidateConfiguration | None, ...]:
     stage_id = str(stage["id"])
-    if stage_id == "convergence":
+    if stage_id == "geometry":
         if parents:
-            raise CalibrationError("The convergence stage cannot receive parent configurations")
+            raise CalibrationError("The geometry stage cannot receive parent configurations")
         return (None,)
     if not parents:
         raise CalibrationError(f"Stage {stage_id!r} requires parent configurations")
@@ -1386,7 +1827,9 @@ def _validated_parents(
         raise CalibrationError(
             f"Stage {stage_id!r} accepts at most {maximum} parents; received {len(parents)}"
         )
-    expected_parent_stage = "convergence" if stage_id == "structure" else "structure"
+    expected_parent_stage = _PARENT_STAGES[stage_id]
+    if expected_parent_stage is None:
+        raise CalibrationError(f"Stage {stage_id!r} has no parent stage")
     identifiers = [parent.configuration_id for parent in parents]
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError(f"Stage {stage_id!r} received duplicate parents")
@@ -1409,11 +1852,13 @@ def _candidate(
     parent: CandidateConfiguration | None,
     variant_id: str,
     parameters: Mapping[str, Any],
-    reference: Mapping[str, Any],
+    base_configuration: Mapping[str, Any],
 ) -> CandidateConfiguration:
     owned_parameters = copy.deepcopy(dict(parameters))
     digest = _configuration_digest(owned_parameters)
-    simplicity = sum(owned_parameters.get(key) != value for key, value in reference.items())
+    simplicity = sum(
+        owned_parameters.get(key) != value for key, value in base_configuration.items()
+    )
     return CandidateConfiguration(
         configuration_id=configuration_id,
         configuration_sha256=digest,
@@ -1422,7 +1867,7 @@ def _candidate(
         parent_configuration_id=None if parent is None else parent.configuration_id,
         variant_id=variant_id,
         parameters=owned_parameters,
-        nonreference_parameter_changes=simplicity,
+        base_parameter_changes=simplicity,
     )
 
 
@@ -1441,14 +1886,17 @@ def _validate_stage_candidate_set(
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError(f"Stage {stage_id!r} received duplicate candidates")
 
+    inherited_variant = "base" if stage_id == "geometry" else "inherited"
+    include_inherited = bool(stage["include_inherited_configuration"])
     expected_variants = {str(item["id"]) for item in stage["candidates"]}
-    expected_variants.add("reference" if stage_id == "convergence" else "inherited")
+    if include_inherited:
+        expected_variants.add(inherited_variant)
     by_parent: dict[str | None, set[str]] = defaultdict(set)
     for candidate in candidates:
         by_parent[candidate.parent_configuration_id].add(candidate.variant_id)
-    if stage_id == "convergence" and set(by_parent) != {None}:
-        raise CalibrationError("Convergence candidates cannot have parent configurations")
-    if stage_id != "convergence" and None in by_parent:
+    if stage_id == "geometry" and set(by_parent) != {None}:
+        raise CalibrationError("Geometry candidates cannot have parent configurations")
+    if stage_id != "geometry" and None in by_parent:
         raise CalibrationError(f"Stage {stage_id!r} candidates must identify their parent")
     maximum_parents = int(stage["maximum_parent_configurations"])
     if len(by_parent) > maximum_parents:
@@ -1456,34 +1904,43 @@ def _validate_stage_candidate_set(
             f"Stage {stage_id!r} candidate set exceeds its {maximum_parents}-parent budget"
         )
     for variants in by_parent.values():
-        if variants != expected_variants:
+        has_inherited = inherited_variant in variants
+        if not variants <= expected_variants or has_inherited != include_inherited:
             raise CalibrationError(
-                f"Stage {stage_id!r} selection requires every predeclared variant; "
-                f"expected {sorted(expected_variants)}, found {sorted(variants)}"
+                f"Stage {stage_id!r} contains variants outside its constrained design: "
+                f"allowed {sorted(expected_variants)}, found {sorted(variants)}"
             )
 
 
 def _validate_candidate_integrity(
     candidates: Sequence[CandidateConfiguration],
-    reference: Mapping[str, Any],
+    base_configuration: Mapping[str, Any],
 ) -> None:
-    reference_keys = set(reference)
+    base_keys = set(base_configuration)
     for candidate in candidates:
         parameters = dict(candidate.parameters)
-        if set(parameters) != reference_keys:
+        if set(parameters) != base_keys:
             raise CalibrationError(
                 f"Candidate {candidate.configuration_id!r} does not contain the complete "
-                "reference parameter set"
+                "base parameter set"
             )
         expected_digest = _configuration_digest(parameters)
         if candidate.configuration_sha256 != expected_digest:
             raise CalibrationError(
                 f"Candidate {candidate.configuration_id!r} parameter digest is inconsistent"
             )
-        expected_simplicity = sum(parameters[key] != value for key, value in reference.items())
-        if candidate.nonreference_parameter_changes != expected_simplicity:
+        expected_simplicity = sum(
+            parameters[key] != value for key, value in base_configuration.items()
+        )
+        if candidate.base_parameter_changes != expected_simplicity:
             raise CalibrationError(
                 f"Candidate {candidate.configuration_id!r} simplicity is inconsistent"
+            )
+        if any(
+            parameters.get(key) != value for key, value in _FIXED_CALIBRATION_PARAMETERS.items()
+        ):
+            raise CalibrationError(
+                f"Candidate {candidate.configuration_id!r} violates fixed calibration parameters"
             )
 
 
@@ -1660,7 +2117,7 @@ def _rank_balanced_rows(
                 stability=fmean(dataset_stabilities),
                 median_wall_time_seconds=median(wall_times),
                 median_peak_memory_mb=median(peak_memories) if peak_memories else None,
-                simplicity=candidate.nonreference_parameter_changes,
+                simplicity=candidate.base_parameter_changes,
                 dataset_count=len(dataset_ids),
                 algorithm_seed_count=len(observed_seeds),
             )

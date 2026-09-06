@@ -1,14 +1,12 @@
-"""Idempotent materialization of adaptive SPATHI calibration stages."""
+"""Idempotent materialization of bounded, staged SPATHI calibration."""
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from ._materialization_io import publish_new_json_directory
 from .artifacts import sha256_file
 from .calibration import (
     build_andrea_requests,
@@ -34,13 +32,13 @@ from .config import (
     validate_calibration_contracts,
     validate_json,
 )
+from .safe_io import atomic_write_json, path_below_no_symlinks, write_idempotent_json
 
 
 def _repo_relative_path(repo_root: Path, path: Path, label: str) -> str:
-    try:
-        relative = path.resolve().relative_to(repo_root.resolve())
-    except ValueError as exc:
-        raise BenchmarkConfigError(f"{label} must be inside the benchmark repository") from exc
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
+    absolute = path_below_no_symlinks(path, root, label)
+    relative = absolute.relative_to(root)
     if relative == Path("."):
         raise BenchmarkConfigError(f"{label} cannot be the repository root")
     return relative.as_posix()
@@ -49,9 +47,7 @@ def _repo_relative_path(repo_root: Path, path: Path, label: str) -> str:
 def _valid_profile_destination(repo_root: Path, path: Path, profile_id: str) -> str:
     relative = _repo_relative_path(repo_root, path, "Calibration profile output")
     canonical = f"experiments/v1/profiles/{profile_id}.json"
-    if relative != canonical and not path.resolve().is_relative_to(
-        (repo_root.resolve() / "work").resolve()
-    ):
+    if relative != canonical and not Path(relative).is_relative_to("work"):
         raise BenchmarkConfigError(
             f"Calibration profile must be written to {canonical} or below work/"
         )
@@ -81,39 +77,6 @@ def _validate_bundle(output_dir: Path, payloads: dict[str, dict[str, Any]]) -> N
         _same_json(member, payload, f"calibration {filename}")
 
 
-def _publish_bundle(output_dir: Path, payloads: dict[str, dict[str, Any]]) -> None:
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}-", dir=output_dir.parent))
-    try:
-        for filename, payload in payloads.items():
-            (temporary / filename).write_text(
-                json.dumps(payload, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-        os.rename(temporary, output_dir)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-
-
-def _publish_profile(profile_output: Path, profile: dict[str, Any]) -> None:
-    profile_output.parent.mkdir(parents=True, exist_ok=True)
-    file_descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{profile_output.name}-", dir=profile_output.parent
-    )
-    os.close(file_descriptor)
-    temporary = Path(temporary_name)
-    try:
-        temporary.write_text(
-            json.dumps(profile, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.link(temporary, profile_output)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
-
-
 def materialize_calibration_stage(
     *,
     repo_root: Path,
@@ -125,7 +88,7 @@ def materialize_calibration_stage(
 ) -> tuple[Path, Path]:
     """Create or validate one deterministic calibration request bundle."""
 
-    root = repo_root.resolve()
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
     search = load_search_space(root)
     spathi_identity = locked_spathi_identity(root)
     parents, parent_ranking = load_parent_ranking(
@@ -149,7 +112,11 @@ def materialize_calibration_stage(
         )
         dataset_role = "development"
     image_tag = load_image_lock(root)["images"]["spathi"]["tag"]
-    tools, custom, metadata = build_andrea_requests(runs, docker_image=image_tag)
+    tools, custom, metadata = build_andrea_requests(
+        runs,
+        docker_image=image_tag,
+        calibration_budget=calibration_budget,
+    )
     bundle_path = _repo_relative_path(root, output_dir, "Calibration plan output")
     profile_id = stage_profile_id(stage_id, calibration_budget)
     _valid_profile_destination(root, profile_output, profile_id)
@@ -164,6 +131,7 @@ def materialize_calibration_stage(
         stage_id,
         calibration_budget,
         bundle_path=bundle_path,
+        search_space=search,
     )
     manifest = {
         "schema_version": "1.0",
@@ -202,10 +170,15 @@ def materialize_calibration_stage(
     published_profile = False
     try:
         if not bundle_exists:
-            _publish_bundle(output_dir, payloads)
+            publish_new_json_directory(output_dir, payloads)
             published_bundle = True
         if not profile_exists:
-            _publish_profile(profile_output, profile)
+            write_idempotent_json(
+                profile_output,
+                profile,
+                f"profile {profile_id}",
+                boundary=root,
+            )
             published_profile = True
     except Exception:
         if published_profile and profile_output.exists():
@@ -227,7 +200,19 @@ def rank_calibration_stage(
 ) -> Path:
     """Create or validate the deterministic ranking for one completed stage."""
 
-    root = repo_root.resolve()
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
+    manifest_path = path_below_no_symlinks(
+        manifest_path,
+        root,
+        "Calibration manifest",
+        require_file=True,
+    )
+    summary_path = path_below_no_symlinks(
+        summary_path,
+        root,
+        "Benchmark summary",
+        require_file=True,
+    )
     search = load_search_space(root)
     manifest = load_json_object(manifest_path, "calibration manifest")
     if (
@@ -249,13 +234,18 @@ def rank_calibration_stage(
     rows = summary.get("calibration_rows")
     if not isinstance(rows, list):
         raise BenchmarkConfigError("Benchmark summary contains no calibration_rows")
-    reconciled_rows = reconcile_summary_runs(manifest, rows)
+    reconciled_rows, calibration_panel = reconcile_summary_runs(
+        manifest,
+        rows,
+        summary.get("calibration_panel"),
+    )
     _repo_relative_path(root, output_path, "Calibration ranking output")
     payload = build_calibration_ranking(
         search,
         stage_id,
         candidates,
         reconciled_rows,
+        calibration_panel=calibration_panel,
         calibration_budget=calibration_budget,
         profile_id=str(manifest["profile_id"]),
         parent_ranking=manifest["parent_ranking"],
@@ -273,11 +263,12 @@ def rank_calibration_stage(
     if output_path.exists():
         _same_json(output_path, payload, "calibration ranking")
         return output_path
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(f".{output_path.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, output_path)
-    return output_path
+    return write_idempotent_json(
+        output_path,
+        payload,
+        "calibration ranking",
+        boundary=root,
+    )
 
 
 def freeze_calibration_selection(
@@ -288,7 +279,7 @@ def freeze_calibration_selection(
 ) -> Path:
     """Create or validate one frozen selection linked to validation evidence."""
 
-    root = repo_root.resolve()
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
     _repo_relative_path(root, output_path, "Frozen SPATHI selection output")
     ranking_relative = _repo_relative_path(root, ranking_path, "Validation ranking")
     ranking_digest = sha256_file(ranking_path)
@@ -311,8 +302,9 @@ def freeze_calibration_selection(
                 f"Refusing to replace an incompatible selected configuration: {output_path}"
             )
     payload = build_frozen_selected_config(root, ranking_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(f".{output_path.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, output_path)
-    return output_path
+    return atomic_write_json(
+        output_path,
+        payload,
+        "frozen SPATHI selection",
+        boundary=root,
+    )

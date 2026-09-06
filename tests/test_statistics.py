@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import pytest
 from spathi_bench.artifacts import sha256_file
 from spathi_bench.cli import main
 from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.seeds import load_seed_plan, validate_plan_seed_record
 from spathi_bench.state import load_state, write_state
 from spathi_bench.statistics import (
     _friedman_test,
@@ -42,7 +44,13 @@ FIELDS = (
     "n_candidate_genes",
     "n_candidate_sources",
     "n_candidate_targets",
+    "dataset_fingerprint_sha256",
+    "candidate_source_universe_sha256",
+    "candidate_target_universe_sha256",
+    "candidate_edge_universe_sha256",
+    "truth_edge_universe_sha256",
     *METRICS,
+    "invariant_edge_stability",
 )
 
 
@@ -52,15 +60,35 @@ def _comparison(
     control: str,
     levels: list[str] | None = None,
     metrics: list[str] | None = None,
-    min_blocks: int = 3,
+    expected_blocks: int = 3,
     dataset_role: str = "smoke",
     comparison_id: str = "primary",
     comparison_role: str = "confirmatory",
+    algorithm_seeds_by_configuration: dict[str, list[int | None]] | None = None,
+    inference_regulator_scope_by_configuration: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": comparison_id,
         "comparison_role": comparison_role,
-        "candidate_space": "tf_restricted" if comparison_role == "confirmatory" else "all_gene",
+        "analysis_kind": "network_accuracy",
+        "truth_scope": "group_specific",
+        "aggregation": {
+            "block_unit": "dataset_id",
+            "hierarchy": ["simulator_id", "condition_id", "dataset_id"],
+            "weighting": "equal_dataset",
+        },
+        "candidate_space": "tf_restricted",
+        "inference_regulator_scope_by_configuration": (
+            inference_regulator_scope_by_configuration
+            or {
+                configuration: (
+                    "tf_restricted"
+                    if comparison_role == "confirmatory" or configuration == control
+                    else "all_gene"
+                )
+                for configuration in configurations
+            }
+        ),
         "dataset_roles": [dataset_role],
         "regime": "group_only",
         "levels": levels or ["directed"],
@@ -68,6 +96,8 @@ def _comparison(
         "primary_level": "directed",
         "primary_metric": "aupr",
         "configuration_ids": configurations,
+        "algorithm_seeds_by_configuration": algorithm_seeds_by_configuration
+        or {configuration: [1] for configuration in configurations},
         "control_configuration_id": control,
         "stratify_by": [
             "dataset_role",
@@ -78,23 +108,47 @@ def _comparison(
             "regime",
             "level",
         ],
-        "min_blocks": min_blocks,
+        "expected_blocks": expected_blocks,
         "posthoc_scope": "control_vs_rest",
         "correction": "holm",
     }
 
 
-def _profile(comparison: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "id": "smoke",
-        "statistics": {
-            "status": "enabled",
+def _profile(
+    comparison: dict[str, Any] | list[dict[str, Any]],
+    *,
+    mode: str = "inferential",
+) -> dict[str, Any]:
+    comparisons = comparison if isinstance(comparison, list) else [comparison]
+    if mode == "descriptive":
+        comparisons = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"posthoc_scope", "correction"}
+            }
+            for item in comparisons
+        ]
+        for item in comparisons:
+            item["comparison_role"] = "exploratory"
+        statistics = {"status": "descriptive", "comparisons": comparisons}
+    else:
+        statistics = {
+            "status": "inferential",
             "alpha": 0.05,
-            "random_seed": 1729,
+            "random_seed": 1698096914,
+            "seed_derivation": {
+                "namespace": "full.test",
+                "stream": "statistical",
+                "coordinates": {"purpose": "phase_root"},
+            },
             "permutations": 9999,
             "bootstrap_resamples": 1000,
-            "comparisons": comparison if isinstance(comparison, list) else [comparison],
-        },
+            "comparisons": comparisons,
+        }
+    return {
+        "id": "smoke",
+        "statistics": statistics,
     }
 
 
@@ -126,6 +180,7 @@ def _metric_row(
     n_candidate_genes: int = 10,
     n_candidate_sources: int = 4,
     n_candidate_targets: int = 10,
+    candidate_edge_universe_sha256: str | None = None,
 ) -> dict[str, Any]:
     tool_id = "custom_spathi" if configuration_id.startswith("spathi") else configuration_id
     family = "spathi" if configuration_id.startswith("spathi") else "catalog_baseline"
@@ -152,7 +207,16 @@ def _metric_row(
         "n_candidate_genes": n_candidate_genes,
         "n_candidate_sources": n_candidate_sources,
         "n_candidate_targets": n_candidate_targets,
+        "dataset_fingerprint_sha256": hashlib.sha256(dataset_id.encode("utf-8")).hexdigest(),
+        "candidate_source_universe_sha256": hashlib.sha256(b"candidate-sources").hexdigest(),
+        "candidate_target_universe_sha256": hashlib.sha256(b"candidate-targets").hexdigest(),
+        "candidate_edge_universe_sha256": candidate_edge_universe_sha256
+        or hashlib.sha256(f"candidate-edges:{level}".encode()).hexdigest(),
+        "truth_edge_universe_sha256": hashlib.sha256(
+            f"truth:{dataset_id}:{context}:{level}".encode()
+        ).hexdigest(),
         **{metric: score for metric in METRICS},
+        "invariant_edge_stability": score,
     }
 
 
@@ -177,6 +241,12 @@ def _run(
     )
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    seed_plan_path = repo_root / "experiments/v1/seeds/seed-plan.json"
+    seed_plan_path.parent.mkdir(parents=True)
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "experiments/v1/seeds/seed-plan.json",
+        seed_plan_path,
+    )
     run_root = tmp_path / "run"
     reports = run_root / "reports"
     reports.mkdir(parents=True)
@@ -186,11 +256,11 @@ def _run(
         writer.writeheader()
         writer.writerows(rows)
     summary_path = reports / "summary.json"
-    summary_path.write_text('{"schema_version":"3.0"}\n', encoding="utf-8")
+    summary_path.write_text('{"schema_version":"1.0"}\n', encoding="utf-8")
     write_state(
         run_root,
         {
-            "schema_version": "3.0",
+            "schema_version": "1.0",
             "profile_id": "smoke",
             "purpose": purpose,
             "status": "completed",
@@ -198,7 +268,9 @@ def _run(
             "datasets": datasets,
             "reports": {
                 "metrics_csv": str(metrics_path.resolve()),
+                "metrics_csv_sha256": sha256_file(metrics_path),
                 "summary_json": str(summary_path.resolve()),
+                "summary_json_sha256": sha256_file(summary_path),
             },
         },
     )
@@ -208,6 +280,10 @@ def _run(
             "status": "complete",
             "benchmark_repository": {"commit": "1" * 40},
         },
+    )
+    monkeypatch.setattr(
+        "spathi_bench.statistics.validate_inference_attribution_contract",
+        lambda **_kwargs: None,
     )
     monkeypatch.setattr(
         "spathi_bench.statistics.frozen_profile",
@@ -255,7 +331,7 @@ def test_statistics_rejects_a_changed_benchmark_python_environment(
     ]
     repo_root, run_root = _run(
         tmp_path,
-        profile=_profile(comparison),
+        profile=_profile(comparison, mode="descriptive"),
         datasets=[_dataset(1)],
         rows=rows,
         monkeypatch=monkeypatch,
@@ -308,7 +384,7 @@ def test_holm_is_step_down_monotone_and_counts_missing_contrasts() -> None:
     assert records[3]["p_holm"] is None
 
 
-def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
+def test_smoke_writes_contract_only_reports_without_treating_groups_as_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -317,7 +393,7 @@ def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
         control="spathi",
         levels=["directed", "topology"],
         metrics=list(METRICS),
-        min_blocks=8,
+        expected_blocks=1,
     )
     rows = [
         _metric_row(
@@ -334,7 +410,7 @@ def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
     ]
     repo_root, run_root = _run(
         tmp_path,
-        profile=_profile(comparison),
+        profile=_profile(comparison, mode="descriptive"),
         datasets=[_dataset(1)],
         rows=rows,
         monkeypatch=monkeypatch,
@@ -342,13 +418,17 @@ def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
 
     paths = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     report = json.loads(paths[0].read_text(encoding="utf-8"))
-    assert report["status"] == "not_testable"
+    assert report["status"] == "contract_only"
+    assert "seed_contract" not in report
     assert report["summary"] == {
         "n_analyses": 8,
+        "n_confirmatory": 0,
+        "n_confirmatory_inferential": 0,
+        "n_contract_only": 8,
         "n_control_wins": 0,
+        "n_descriptive": 0,
         "n_incomplete": 0,
-        "n_not_testable": 8,
-        "n_tested": 0,
+        "n_inferential": 0,
     }
     assert {analysis["n_complete_blocks"] for analysis in report["analyses"]} == {1}
     assert {analysis["blocks"][0]["n_contexts"] for analysis in report["analyses"]} == {7}
@@ -359,11 +439,72 @@ def test_smoke_writes_not_testable_reports_without_treating_groups_as_blocks(
     assert analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root) == paths
 
 
+def test_reduced_regression_report_is_strictly_descriptive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configurations = ["weak", "middle", "spathi"]
+    comparison = _comparison(configurations, control="spathi", expected_blocks=3)
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=configuration,
+            context="group:a",
+            score={"weak": 0.2, "middle": 0.5, "spathi": 0.8}[configuration],
+        )
+        for dataset_index in range(1, 4)
+        for configuration in configurations
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison, mode="descriptive"),
+        datasets=[_dataset(index) for index in range(1, 4)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+        purpose="regression",
+    )
+
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("Reduced statistics must not invoke inferential procedures or seeds")
+
+    monkeypatch.setattr("spathi_bench.statistics._friedman_test", forbidden)
+    monkeypatch.setattr("spathi_bench.statistics._wilcoxon_test", forbidden)
+    monkeypatch.setattr("spathi_bench.statistics._bootstrap_median_interval", forbidden)
+    monkeypatch.setattr("spathi_bench.statistics._analysis_seed_record", forbidden)
+
+    statistics, *_ = analyze_statistics(
+        repo_root=repo_root,
+        profile_id="smoke",
+        run_root=run_root,
+    )
+    report = json.loads(statistics.read_text(encoding="utf-8"))
+    assert report["status"] == "descriptive_only"
+    assert "seed_contract" not in report
+    analysis = report["analyses"][0]
+    assert analysis["analysis_role"] == "descriptive"
+    assert analysis["status"] == "descriptive_only"
+    assert analysis["conclusion"] == "descriptive_only"
+    assert analysis["omnibus"]["p_raw"] is None
+    assert analysis["omnibus"]["p_holm"] is None
+    assert analysis["omnibus"]["reject"] is False
+    assert analysis["omnibus"]["seed_record"] is None
+    for contrast in analysis["pairwise"]:
+        assert contrast["p_raw"] is None
+        assert contrast["p_holm"] is None
+        assert contrast["reject"] is False
+        assert contrast["bootstrap_ci_low"] is None
+        assert contrast["bootstrap_ci_high"] is None
+        assert contrast["bootstrap_resamples"] == 0
+        assert contrast["permutation_seed_record"] is None
+        assert contrast["bootstrap_seed_record"] is None
+
+
 def test_comparison_generation_jobs_exclude_other_jobs_from_strata_and_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=1)
     comparison["generation_jobs"] = ["selected_job"]
     comparison["stratify_by"] = ["dataset_role", "regime", "level"]
     datasets = [_dataset(1), _dataset(2)]
@@ -410,8 +551,11 @@ def test_complete_panel_averages_contexts_then_seeds_and_runs_friedman(
     comparison = _comparison(
         configurations,
         control="spathi",
-        min_blocks=3,
+        expected_blocks=3,
         dataset_role="test",
+        algorithm_seeds_by_configuration={
+            configuration: [1, 2] for configuration in configurations
+        },
     )
     # A numeric zero is a valid evaluated empty-network score, not missing data.
     base_scores = {"weak": 0.05, "middle": 0.5, "spathi": 0.8}
@@ -464,8 +608,172 @@ def test_complete_panel_averages_contexts_then_seeds_and_runs_friedman(
     }
     assert analysis["rankings"][0]["configuration_id"] == "spathi"
     assert analysis["conclusion"] == "control_top_ranked_not_distinguishable"
+    seed_plan = load_seed_plan(repo_root / "experiments/v1/seeds/seed-plan.json")
+    assert (
+        validate_plan_seed_record(
+            seed_plan,
+            seed=report["seed_contract"]["root"]["seed"],
+            seed_derivation=report["seed_contract"]["root"]["seed_derivation"],
+        )
+        == report["seed_contract"]["root"]
+    )
+    assert (
+        validate_plan_seed_record(
+            seed_plan,
+            seed=analysis["omnibus"]["seed_record"]["seed"],
+            seed_derivation=analysis["omnibus"]["seed_record"]["seed_derivation"],
+        )
+        == analysis["omnibus"]["seed_record"]
+    )
+    for contrast in analysis["pairwise"]:
+        for key in ("permutation_seed_record", "bootstrap_seed_record"):
+            record = contrast[key]
+            assert (
+                validate_plan_seed_record(
+                    seed_plan,
+                    seed=record["seed"],
+                    seed_derivation=record["seed_derivation"],
+                )
+                == record
+            )
     assert rankings.read_text(encoding="utf-8").count("\n") == 4
     assert pairwise.read_text(encoding="utf-8").count("\n") == 3
+
+
+def test_complete_panel_combines_one_deterministic_run_with_seeded_replicates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configurations = ["deterministic", "stochastic", "spathi"]
+    comparison = _comparison(
+        configurations,
+        control="spathi",
+        expected_blocks=3,
+        dataset_role="test",
+        algorithm_seeds_by_configuration={
+            "deterministic": [None],
+            "stochastic": [1, 2],
+            "spathi": [1, 2],
+        },
+    )
+    scores = {"deterministic": 0.4, "stochastic": 0.6, "spathi": 0.8}
+    rows = []
+    for dataset_index in range(1, 4):
+        for configuration in configurations:
+            seeds = (None,) if configuration == "deterministic" else (1, 2)
+            for algorithm_seed in seeds:
+                rows.append(
+                    _metric_row(
+                        configuration_id=configuration,
+                        dataset_id=f"dataset_{dataset_index}",
+                        run_id=(
+                            configuration
+                            if algorithm_seed is None
+                            else f"{configuration}_seed_{algorithm_seed}"
+                        ),
+                        context="group:a",
+                        score=scores[configuration],
+                        dataset_role="test",
+                        algorithm_seed=algorithm_seed,
+                    )
+                )
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=[_dataset(index, dataset_role="test") for index in range(1, 4)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+        purpose="benchmark",
+    )
+
+    statistics, *_ = analyze_statistics(
+        repo_root=repo_root,
+        profile_id="smoke",
+        run_root=run_root,
+    )
+    analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
+    assert analysis["status"] == "tested"
+    block = analysis["blocks"][0]
+    assert block["executions_per_configuration"] == {
+        "deterministic": 1,
+        "spathi": 2,
+        "stochastic": 2,
+    }
+    assert block["algorithm_seeds"] == {
+        "deterministic": [None],
+        "spathi": [1, 2],
+        "stochastic": [1, 2],
+    }
+    assert block["expected_algorithm_seeds"] == {
+        "deterministic": [None],
+        "stochastic": [1, 2],
+        "spathi": [1, 2],
+    }
+
+
+def test_complete_declared_panel_with_unequal_design_strata_is_tested(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configurations = ["weak", "middle", "spathi"]
+    comparison = _comparison(
+        configurations,
+        control="spathi",
+        expected_blocks=5,
+        dataset_role="test",
+    )
+    comparison["stratify_by"] = ["dataset_role", "regime", "level"]
+    datasets = [_dataset(index, dataset_role="test") for index in range(1, 6)]
+    design = [
+        ("dyngen", "linear", "dyngen_linear"),
+        ("dyngen", "linear", "dyngen_linear"),
+        ("dyngen", "branching", "dyngen_branching"),
+        ("scmultisim", "rewiring", "scmultisim_rewiring"),
+        ("scmultisim", "rewiring", "scmultisim_rewiring"),
+    ]
+    for dataset, (simulator_id, condition_id, generation_job) in zip(datasets, design, strict=True):
+        dataset.update(
+            simulator_id=simulator_id,
+            condition_id=condition_id,
+            generation_job=generation_job,
+        )
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=dataset["dataset_id"],
+            run_id=configuration,
+            context="group:a",
+            score={"weak": 0.2, "middle": 0.5, "spathi": 0.8}[configuration],
+            dataset_role="test",
+        )
+        for dataset in datasets
+        for configuration in configurations
+    ]
+    by_dataset = {dataset["dataset_id"]: dataset for dataset in datasets}
+    for row in rows:
+        dataset = by_dataset[row["dataset_id"]]
+        for field in ("simulator_id", "condition_id", "generation_job"):
+            row[field] = dataset[field]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=datasets,
+        rows=rows,
+        monkeypatch=monkeypatch,
+        purpose="benchmark",
+    )
+
+    statistics, *_ = analyze_statistics(
+        repo_root=repo_root,
+        profile_id="smoke",
+        run_root=run_root,
+    )
+    analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
+    assert analysis["status"] == "tested"
+    assert analysis["n_complete_blocks"] == 5
+    assert {pair["bootstrap_method"] for pair in analysis["pairwise"]} == {
+        "paired_percentile_bootstrap_fixed_simulator_condition_strata"
+    }
 
 
 def test_incomplete_context_panel_is_reported_and_never_pairwise_deleted(
@@ -473,7 +781,7 @@ def test_incomplete_context_panel_is_reported_and_never_pairwise_deleted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configurations = ["weak", "middle", "spathi"]
-    comparison = _comparison(configurations, control="spathi", min_blocks=2)
+    comparison = _comparison(configurations, control="spathi", expected_blocks=2)
     rows = [
         _metric_row(
             configuration_id=configuration,
@@ -513,7 +821,7 @@ def test_configuration_hashes_cannot_change_under_one_configuration_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
     rows = [
         _metric_row(
             configuration_id=configuration,
@@ -544,14 +852,14 @@ def test_configuration_hashes_cannot_change_under_one_configuration_id(
         analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
 
 
-def test_different_algorithm_seed_panels_are_aggregated_without_adding_blocks(
+def test_different_algorithm_seed_panels_invalidate_the_predeclared_panel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     comparison = _comparison(
         ["deterministic", "spathi"],
         control="spathi",
-        min_blocks=2,
+        expected_blocks=2,
         dataset_role="test",
     )
     rows = [
@@ -585,29 +893,67 @@ def test_different_algorithm_seed_panels_are_aggregated_without_adding_blocks(
 
     statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
-    assert analysis["status"] == "tested"
-    assert analysis["n_complete_blocks"] == 2
-    assert {block["n_contexts"] for block in analysis["blocks"]} == {1}
+    assert analysis["status"] == "incomplete_panel"
+    assert analysis["n_complete_blocks"] == 0
     assert all(
-        block["executions_per_configuration"] == {"deterministic": 1, "spathi": 2}
-        for block in analysis["blocks"]
+        any("algorithm_seed_contract" in reason for reason in block["reasons"])
+        for block in analysis["excluded_blocks"]
     )
-    assert all(
-        block["algorithm_seeds"] == {"deterministic": [None], "spathi": [1, 2]}
-        for block in analysis["blocks"]
+
+
+def test_declared_cardinality_mismatch_is_rejected_before_any_winner_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    confirmatory = _comparison(
+        ["weak", "middle", "spathi"],
+        control="spathi",
+        expected_blocks=4,
+        dataset_role="test",
+        comparison_id="confirmatory",
     )
-    assert all(
-        block["scores"] == pytest.approx({"deterministic": 0.5, "spathi": 0.8})
-        for block in analysis["blocks"]
+    exploratory = _comparison(
+        ["weak", "middle", "spathi"],
+        control="spathi",
+        expected_blocks=3,
+        dataset_role="test",
+        comparison_id="exploratory",
+        comparison_role="exploratory",
     )
-    assert analysis["pairwise"][0]["n_blocks"] == 2
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=configuration,
+            context="group:a",
+            score={"weak": 0.2, "middle": 0.5, "spathi": 0.8}[configuration],
+            dataset_role="test",
+        )
+        for dataset_index in range(1, 4)
+        for configuration in ("weak", "middle", "spathi")
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile([confirmatory, exploratory]),
+        datasets=[_dataset(index, dataset_role="test") for index in range(1, 4)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+        purpose="benchmark",
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="declares 4 expected blocks"):
+        analyze_statistics(
+            repo_root=repo_root,
+            profile_id="smoke",
+            run_root=run_root,
+        )
 
 
 def test_one_algorithm_seed_cannot_be_counted_twice_under_distinct_run_ids(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
     rows = [
         _metric_row(
             configuration_id=configuration,
@@ -646,7 +992,7 @@ def test_candidate_universes_must_match_within_each_paired_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
     rows = [
         _metric_row(
             configuration_id=configuration,
@@ -678,6 +1024,129 @@ def test_candidate_universes_must_match_within_each_paired_context(
     )
 
 
+def test_candidate_universe_identities_must_match_when_counts_are_equal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=configuration,
+            context="group:a",
+            score=0.8 if configuration == "spathi" else 0.5,
+            candidate_edge_universe_sha256=(
+                hashlib.sha256(b"different-candidate-edges").hexdigest()
+                if configuration == "spathi"
+                else None
+            ),
+        )
+        for dataset_index in (1, 2)
+        for configuration in ("genie3", "spathi")
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=[_dataset(1), _dataset(2)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+    )
+
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
+    assert analysis["status"] == "incomplete_panel"
+    assert analysis["n_complete_blocks"] == 0
+    assert all(
+        any("semantic_universe" in reason for reason in block["reasons"])
+        for block in analysis["excluded_blocks"]
+    )
+
+
+def test_every_configuration_must_include_the_predeclared_algorithm_seeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comparison = _comparison(
+        ["genie3", "spathi"],
+        control="spathi",
+        expected_blocks=2,
+        algorithm_seeds_by_configuration={"genie3": [1, 2], "spathi": [1, 2]},
+    )
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=f"{configuration}_seed_1",
+            context="group:a",
+            score=0.8 if configuration == "spathi" else 0.5,
+            algorithm_seed=1,
+        )
+        for dataset_index in (1, 2)
+        for configuration in ("genie3", "spathi")
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=[_dataset(1), _dataset(2)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+    )
+
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
+    assert analysis["status"] == "incomplete_panel"
+    assert analysis["n_complete_blocks"] == 0
+    assert all(
+        any("algorithm_seed_contract" in reason for reason in block["reasons"])
+        for block in analysis["excluded_blocks"]
+    )
+
+
+def test_mixed_missing_and_numeric_algorithm_seeds_have_a_stable_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    comparison = _comparison(
+        ["genie3", "spathi"],
+        control="spathi",
+        expected_blocks=2,
+        algorithm_seeds_by_configuration={"genie3": [1, 2], "spathi": [1, 2]},
+    )
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=(
+                f"{configuration}_without_seed"
+                if algorithm_seed is None
+                else f"{configuration}_seed_{algorithm_seed}"
+            ),
+            context="group:a",
+            score=0.8 if configuration == "spathi" else 0.5,
+            algorithm_seed=algorithm_seed,
+        )
+        for dataset_index in (1, 2)
+        for configuration, seeds in (("genie3", (None, 1)), ("spathi", (1, 2)))
+        for algorithm_seed in seeds
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=[_dataset(1), _dataset(2)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+    )
+
+    statistics, *_ = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    analysis = json.loads(statistics.read_text(encoding="utf-8"))["analyses"][0]
+    assert analysis["status"] == "incomplete_panel"
+    assert all(
+        any("observed=[None, 1]" in reason for reason in block["reasons"])
+        for block in analysis["excluded_blocks"]
+    )
+
+
 @pytest.mark.parametrize(
     ("metric", "invalid_value"),
     [
@@ -696,7 +1165,7 @@ def test_metrics_outside_their_mathematical_domain_are_rejected(
     comparison = _comparison(
         ["genie3", "spathi"],
         control="spathi",
-        min_blocks=2,
+        expected_blocks=2,
         metrics=[metric],
         comparison_role="exploratory",
     )
@@ -732,7 +1201,7 @@ def test_distinct_dataset_ids_cannot_duplicate_one_independent_simulation_unit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
     datasets = [_dataset(1), _dataset(2)]
     datasets[1]["seed"] = datasets[0]["seed"]
     rows = [
@@ -769,7 +1238,7 @@ def test_significant_adverse_result_is_reported_explicitly_for_the_control(
     comparison = _comparison(
         configurations,
         control="spathi",
-        min_blocks=8,
+        expected_blocks=8,
         dataset_role="test",
     )
     scores = {"winner": 0.9, "runner": 0.6, "spathi": 0.1}
@@ -813,7 +1282,7 @@ def test_markdown_report_contains_omnibus_posthoc_effect_and_interval_evidence(
     comparison = _comparison(
         configurations,
         control="spathi",
-        min_blocks=8,
+        expected_blocks=8,
         dataset_role="test",
     )
     scores = {"weak": 0.1, "middle": 0.5, "spathi": 0.9}
@@ -856,13 +1325,13 @@ def test_exploratory_comparison_cannot_be_promoted_by_primary_metric_names(
     confirmatory = _comparison(
         configurations,
         control="spathi",
-        min_blocks=2,
+        expected_blocks=2,
         dataset_role="test",
     )
     exploratory = _comparison(
         configurations,
         control="spathi",
-        min_blocks=2,
+        expected_blocks=2,
         dataset_role="test",
         comparison_id="all_gene",
         comparison_role="exploratory",
@@ -895,8 +1364,18 @@ def test_exploratory_comparison_cannot_be_promoted_by_primary_metric_names(
     }
     assert analyses["primary"]["analysis_role"] == "confirmatory"
     assert analyses["primary"]["candidate_space"] == "tf_restricted"
+    assert analyses["primary"]["inference_regulator_scope_by_configuration"] == {
+        "weak": "tf_restricted",
+        "middle": "tf_restricted",
+        "spathi": "tf_restricted",
+    }
     assert analyses["all_gene"]["analysis_role"] == "exploratory"
-    assert analyses["all_gene"]["candidate_space"] == "all_gene"
+    assert analyses["all_gene"]["candidate_space"] == "tf_restricted"
+    assert analyses["all_gene"]["inference_regulator_scope_by_configuration"] == {
+        "weak": "all_gene",
+        "middle": "all_gene",
+        "spathi": "tf_restricted",
+    }
     assert analyses["all_gene"]["omnibus"]["p_holm"] is None
 
 
@@ -904,7 +1383,7 @@ def test_existing_statistics_detect_tampering_and_recovers_after_state_gap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    comparison = _comparison(["genie3", "spathi"], control="spathi", min_blocks=2)
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
     rows = [
         _metric_row(
             configuration_id=configuration,
@@ -933,10 +1412,108 @@ def test_existing_statistics_detect_tampering_and_recovers_after_state_gap(
     with pytest.raises(BenchmarkConfigError, match="Incomplete or stale"):
         analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
     paths[1].write_bytes(rankings)
+    statistics_document = paths[0].read_text(encoding="utf-8")
+    tampered_document = json.loads(statistics_document)
+    tampered_document["status"] = "not_testable"
+    paths[0].write_text(json.dumps(tampered_document), encoding="utf-8")
+    with pytest.raises(BenchmarkConfigError, match="Incomplete or stale"):
+        analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    paths[0].write_text(statistics_document, encoding="utf-8")
     assert analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root) == paths
 
     paths[1].write_text("tampered\n", encoding="utf-8")
     with pytest.raises(BenchmarkConfigError, match="missing or changed"):
+        analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+
+def _completed_statistics_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, tuple[Path, Path, Path, Path]]:
+    comparison = _comparison(["genie3", "spathi"], control="spathi", expected_blocks=2)
+    rows = [
+        _metric_row(
+            configuration_id=configuration,
+            dataset_id=f"dataset_{dataset_index}",
+            run_id=configuration,
+            context="group:a",
+            score=0.8 if configuration == "spathi" else 0.5,
+        )
+        for dataset_index in (1, 2)
+        for configuration in ("genie3", "spathi")
+    ]
+    repo_root, run_root = _run(
+        tmp_path,
+        profile=_profile(comparison),
+        datasets=[_dataset(1), _dataset(2)],
+        rows=rows,
+        monkeypatch=monkeypatch,
+    )
+    paths = analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    return repo_root, run_root, paths
+
+
+def test_completed_statistics_state_requires_canonical_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, run_root, paths = _completed_statistics_run(tmp_path, monkeypatch)
+    state = load_state(run_root, "smoke")
+    state["statistics"]["directory"] = str(run_root / "reports" / "alias" / ".." / "statistics")
+    write_state(run_root, state)
+
+    with pytest.raises(BenchmarkConfigError, match="not canonical"):
+        analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+    state["statistics"]["directory"] = str(run_root / "reports" / "statistics")
+    state["statistics"]["files"]["rankings.csv"]["path"] = str(
+        paths[1].parent / "alias" / ".." / "rankings.csv"
+    )
+    write_state(run_root, state)
+    with pytest.raises(BenchmarkConfigError, match="missing or changed"):
+        analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+
+@pytest.mark.parametrize("symlink_kind", ["file", "ancestor"])
+def test_completed_statistics_resume_rejects_symlinks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    symlink_kind: str,
+) -> None:
+    repo_root, run_root, paths = _completed_statistics_run(tmp_path, monkeypatch)
+    if symlink_kind == "file":
+        external = tmp_path / "external-rankings.csv"
+        external.write_bytes(paths[1].read_bytes())
+        paths[1].unlink()
+        paths[1].symlink_to(external)
+    else:
+        statistics_dir = run_root / "reports" / "statistics"
+        relocated = run_root / "reports" / "relocated-statistics"
+        statistics_dir.rename(relocated)
+        statistics_dir.symlink_to(relocated, target_is_directory=True)
+
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+
+@pytest.mark.parametrize("state_gap", [False, True], ids=("completed", "recovery"))
+def test_statistics_requires_exact_directory_members(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state_gap: bool,
+) -> None:
+    repo_root, run_root, _paths = _completed_statistics_run(tmp_path, monkeypatch)
+    if state_gap:
+        state = load_state(run_root, "smoke")
+        del state["statistics"]
+        write_state(run_root, state)
+    (run_root / "reports" / "statistics" / "unexpected.txt").write_text(
+        "unexpected\n",
+        encoding="utf-8",
+    )
+
+    message = "Incomplete or stale" if state_gap else "non-canonical members"
+    with pytest.raises(BenchmarkConfigError, match=message):
         analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
 
 

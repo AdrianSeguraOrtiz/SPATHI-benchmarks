@@ -14,10 +14,11 @@ from ..state import STATE_SCHEMA_VERSION
 from .common import (
     central_report_path,
     path_below,
+    reconcile_report_bundle,
     repo_file,
     require_array,
-    require_completed_workflow,
     require_mapping,
+    require_reportable_workflow,
     safe_relative_link,
     validated_export_link,
     verify_sha256,
@@ -279,7 +280,7 @@ def render_comparison_report(
     workflow_root: Path,
     run_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Render a completed comparison using only frozen published statistics."""
+    """Render a publishable comparison using only frozen published statistics."""
 
     root = repo_root.resolve()
     version = path_below(
@@ -295,15 +296,26 @@ def render_comparison_report(
         file=False,
     )
     workflow_path = comparison_root / "workflow.json"
-    workflow = require_completed_workflow(workflow_path, "comparison")
+    workflow = require_reportable_workflow(workflow_path, "comparison")
     profile = workflow.get("profile")
     if profile not in {"reduced", "full"} or comparison_root.parent.name != profile:
         raise BenchmarkConfigError("Comparison workflow path disagrees with its profile")
     if comparison_root.name != workflow["flow_id"]:
         raise BenchmarkConfigError("Comparison workflow path disagrees with its flow ID")
-    calibration_flow_id = workflow.get("calibration_flow_id")
-    if not isinstance(calibration_flow_id, str) or not calibration_flow_id:
-        raise BenchmarkConfigError("Comparison workflow has no calibration flow ID")
+    efficiency_flow_id = workflow.get("efficiency_flow_id")
+    if not isinstance(efficiency_flow_id, str) or not efficiency_flow_id:
+        raise BenchmarkConfigError("Comparison workflow has no efficiency flow ID")
+    production_path = repo_file(
+        root,
+        workflow.get("production_config"),
+        "SPATHI production configuration",
+        below=version,
+    )
+    verify_sha256(
+        production_path,
+        workflow.get("production_config_sha256"),
+        "SPATHI production configuration",
+    )
     stage = require_mapping(
         require_mapping(workflow.get("stages"), "comparison workflow stages").get("comparison"),
         "comparison workflow stage",
@@ -346,7 +358,7 @@ def render_comparison_report(
     )
     summary = load_json_object(summary_path, "comparison summary")
     if (
-        summary.get("schema_version") != "3.0"
+        summary.get("schema_version") != "1.0"
         or summary.get("profile_id") != state.get("profile_id")
         or summary.get("purpose") != state.get("purpose")
     ):
@@ -379,8 +391,10 @@ def render_comparison_report(
         version_root=version,
         report_type="comparison",
         scope=profile,
-        flow_id=calibration_flow_id,
+        flow_id=workflow["flow_id"],
     )
+    if workflow.get("interactive_report") != report_path.relative_to(root).as_posix():
+        raise BenchmarkConfigError("Comparison workflow records a non-canonical report path")
     exported_datasets = _export_datasets(
         exports=exports,
         exports_root=benchmark_run / "exports",
@@ -395,6 +409,10 @@ def render_comparison_report(
         {
             "label": "Run state",
             "href": safe_relative_link(report_path, state_path, benchmark_run),
+        },
+        {
+            "label": "Production configuration",
+            "href": safe_relative_link(report_path, production_path, version),
         },
         {
             "label": "Summary JSON",
@@ -451,11 +469,11 @@ def render_comparison_report(
         "report_type": "comparison",
         "workflow": {
             "flow_id": workflow["flow_id"],
-            "status": workflow["status"],
+            "status": "complete",
             "profile": profile,
             "profile_id": state["profile_id"],
             "purpose": state.get("purpose"),
-            "calibration_flow_id": calibration_flow_id,
+            "efficiency_flow_id": efficiency_flow_id,
             "analysis_roles": analysis_roles,
             "comparison_roles": comparison_roles,
             "identity": workflow["identity"],
@@ -471,19 +489,24 @@ def render_comparison_report(
         "runtimes": runtimes,
         "links": links,
     }
-    return write_report_bundle(
-        repo_root=root,
-        kind="comparison",
-        output_path=report_path,
-        payload=payload,
-        input_paths=[
-            profile_path,
-            state_path,
-            metrics_path,
-            summary_path,
-            *statistics_paths,
-            exports_path,
-            *dataset_inputs,
-        ],
-        manifest_name="comparison-report.manifest.json",
+    return reconcile_report_bundle(
+        workflow,
+        write_report_bundle(
+            repo_root=root,
+            kind="comparison",
+            output_path=report_path,
+            payload=payload,
+            input_paths=[
+                profile_path,
+                state_path,
+                metrics_path,
+                summary_path,
+                *statistics_paths,
+                exports_path,
+                *dataset_inputs,
+            ],
+            manifest_name="comparison-report.manifest.json",
+            immutable=True,
+        ),
+        "comparison",
     )

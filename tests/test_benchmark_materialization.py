@@ -9,15 +9,15 @@ from typing import Any
 import pytest
 
 import spathi_bench.benchmark_materialization as materialization
-import spathi_bench.config as config_module
-from spathi_bench.artifacts import canonical_json_sha256
+from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.benchmark_materialization import (
     SELECTED_PLACEHOLDER,
     build_runnable_benchmark_profile,
     build_selected_spathi_requests,
-    load_frozen_selected_candidate,
+    load_frozen_production_policy,
     materialize_benchmark_plan,
 )
+from spathi_bench.calibration import materialize_group_policy
 from spathi_bench.config import (
     BenchmarkConfigError,
     load_json_object,
@@ -30,15 +30,58 @@ from spathi_bench.config import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _selected_candidate(repo: Path, *, candidate_id: str = "selected_winner") -> dict[str, Any]:
+@pytest.fixture(autouse=True)
+def _stub_immutable_efficiency_verification(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep materialization tests focused on links checked after evidence rebuilding."""
+
+    validate_json_original = materialization.validate_json
+
+    def validate_fixture(payload: Any, schema_path: Path, label: str) -> None:
+        if schema_path.name == "noninferiority-results.schema.json":
+            return
+        validate_json_original(payload, schema_path, label)
+
+    def verified_output(
+        *, repo_root: Path, plan_path: Path, evidence_path: Path, output_dir: Path
+    ) -> tuple[Path, Path, Path]:
+        assert plan_path.is_relative_to(repo_root)
+        assert evidence_path.is_relative_to(repo_root)
+        return tuple(
+            (output_dir / filename).resolve()
+            for filename in ("results.json", "comparisons.csv", "manifest.json")
+        )
+
+    monkeypatch.setattr(materialization, "validate_json", validate_fixture)
+    monkeypatch.setattr(materialization, "analyze_noninferiority", verified_output)
+    monkeypatch.setattr(
+        materialization,
+        "validate_calibration_contracts",
+        lambda _root, selected_path: ({}, json.loads(selected_path.read_text(encoding="utf-8"))),
+    )
+    monkeypatch.setattr(
+        materialization,
+        "observe_benchmark_repository",
+        lambda root, **_kwargs: {
+            "path": str(root),
+            "commit": "1" * 40,
+            "origin": "https://example.test/spathi-benchmarks.git",
+            "clean": True,
+        },
+    )
+
+
+def _selected_policy(repo: Path, *, candidate_id: str = "selected_winner") -> dict[str, Any]:
     search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
-    parameters = copy.deepcopy(search["reference_configuration"])
+    parameters = copy.deepcopy(search["base_configuration"])
+    group_policy = materialize_group_policy(search, parameters)
     commit = load_json_object(repo / "repos.lock.json")["repositories"]["spathi"]["commit"]
     return {
-        "candidate_id": candidate_id,
+        "policy_id": "spathi_conditional_v1",
+        "source_candidate_id": candidate_id,
         "spathi_commit": commit,
-        "configuration_sha256": canonical_json_sha256(parameters),
-        "parameters": parameters,
+        "source_configuration_sha256": canonical_json_sha256(parameters),
+        "policy_sha256": canonical_json_sha256(group_policy),
+        "group_policy": group_policy,
     }
 
 
@@ -51,9 +94,108 @@ def _copy_materialization_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _write_production_config(repo: Path, budget: str) -> Path:
+    root = repo / "work/v1/workflows/efficiency" / budget / "test-flow"
+    root.mkdir(parents=True, exist_ok=True)
+    selected = _selected_policy(repo)
+    ranking_path = root / "calibration-ranking.json"
+    ranking_path.write_text(json.dumps({"benchmark_commit": "1" * 40}) + "\n", encoding="utf-8")
+    selected["selection_evidence"] = {
+        "validation_ranking": ranking_path.relative_to(repo).as_posix()
+    }
+    role = "descriptive" if budget == "reduced" else "confirmatory"
+    selected_path = root / "calibration_selection.json"
+    selected_path.write_text(json.dumps(selected) + "\n", encoding="utf-8")
+    selected_reference = {
+        "path": selected_path.relative_to(repo).as_posix(),
+        "sha256": sha256_file(selected_path),
+    }
+    plan = {
+        "budget": {"id": budget, "analysis_role": role},
+        "reference": {
+            "selected_config": selected_reference,
+            "policy_id": selected["policy_id"],
+            "policy_sha256": selected["policy_sha256"],
+            "group_policy": selected["group_policy"],
+            "spathi_commit": selected["spathi_commit"],
+            "selection_validation_manifest_sha256": "1" * 64,
+        },
+        "panel": {"path": "work/panel.json", "sha256": "2" * 64},
+        "analysis": {
+            "adoption_rule": (
+                "lowest_geometric_mean_runtime_ratio_then_candidate_id_among_adoptable"
+            )
+        },
+        "candidates": [],
+    }
+    plan_path = root / "efficiency_plan.json"
+    plan_path.write_text(json.dumps(plan) + "\n", encoding="utf-8")
+    evidence = {
+        "study_id": "spathi_efficiency_noninferiority_v1",
+        "plan_sha256": sha256_file(plan_path),
+        "panel_sha256": "2" * 64,
+        "selection_validation_manifest_sha256": "1" * 64,
+        "budget": budget,
+        "dataset_role": "efficiency_validation",
+    }
+    evidence_path = root / "efficiency_evidence.json"
+    evidence_path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
+    adoption = materialization.resolve_efficiency_adoption(plan, [], [])
+    results = {
+        "study_id": evidence["study_id"],
+        "budget": budget,
+        "analysis_role": role,
+        "dataset_role": evidence["dataset_role"],
+        "inputs": {
+            "plan_sha256": sha256_file(plan_path),
+            "evidence_sha256": sha256_file(evidence_path),
+        },
+        "comparisons": [],
+        "global_decision": adoption["decision"],
+        "adoption": adoption,
+    }
+    results_path = root / "analysis/results.json"
+    results_path.parent.mkdir()
+    results_path.write_text(json.dumps(results) + "\n", encoding="utf-8")
+    provenance = {
+        "calibration_selection": selected_reference,
+        "efficiency_plan": {
+            "path": plan_path.relative_to(repo).as_posix(),
+            "sha256": sha256_file(plan_path),
+        },
+        "efficiency_evidence": {
+            "path": evidence_path.relative_to(repo).as_posix(),
+            "sha256": sha256_file(evidence_path),
+        },
+        "efficiency_results": {
+            "path": results_path.relative_to(repo).as_posix(),
+            "sha256": sha256_file(results_path),
+        },
+    }
+    production = {
+        "schema_version": "1.0",
+        "artifact_type": "spathi_production_policy",
+        "budget": budget,
+        "evidence_role": role,
+        "status": "descriptive" if budget == "reduced" else "confirmed",
+        "decision": adoption["decision"],
+        "policy": {
+            "policy_id": adoption["selected_policy_id"],
+            "policy_sha256": adoption["selected_policy_sha256"],
+            "group_policy": adoption["selected_group_policy"],
+            "spathi_commit": selected["spathi_commit"],
+        },
+        "provenance": provenance,
+    }
+    output = root / "production-config.json"
+    output.write_text(json.dumps(production, indent=2) + "\n", encoding="utf-8")
+    return output
+
+
 def _catalog_plan(repo: Path) -> Path:
     template = load_json_object(repo / "experiments/v1/profiles/reduced.json")
     jobs = [job["id"] for job in template["generation_jobs"]]
+    algorithm_seeds = (1107144475, 512584353, 238683595)
     request_root = repo / "experiments/v1/inference/materialization-test"
     request_root.mkdir(parents=True)
     (request_root / "tools-params.json").write_text(
@@ -61,11 +203,12 @@ def _catalog_plan(repo: Path) -> Path:
             {
                 "runs": [
                     {
-                        "run_id": "genie3_reduced",
+                        "run_id": f"genie3_reduced_seed_{seed}",
                         "tool_id": "genie3",
-                        "params": {"seed": 1729},
+                        "params": {"seed": seed},
                         "execution": {"mode": "group_emulated"},
                     }
+                    for seed in algorithm_seeds
                 ]
             }
         ),
@@ -77,13 +220,22 @@ def _catalog_plan(repo: Path) -> Path:
                 "schema_version": "1.0",
                 "runs": [
                     {
-                        "run_id": "genie3_reduced",
+                        "run_id": f"genie3_reduced_seed_{seed}",
                         "configuration_id": "genie3_reduced",
                         "selection_role": "baseline",
-                        "algorithm_seed": 1729,
+                        "algorithm_seed": seed,
                         "algorithm_seed_parameter": "seed",
                         "family": "catalog_baseline",
+                        "seed_derivation": {
+                            "namespace": "reduced.test",
+                            "stream": "inference",
+                            "coordinates": {
+                                "purpose": "algorithm_replicate",
+                                "replicate_index": replicate_index,
+                            },
+                        },
                     }
+                    for replicate_index, seed in enumerate(algorithm_seeds, start=1)
                 ],
             }
         ),
@@ -96,7 +248,7 @@ def _catalog_plan(repo: Path) -> Path:
             {
                 "id": "group-only-baselines",
                 "kind": "baseline",
-                "dataset_role": "development",
+                "dataset_role": "test",
                 "generation_jobs": jobs,
                 "regime": "group_only",
                 "tools_params": ("experiments/v1/inference/materialization-test/tools-params.json"),
@@ -104,17 +256,24 @@ def _catalog_plan(repo: Path) -> Path:
             }
         ],
         "statistics": {
-            "status": "enabled",
-            "alpha": 0.05,
-            "random_seed": 1729,
-            "permutations": 99999,
-            "bootstrap_resamples": 20000,
+            "status": "descriptive",
             "comparisons": [
                 {
                     "id": "group-only-primary",
-                    "comparison_role": "confirmatory",
+                    "comparison_role": "exploratory",
+                    "analysis_kind": "network_accuracy",
+                    "truth_scope": "group_specific",
+                    "aggregation": {
+                        "block_unit": "dataset_id",
+                        "hierarchy": ["simulator_id", "condition_id", "dataset_id"],
+                        "weighting": "equal_dataset",
+                    },
                     "candidate_space": "tf_restricted",
-                    "dataset_roles": ["development"],
+                    "inference_regulator_scope_by_configuration": {
+                        "genie3_reduced": "tf_restricted",
+                        SELECTED_PLACEHOLDER: "tf_restricted",
+                    },
+                    "dataset_roles": ["test"],
                     "generation_jobs": jobs,
                     "regime": "group_only",
                     "levels": ["directed", "topology"],
@@ -122,11 +281,13 @@ def _catalog_plan(repo: Path) -> Path:
                     "primary_level": "directed",
                     "primary_metric": "aupr",
                     "configuration_ids": ["genie3_reduced", SELECTED_PLACEHOLDER],
+                    "algorithm_seeds_by_configuration": {
+                        "genie3_reduced": list(algorithm_seeds),
+                        SELECTED_PLACEHOLDER: list(algorithm_seeds),
+                    },
                     "control_configuration_id": SELECTED_PLACEHOLDER,
                     "stratify_by": ["dataset_role", "regime", "level"],
-                    "min_blocks": 8,
-                    "posthoc_scope": "control_vs_rest",
-                    "correction": "holm",
+                    "expected_blocks": 8,
                 }
             ],
         },
@@ -136,42 +297,26 @@ def _catalog_plan(repo: Path) -> Path:
     return plan_path
 
 
-def _patch_frozen_selection(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": "reduced",
-        "selected_candidate": _selected_candidate(repo),
-    }
-
-    def selection_fixture(
-        _root: Path, _path: Path | None = None
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return search, selected
-
-    monkeypatch.setattr(materialization, "validate_calibration_contracts", selection_fixture)
-    monkeypatch.setattr(config_module, "validate_calibration_contracts", selection_fixture)
-
-
-def test_selected_requests_reuse_predeclared_seeds_without_mutating_candidate() -> None:
-    candidate = _selected_candidate(REPO_ROOT)
-    before = copy.deepcopy(candidate)
+def test_selected_requests_reuse_predeclared_seeds_without_mutating_policy() -> None:
+    policy = _selected_policy(REPO_ROOT)
+    before = copy.deepcopy(policy)
 
     tools, custom, metadata = build_selected_spathi_requests(
-        candidate,
+        policy,
         (1729, 31415, 104729),
         docker_image="spathi:test",
+        seed_namespace="full.test",
     )
 
-    assert candidate == before
+    assert policy == before
     assert [item["algorithm_seed"] for item in metadata["runs"]] == [1729, 31415, 104729]
-    assert {item["configuration_id"] for item in metadata["runs"]} == {candidate["candidate_id"]}
+    assert {item["configuration_id"] for item in metadata["runs"]} == {policy["policy_id"]}
     assert [item["params"]["random_seed"] for item in tools["runs"]] == [
         1729,
         31415,
         104729,
     ]
+    assert all(item["params"]["group_policy"] == policy["group_policy"] for item in tools["runs"])
     assert {item["run_id"] for item in custom["tools"]} == {
         item["run_id"] for item in tools["runs"]
     }
@@ -185,7 +330,7 @@ def test_profile_builder_creates_selected_spathi_route_for_each_unique_selector(
             {
                 "id": "baseline",
                 "kind": "baseline",
-                "dataset_role": "development",
+                "dataset_role": "test",
                 "generation_jobs": jobs,
                 "regime": "group_only",
                 "tools_params": "tools.json",
@@ -193,18 +338,22 @@ def test_profile_builder_creates_selected_spathi_route_for_each_unique_selector(
             }
         ],
         "statistics": {
-            "status": "enabled",
-            "alpha": 0.05,
-            "random_seed": 1729,
-            "permutations": 99999,
-            "bootstrap_resamples": 20000,
+            "status": "descriptive",
             "comparisons": [
                 {
                     "id": comparison_id,
-                    "dataset_roles": ["development"],
+                    "dataset_roles": ["test"],
                     "generation_jobs": jobs,
                     "regime": regime,
                     "configuration_ids": ["baseline", SELECTED_PLACEHOLDER],
+                    "algorithm_seeds_by_configuration": {
+                        "baseline": [1],
+                        SELECTED_PLACEHOLDER: [1],
+                    },
+                    "inference_regulator_scope_by_configuration": {
+                        "baseline": "tf_restricted",
+                        SELECTED_PLACEHOLDER: "tf_restricted",
+                    },
                     "control_configuration_id": SELECTED_PLACEHOLDER,
                 }
                 for comparison_id, regime in (
@@ -220,103 +369,136 @@ def test_profile_builder_creates_selected_spathi_route_for_each_unique_selector(
         plan,
         profile_id="reduced-v1",
         bundle_path="experiments/v1/spathi/benchmark/v1/reduced",
-        candidate_id="selected_winner",
+        policy_id="spathi_conditional_v1",
+        production_config_path="work/v1/workflows/efficiency/reduced/run/production-config.json",
     )
 
     spathi_batches = [batch for batch in profile["inference_batches"] if batch["kind"] == "spathi"]
     assert {batch["regime"] for batch in spathi_batches} == {"group_only", "order_aware"}
     assert all(batch["generation_jobs"] == jobs for batch in spathi_batches)
     assert all(
-        comparison["control_configuration_id"] == "selected_winner"
+        comparison["control_configuration_id"] == "spathi_conditional_v1"
         for comparison in profile["statistics"]["comparisons"]
     )
 
 
-def test_frozen_candidate_loader_rejects_unfrozen_selection(
-    monkeypatch: pytest.MonkeyPatch,
+def test_production_policy_loader_validates_budget_commit_and_provenance(
+    tmp_path: Path,
 ) -> None:
-    search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
-    selected = {
-        "status": "unselected",
-        "phase": "planned",
-        "calibration_budget": None,
-        "selected_candidate": None,
-    }
-    monkeypatch.setattr(
-        materialization,
-        "validate_calibration_contracts",
-        lambda _root: (search, selected),
-    )
-    with pytest.raises(BenchmarkConfigError, match="requires a frozen"):
-        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="reduced")
+    repo = _copy_materialization_repo(tmp_path)
+    path = _write_production_config(repo, "reduced")
+    policy, seeds = load_frozen_production_policy(repo, path, budget="reduced")
 
+    assert policy["policy_id"] == "spathi_conditional_v1"
+    assert seeds == (1107144475, 512584353, 238683595)
 
-def test_frozen_candidate_loader_rejects_stale_repository_commit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate = _selected_candidate(REPO_ROOT)
-    candidate["spathi_commit"] = "0" * 40
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": "reduced",
-        "selected_candidate": candidate,
-    }
-    search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
-    monkeypatch.setattr(
-        materialization,
-        "validate_calibration_contracts",
-        lambda _root: (search, selected),
-    )
+    with pytest.raises(BenchmarkConfigError, match="uses budget"):
+        load_frozen_production_policy(repo, path, budget="full")
 
+    production = load_json_object(path)
+    production["policy"]["spathi_commit"] = "0" * 40
+    path.write_text(json.dumps(production), encoding="utf-8")
     with pytest.raises(BenchmarkConfigError, match="different repos.lock.json commit"):
-        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="reduced")
+        load_frozen_production_policy(repo, path, budget="reduced")
+
+    production["policy"]["spathi_commit"] = _selected_policy(repo)["spathi_commit"]
+    path.write_text(json.dumps(production), encoding="utf-8")
+    evidence = repo / production["provenance"]["efficiency_results"]["path"]
+    evidence.write_text("changed\n", encoding="utf-8")
+    with pytest.raises(BenchmarkConfigError, match="missing or changed"):
+        load_frozen_production_policy(repo, path, budget="reduced")
 
 
-def test_frozen_candidate_loader_rejects_another_calibration_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": "reduced",
-        "selected_candidate": _selected_candidate(REPO_ROOT),
-    }
-    monkeypatch.setattr(
-        materialization,
-        "validate_calibration_contracts",
-        lambda _root: (search, selected),
-    )
-
-    with pytest.raises(BenchmarkConfigError, match="uses calibration budget"):
-        load_frozen_selected_candidate(REPO_ROOT, calibration_budget="full")
-
-
-def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
+def test_production_policy_rejects_another_benchmark_revision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _copy_materialization_repo(tmp_path)
-    plan_path = _catalog_plan(repo)
-    search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
-    candidate = _selected_candidate(repo)
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": "reduced",
-        "selected_candidate": candidate,
-    }
+    path = _write_production_config(repo, "reduced")
     monkeypatch.setattr(
         materialization,
-        "validate_calibration_contracts",
-        lambda _root, _path=None: (search, selected),
+        "observe_benchmark_repository",
+        lambda root, **_kwargs: {
+            "path": str(root),
+            "commit": "2" * 40,
+            "origin": "https://example.test/spathi-benchmarks.git",
+            "clean": True,
+        },
     )
-    monkeypatch.setattr(
-        config_module,
-        "validate_calibration_contracts",
-        lambda _root, _path=None: (search, selected),
-    )
+
+    with pytest.raises(BenchmarkConfigError, match="another benchmark revision"):
+        load_frozen_production_policy(repo, path, budget="reduced")
+
+
+def test_production_policy_rejects_rehashed_results_adoption_tampering(
+    tmp_path: Path,
+) -> None:
+    repo = _copy_materialization_repo(tmp_path)
+    path = _write_production_config(repo, "reduced")
+    production = load_json_object(path)
+    results_path = repo / production["provenance"]["efficiency_results"]["path"]
+    results = load_json_object(results_path)
+    results["adoption"]["selected_policy_id"] = "forged_policy"
+    results_path.write_text(json.dumps(results), encoding="utf-8")
+    production["provenance"]["efficiency_results"]["sha256"] = sha256_file(results_path)
+    path.write_text(json.dumps(production), encoding="utf-8")
+
+    with pytest.raises(BenchmarkConfigError, match="predeclared decision rule"):
+        load_frozen_production_policy(repo, path, budget="reduced")
+
+
+def test_production_policy_rejects_rehashed_evidence_chain_tampering(
+    tmp_path: Path,
+) -> None:
+    repo = _copy_materialization_repo(tmp_path)
+    path = _write_production_config(repo, "reduced")
+    production = load_json_object(path)
+    evidence_path = repo / production["provenance"]["efficiency_evidence"]["path"]
+    evidence = load_json_object(evidence_path)
+    evidence["plan_sha256"] = "0" * 64
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    production["provenance"]["efficiency_evidence"]["sha256"] = sha256_file(evidence_path)
+    path.write_text(json.dumps(production), encoding="utf-8")
+
+    with pytest.raises(BenchmarkConfigError, match="evidence targets a different plan"):
+        load_frozen_production_policy(repo, path, budget="reduced")
+
+
+def test_production_policy_rejects_decision_not_authorized_by_results(
+    tmp_path: Path,
+) -> None:
+    repo = _copy_materialization_repo(tmp_path)
+    path = _write_production_config(repo, "full")
+    production = load_json_object(path)
+    production["decision"] = "candidate_adopted"
+    path.write_text(json.dumps(production), encoding="utf-8")
+
+    with pytest.raises(BenchmarkConfigError, match="does not match the efficiency adoption"):
+        load_frozen_production_policy(repo, path, budget="full")
+
+
+def test_production_policy_requires_immutable_evidence_reverification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _copy_materialization_repo(tmp_path)
+    path = _write_production_config(repo, "reduced")
+
+    def reject_evidence(**_kwargs: Any) -> tuple[Path, Path, Path]:
+        raise BenchmarkConfigError("immutable evidence differs")
+
+    monkeypatch.setattr(materialization, "analyze_noninferiority", reject_evidence)
+    with pytest.raises(BenchmarkConfigError, match="immutable evidence differs"):
+        load_frozen_production_policy(repo, path, budget="reduced")
+
+
+def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
+    tmp_path: Path,
+) -> None:
+    repo = _copy_materialization_repo(tmp_path)
+    plan_path = _catalog_plan(repo)
+    production_path = _write_production_config(repo, "reduced")
+    policy = load_json_object(production_path)["policy"]
     output_dir = repo / "experiments/v1/spathi/benchmark/v1/reduced-v1"
     profile_output = repo / "experiments/v1/profiles/reduced-v1.json"
 
@@ -326,6 +508,7 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
         baseline_plan_path=plan_path,
         output_dir=output_dir,
         profile_output=profile_output,
+        production_config_path=production_path,
     )
 
     profile = load_json_object(profile_output)
@@ -333,10 +516,10 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
     tools = load_json_object(output_dir / "tools-params.json")
     manifest = load_json_object(output_dir / "benchmark-manifest.json")
     assert profile["status"] == "runnable"
-    assert len(tools["runs"]) == 2
-    assert manifest["selected_config"]["candidate_id"] == candidate["candidate_id"]
-    assert manifest["selected_config"]["calibration_budget"] == "reduced"
-    assert manifest["algorithm_seeds"]["values"] == [1729, 31415]
+    assert len(tools["runs"]) == 3
+    assert manifest["production_config"]["policy_id"] == policy["policy_id"]
+    assert manifest["production_config"]["budget"] == "reduced"
+    assert manifest["algorithm_seeds"]["values"] == [1107144475, 512584353, 238683595]
 
     materialize_benchmark_plan(
         repo_root=repo,
@@ -344,6 +527,7 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
         baseline_plan_path=plan_path,
         output_dir=output_dir,
         profile_output=profile_output,
+        production_config_path=production_path,
     )
     (output_dir / "tools-params.json").write_text('{"runs": []}', encoding="utf-8")
     with pytest.raises(BenchmarkConfigError, match="differs from this workflow"):
@@ -353,18 +537,18 @@ def test_materializer_writes_reconciled_profile_and_resumes_idempotently(
             baseline_plan_path=plan_path,
             output_dir=output_dir,
             profile_output=profile_output,
+            production_config_path=production_path,
         )
 
 
 @pytest.mark.parametrize("missing", ["bundle", "profile"])
 def test_benchmark_materializer_recovers_one_missing_materialization_member(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     missing: str,
 ) -> None:
     repo = _copy_materialization_repo(tmp_path)
     plan_path = _catalog_plan(repo)
-    _patch_frozen_selection(repo, monkeypatch)
+    production_path = _write_production_config(repo, "reduced")
     output_dir = repo / "work/comparison/reduced/requests"
     profile_output = repo / "work/comparison/reduced/reduced-v1.json"
     arguments = {
@@ -373,6 +557,7 @@ def test_benchmark_materializer_recovers_one_missing_materialization_member(
         "baseline_plan_path": plan_path,
         "output_dir": output_dir,
         "profile_output": profile_output,
+        "production_config_path": production_path,
     }
     materialize_benchmark_plan(**arguments)
     expected_bundle = {
@@ -393,12 +578,11 @@ def test_benchmark_materializer_recovers_one_missing_materialization_member(
 @pytest.mark.parametrize("survivor", ["bundle", "profile"])
 def test_benchmark_materializer_rejects_a_divergent_partial_materialization(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     survivor: str,
 ) -> None:
     repo = _copy_materialization_repo(tmp_path)
     plan_path = _catalog_plan(repo)
-    _patch_frozen_selection(repo, monkeypatch)
+    production_path = _write_production_config(repo, "reduced")
     output_dir = repo / "work/comparison/reduced/requests"
     profile_output = repo / "work/comparison/reduced/reduced-v1.json"
     arguments = {
@@ -407,6 +591,7 @@ def test_benchmark_materializer_rejects_a_divergent_partial_materialization(
         "baseline_plan_path": plan_path,
         "output_dir": output_dir,
         "profile_output": profile_output,
+        "production_config_path": production_path,
     }
     materialize_benchmark_plan(**arguments)
 
@@ -426,32 +611,13 @@ def test_benchmark_materializer_rejects_a_divergent_partial_materialization(
     assert not missing_path.exists()
 
 
-def test_materializer_accepts_explicit_selection_and_profile_below_work(
+def test_materializer_accepts_production_policy_and_profile_below_work(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _copy_materialization_repo(tmp_path)
     plan_path = _catalog_plan(repo)
-    search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
-    candidate = _selected_candidate(repo)
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": "reduced",
-        "selected_candidate": candidate,
-    }
-
-    def selection_fixture(
-        _root: Path, _path: Path | None = None
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return search, selected
-
-    monkeypatch.setattr(materialization, "validate_calibration_contracts", selection_fixture)
-    monkeypatch.setattr(config_module, "validate_calibration_contracts", selection_fixture)
     runtime = repo / "work/comparison/reduced"
-    selected_path = runtime / "selected-config.json"
-    selected_path.parent.mkdir(parents=True)
-    shutil.copyfile(repo / "experiments/v1/spathi/selected-config.json", selected_path)
+    production_path = _write_production_config(repo, "reduced")
 
     bundle, profile_path = materialize_benchmark_plan(
         repo_root=repo,
@@ -459,22 +625,22 @@ def test_materializer_accepts_explicit_selection_and_profile_below_work(
         baseline_plan_path=plan_path,
         output_dir=runtime / "requests",
         profile_output=runtime / "reduced-v1.json",
-        selected_config_path=selected_path,
+        production_config_path=production_path,
     )
 
     profile = load_json_object(profile_path)
     manifest = load_json_object(bundle / "benchmark-manifest.json")
-    assert profile["selected_config"] == selected_path.relative_to(repo).as_posix()
+    assert profile["production_config"] == production_path.relative_to(repo).as_posix()
     assert (
         profile["materialization_manifest"]
         == (bundle / "benchmark-manifest.json").relative_to(repo).as_posix()
     )
-    assert manifest["selected_config"]["path"] == profile["selected_config"]
+    assert manifest["production_config"]["path"] == profile["production_config"]
 
 
 @pytest.mark.parametrize(
     ("template_id", "expected_batches", "expected_comparisons"),
-    [("reduced", 2, 1), ("full", 6, 4)],
+    [("reduced", 6, 4), ("full", 8, 7)],
 )
 def test_committed_benchmark_plans_build_valid_runnable_profiles(
     template_id: str,
@@ -491,7 +657,10 @@ def test_committed_benchmark_plans_build_valid_runnable_profiles(
         plan,
         profile_id=f"{template_id}-v1",
         bundle_path=f"experiments/v1/spathi/benchmark/v1/{template_id}-v1",
-        candidate_id="selected_fixture",
+        policy_id="spathi_conditional_v1",
+        production_config_path=(
+            f"work/v1/workflows/efficiency/{template_id}/run/production-config.json"
+        ),
     )
 
     validate_json(
@@ -507,26 +676,10 @@ def test_committed_benchmark_plans_build_valid_runnable_profiles(
 @pytest.mark.parametrize("template_id", ["reduced", "full"])
 def test_committed_plan_materializes_with_a_reconciled_selection_fixture(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     template_id: str,
 ) -> None:
     repo = _copy_materialization_repo(tmp_path)
-    search = load_json_object(repo / "experiments/v1/spathi/search-space.json")
-    candidate = _selected_candidate(repo)
-    selected = {
-        "status": "selected",
-        "phase": "frozen",
-        "calibration_budget": template_id,
-        "selected_candidate": candidate,
-    }
-
-    def selection_fixture(
-        _root: Path, _path: Path | None = None
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        return search, selected
-
-    monkeypatch.setattr(materialization, "validate_calibration_contracts", selection_fixture)
-    monkeypatch.setattr(config_module, "validate_calibration_contracts", selection_fixture)
+    production_path = _write_production_config(repo, template_id)
 
     output_dir = repo / f"experiments/v1/spathi/benchmark/v1/{template_id}-v1"
     profile_output = repo / f"experiments/v1/profiles/{template_id}-v1.json"
@@ -536,6 +689,7 @@ def test_committed_plan_materializes_with_a_reconciled_selection_fixture(
         baseline_plan_path=(repo / f"experiments/v1/inference/plans/{template_id}-v1.json"),
         output_dir=output_dir,
         profile_output=profile_output,
+        production_config_path=production_path,
     )
 
     profile = load_json_object(profile_output)

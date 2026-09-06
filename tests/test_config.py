@@ -13,6 +13,7 @@ from spathi_bench.config import (
     load_image_lock,
     load_json_object,
     load_profile,
+    load_profile_file,
     load_repo_lock,
     profile_path,
     resolve_repo_path,
@@ -21,6 +22,7 @@ from spathi_bench.config import (
     validate_locked_repository,
     validate_profile_references,
 )
+from spathi_bench.seeds import generation_seed_for_consumer, load_seed_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,6 +72,85 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
     assert status_by_id["full"] == "planned"
 
 
+def test_design_validation_treats_seed_audit_as_a_mandatory_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spathi_bench.reproducibility import ReproducibilityAuditError
+
+    def fail(_repo_root: Path) -> dict[str, object]:
+        raise ReproducibilityAuditError("stale seed fixture")
+
+    monkeypatch.setattr("spathi_bench.reproducibility.audit_reproducibility", fail)
+    with pytest.raises(BenchmarkConfigError, match="Reproducibility audit failed"):
+        validate_design_contracts(REPO_ROOT)
+
+
+def test_full_efficiency_safety_profile_freezes_six_disjoint_conditions() -> None:
+    profile = load_profile(REPO_ROOT, "efficiency-safety-full")
+    jobs = [job for job in profile["generation_jobs"] if job["dataset_role"] == "efficiency_safety"]
+    expected = {
+        "g3000_tf100_c300": (3_000, 100, 300, [100, 100, 100]),
+        "g100_tf10_c500_single_group": (100, 10, 500, [500]),
+        "g100_tf10_c300_groups_10_40_250": (100, 10, 300, [10, 40, 250]),
+        "g100_tf10_c10000": (100, 10, 10_000, [3_333, 3_333, 3_334]),
+        "g3000_tf1500_c300": (3_000, 1_500, 300, [100, 100, 100]),
+        "g15000_tf100_c300": (15_000, 100, 300, [100, 100, 100]),
+    }
+    assert {job["condition_id"] for job in jobs} == set(expected)
+
+    def directed_edges(path: Path) -> set[tuple[str, str]]:
+        edges: set[tuple[str, str]] = set()
+        for row in path.read_text(encoding="utf-8").splitlines()[1:]:
+            target, regulator, _effect = row.split("\t")
+            edges.add((target, regulator))
+        return edges
+
+    safety_root = REPO_ROOT / "experiments/v1/simulations/scmultisim/efficiency_safety"
+    seed_plan = load_seed_plan(REPO_ROOT / "experiments/v1/seeds/seed-plan.json")
+    generation_seeds: set[int] = set()
+    for job in jobs:
+        run = load_json_object(REPO_ROOT / job["simulator_runs"])["runs"][0]
+        genes, transcription_factors, cells, group_sizes = expected[job["condition_id"]]
+        assert job["split_id"] == "efficiency_safety_v1"
+        assert run["replicates"] == 3
+        assert run["params"]["num_genes"] == genes
+        assert run["params"]["num_cells"] == cells
+        assert run["params"]["discrete_population"]["pop_size"] == group_sizes
+        assert run["base_seed"] == generation_seed_for_consumer(
+            seed_plan,
+            path=job["simulator_runs"],
+            run_id=run["run_id"],
+        )
+        scenario = load_json_object(REPO_ROOT / job["scenario"])
+        topology = safety_root / scenario["inputs"]["regulatory_network"]["path"]
+        assert len({regulator for _target, regulator in directed_edges(topology)}) == (
+            transcription_factors
+        )
+        generation_seeds.update(run["base_seed"] + offset for offset in range(run["replicates"]))
+    assert len(generation_seeds) == 18
+
+    transfer_root = REPO_ROOT / "experiments/v1/simulations/scmultisim/dimensional_transfer"
+    safety_topologies = [
+        directed_edges(path) for path in sorted(safety_root.glob("regulatory-network*.tsv"))
+    ]
+    assert len(safety_topologies) == 4
+    for index, left in enumerate(safety_topologies):
+        for right in safety_topologies[index + 1 :]:
+            assert left.isdisjoint(right)
+    transfer_edges = set().union(
+        *(directed_edges(path) for path in transfer_root.glob("regulatory-network*.tsv"))
+    )
+    assert set().union(*safety_topologies).isdisjoint(transfer_edges)
+
+
+def test_formal_efficiency_profile_excludes_conditional_safety_generation() -> None:
+    formal = load_profile(REPO_ROOT, "efficiency-full")
+
+    assert len(formal["generation_jobs"]) == 5
+    assert {job["dataset_role"] for job in formal["generation_jobs"]} == {"efficiency_validation"}
+    assert "replicate_exceptions" not in formal["planned_design"]
+
+
 def test_full_panel_freezes_supported_robustness_conditions() -> None:
     profile = load_profile(REPO_ROOT, "full")
     jobs = {job["id"]: job for job in profile["generation_jobs"]}
@@ -78,27 +159,18 @@ def test_full_panel_freezes_supported_robustness_conditions() -> None:
         for job_id, job in jobs.items()
     }
 
-    assert sum(run["replicates"] for run in runs_by_job.values()) == 50
-    assert {
-        run["base_seed"] + offset
-        for run in runs_by_job.values()
-        for offset in range(run["replicates"])
-    } == {
-        seed
-        for start in (
-            31001,
-            31101,
-            31201,
-            31301,
-            41001,
-            41101,
-            42001,
-            43001,
-            43101,
-            44001,
+    assert sum(run["replicates"] for run in runs_by_job.values()) == 60
+    seed_plan = load_seed_plan(REPO_ROOT / "experiments/v1/seeds/seed-plan.json")
+    allocated: set[int] = set()
+    for job_id, job in jobs.items():
+        run = runs_by_job[job_id]
+        assert run["base_seed"] == generation_seed_for_consumer(
+            seed_plan,
+            path=job["simulator_runs"],
+            run_id=run["run_id"],
         )
-        for seed in range(start, start + 5)
-    }
+        allocated.update(run["base_seed"] + offset for offset in range(run["replicates"]))
+    assert len(allocated) == 60
 
     low = runs_by_job["scmultisim_test_dynamic_low_balanced"]["params"]
     high = runs_by_job["scmultisim_test_dynamic_high_imbalanced"]["params"]
@@ -134,13 +206,27 @@ def test_full_panel_freezes_supported_robustness_conditions() -> None:
     }
 
     plan = load_json_object(REPO_ROOT / "experiments/v1/inference/plans/full-v1.json")
-    group_batch = next(
-        batch for batch in plan["baseline_batches"] if batch["regime"] == "group_only"
+    group_batches = [batch for batch in plan["baseline_batches"] if batch["regime"] == "group_only"]
+    assert len(group_batches) == 3
+    primary_batches = [batch for batch in group_batches if "all-gene" not in batch["id"]]
+    all_gene_batch = next(batch for batch in group_batches if "all-gene" in batch["id"])
+    assert set().union(*(set(batch["generation_jobs"]) for batch in primary_batches)) == set(jobs)
+    assert set(primary_batches[0]["generation_jobs"]).isdisjoint(
+        primary_batches[1]["generation_jobs"]
     )
-    assert set(group_batch["generation_jobs"]) == set(jobs)
-    for comparison in plan["statistics"]["comparisons"]:
-        if comparison["regime"] == "group_only":
-            assert set(comparison["generation_jobs"]) == set(jobs)
+    assert set(all_gene_batch["generation_jobs"]) <= set(jobs)
+    group_comparisons = [
+        comparison
+        for comparison in plan["statistics"]["comparisons"]
+        if comparison["regime"] == "group_only"
+    ]
+    assert {comparison["analysis_kind"] for comparison in group_comparisons} == {
+        "network_accuracy",
+        "invariant_network_stability",
+    }
+    assert set().union(
+        *(set(comparison["generation_jobs"]) for comparison in group_comparisons)
+    ) == set(jobs)
 
 
 def test_load_json_object_rejects_invalid_json_and_non_object(tmp_path: Path) -> None:
@@ -196,6 +282,57 @@ def test_resolve_repo_path_confines_paths_and_requires_a_file(tmp_path: Path) ->
         resolve_repo_path(root, "../outside.json", "member")
     with pytest.raises(BenchmarkConfigError, match="does not exist"):
         resolve_repo_path(root, "missing.json", "member")
+
+
+def test_resolve_repo_path_rejects_symlinked_file_and_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external_file = outside / "member.json"
+    external_file.write_text("{}", encoding="utf-8")
+
+    (root / "linked-file.json").symlink_to(external_file)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        resolve_repo_path(root, "linked-file.json", "member")
+
+    (root / "linked-directory").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        resolve_repo_path(root, "linked-directory/member.json", "member")
+
+
+def test_load_profile_file_rejects_symlinked_file_and_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    work = root / "work"
+    work.mkdir(parents=True)
+    schemas = root / "schemas"
+    schemas.mkdir()
+    (schemas / "profile.schema.json").write_text(
+        (REPO_ROOT / "schemas" / "profile.schema.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external_profile = outside / "smoke.json"
+    external_profile.write_text(
+        (REPO_ROOT / "experiments/v1/profiles/smoke.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    linked_file = work / "linked-profile.json"
+    linked_file.symlink_to(external_profile)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        load_profile_file(root, linked_file, "smoke", require_runtime=True)
+
+    linked_directory = work / "linked-directory"
+    linked_directory.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        load_profile_file(
+            root,
+            linked_directory / "smoke.json",
+            "smoke",
+            require_runtime=True,
+        )
 
 
 def test_custom_tool_run_identity_must_match_definition() -> None:
@@ -346,14 +483,14 @@ def test_runnable_profiles_cannot_mix_dataset_partitions() -> None:
         validate_profile_references(REPO_ROOT, profile)
 
 
-def test_test_profile_requires_a_frozen_spathi_selection() -> None:
+def test_test_profile_requires_an_efficiency_gated_production_policy() -> None:
     profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
     profile["purpose"] = "benchmark"
     profile["generation_jobs"][0]["dataset_role"] = "test"
     for batch in profile["inference_batches"]:
         batch["dataset_role"] = "test"
 
-    with pytest.raises(BenchmarkConfigError, match="cannot become runnable before"):
+    with pytest.raises(BenchmarkConfigError, match="requires an efficiency-gated"):
         validate_profile_references(REPO_ROOT, profile)
 
 
@@ -378,6 +515,16 @@ def test_locked_repository_checks_commit_origin_and_cleanliness(tmp_path: Path) 
     )
     assert result["commit"] == head
     assert result["clean"] is True
+
+    linked_repo = tmp_path / "linked-repo"
+    linked_repo.symlink_to(repo, target_is_directory=True)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        validate_locked_repository(
+            name="fixture",
+            path=linked_repo,
+            lock_entry=lock,
+            require_clean=True,
+        )
 
     (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
     with pytest.raises(BenchmarkConfigError, match="worktree is not clean"):

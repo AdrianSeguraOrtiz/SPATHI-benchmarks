@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import itertools
 import json
 import math
@@ -20,14 +19,32 @@ from pathlib import Path
 from statistics import fmean, median
 from typing import Any
 
+from .algorithm_seed_contract import algorithm_seeds_by_configuration
 from .artifacts import canonical_json_sha256, sha256_file
-from .config import BenchmarkConfigError, load_json_object
+from .config import BenchmarkConfigError
+from .inference_scope_contract import inference_regulator_scopes
+from .pipeline import validate_inference_attribution_contract
 from .provenance import frozen_profile, validate_run_inputs
 from .runtime import benchmark_host_environment
+from .safe_io import path_below_no_symlinks
+from .seeds import (
+    SeedPlanError,
+    load_seed_plan,
+    plan_seed_record,
+    validate_plan_seed_record,
+)
 from .state import load_state, require_status, write_state
+from .summarize import validate_summary_reports
 
 STATISTICS_SCHEMA_VERSION = "1.0"
-SUPPORTED_METRICS = ("auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count")
+STATISTICS_FILENAMES = ("statistics.json", "rankings.csv", "pairwise.csv", "report.md")
+SUPPORTED_METRICS = (
+    "auroc",
+    "aupr",
+    "f1_at_truth_count",
+    "epr_at_truth_count",
+    "invariant_edge_stability",
+)
 STRATUM_FIELDS = (
     "dataset_role",
     "split_id",
@@ -44,6 +61,13 @@ DATASET_STRATUM_FIELDS = {
     "simulator_id",
     "generation_job",
 }
+SEMANTIC_UNIVERSE_FIELDS = (
+    "dataset_fingerprint_sha256",
+    "candidate_source_universe_sha256",
+    "candidate_target_universe_sha256",
+    "candidate_edge_universe_sha256",
+    "truth_edge_universe_sha256",
+)
 REQUIRED_METRIC_FIELDS = {
     "configuration_id",
     "dataset_id",
@@ -65,6 +89,7 @@ REQUIRED_METRIC_FIELDS = {
     "n_candidate_genes",
     "n_candidate_sources",
     "n_candidate_targets",
+    *SEMANTIC_UNIVERSE_FIELDS,
     *SUPPORTED_METRICS,
 }
 RANKING_FIELDS = (
@@ -72,6 +97,7 @@ RANKING_FIELDS = (
     "comparison_id",
     "comparison_role",
     "candidate_space",
+    "inference_regulator_scope",
     *STRATUM_FIELDS,
     "metric",
     "analysis_role",
@@ -90,6 +116,8 @@ PAIRWISE_FIELDS = (
     "comparison_id",
     "comparison_role",
     "candidate_space",
+    "control_inference_regulator_scope",
+    "competitor_inference_regulator_scope",
     *STRATUM_FIELDS,
     "metric",
     "analysis_role",
@@ -145,7 +173,7 @@ def _metric_value(metric: str, value: Any, *, label: str) -> float | None:
     if number is None:
         return None
     tolerance = 1e-12
-    if metric in {"auroc", "aupr", "f1_at_truth_count"}:
+    if metric in {"auroc", "aupr", "f1_at_truth_count", "invariant_edge_stability"}:
         if number < -tolerance or number > 1.0 + tolerance:
             raise BenchmarkConfigError(
                 f"Metric {metric} is outside its [0, 1] domain for {label}: {number}"
@@ -176,6 +204,13 @@ def _algorithm_seed(value: Any, *, label: str) -> int | None:
     return _nonnegative_integer(value, label=label)
 
 
+def _sha256_digest(value: Any, *, label: str) -> str:
+    digest = str(value)
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise BenchmarkConfigError(f"{label} must be a lowercase SHA-256 digest")
+    return digest
+
+
 def _csv_value(value: Any) -> Any:
     if value is None:
         return ""
@@ -199,14 +234,29 @@ def _percentile(values: Sequence[float], probability: float) -> float:
     return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
-def _seed(base_seed: int, *parts: Any) -> int:
-    payload = json.dumps(
-        [base_seed, *parts],
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+def _analysis_seed_record(
+    seed_plan: dict[str, Any],
+    *,
+    namespace: str,
+    purpose: str,
+    analysis_id: str,
+    control_configuration_id: str | None = None,
+    competitor_configuration_id: str | None = None,
+) -> dict[str, Any]:
+    coordinates: dict[str, str] = {
+        "purpose": purpose,
+        "analysis_id": analysis_id,
+    }
+    if control_configuration_id is not None:
+        coordinates["control_configuration_id"] = control_configuration_id
+    if competitor_configuration_id is not None:
+        coordinates["competitor_configuration_id"] = competitor_configuration_id
+    return plan_seed_record(
+        seed_plan,
+        namespace=namespace,
+        stream="statistical",
+        coordinates=coordinates,
+    )
 
 
 def _midranks(values: Sequence[float], *, descending: bool) -> tuple[list[float], int]:
@@ -335,6 +385,28 @@ def _hodges_lehmann(differences: Sequence[float]) -> float | None:
     return float(median(walsh))
 
 
+def _paired_descriptives(differences: Sequence[float]) -> dict[str, Any]:
+    """Return paired point summaries without invoking an inferential procedure."""
+
+    if any(not math.isfinite(value) for value in differences):
+        raise ValueError("Paired differences must be finite")
+    wins = sum(value > 0 for value in differences)
+    ties = sum(value == 0 for value in differences)
+    losses = sum(value < 0 for value in differences)
+    n_total = len(differences)
+    return {
+        "n_blocks": n_total,
+        "n_nonzero": n_total - ties,
+        "wins": wins,
+        "ties": ties,
+        "losses": losses,
+        "probability_of_superiority": ((wins + 0.5 * ties) / n_total if n_total else None),
+        "mean_difference": fmean(differences) if differences else None,
+        "median_difference": float(median(differences)) if differences else None,
+        "hodges_lehmann": _hodges_lehmann(differences),
+    }
+
+
 def _wilcoxon_test(
     differences: Sequence[float],
     *,
@@ -344,24 +416,8 @@ def _wilcoxon_test(
 ) -> dict[str, Any]:
     """Two-sided paired signed-rank test using an exact sign-flip distribution."""
 
-    if any(not math.isfinite(value) for value in differences):
-        raise ValueError("Wilcoxon differences must be finite")
-    wins = sum(value > 0 for value in differences)
-    ties = sum(value == 0 for value in differences)
-    losses = sum(value < 0 for value in differences)
-    n_total = len(differences)
+    descriptive = _paired_descriptives(differences)
     nonzero = [value for value in differences if value != 0]
-    descriptive = {
-        "n_blocks": n_total,
-        "n_nonzero": len(nonzero),
-        "wins": wins,
-        "ties": ties,
-        "losses": losses,
-        "probability_of_superiority": ((wins + 0.5 * ties) / n_total if n_total else None),
-        "mean_difference": fmean(differences) if differences else None,
-        "median_difference": float(median(differences)) if differences else None,
-        "hodges_lehmann": _hodges_lehmann(differences),
-    }
     if not differences:
         return {
             **descriptive,
@@ -474,7 +530,7 @@ def _holm_adjust(records: Sequence[dict[str, Any]], *, alpha: float) -> None:
 
 def _bootstrap_median_interval(
     differences: Sequence[float],
-    simulator_ids: Sequence[str],
+    design_strata: Sequence[tuple[str, str]],
     *,
     resamples: int,
     random_seed: int,
@@ -482,15 +538,15 @@ def _bootstrap_median_interval(
 ) -> tuple[float, float] | None:
     if len(differences) < 2:
         return None
-    by_simulator: dict[str, list[float]] = defaultdict(list)
-    for difference, simulator_id in zip(differences, simulator_ids, strict=True):
-        by_simulator[simulator_id].append(difference)
+    by_stratum: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for difference, design_stratum in zip(differences, design_strata, strict=True):
+        by_stratum[design_stratum].append(difference)
     rng = random.Random(random_seed)
     samples: list[float] = []
     for _ in range(resamples):
         draw: list[float] = []
-        for simulator_id in sorted(by_simulator):
-            values = by_simulator[simulator_id]
+        for design_stratum in sorted(by_stratum):
+            values = by_stratum[design_stratum]
             draw.extend(values[rng.randrange(len(values))] for _ in values)
         samples.append(float(median(draw)))
     return _percentile(samples, alpha / 2.0), _percentile(samples, 1.0 - alpha / 2.0)
@@ -548,13 +604,88 @@ def _read_metrics(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def _validate_statistics_contract(profile: dict[str, Any]) -> dict[str, Any]:
+def _validate_statistics_contract(
+    profile: dict[str, Any], seed_plan: dict[str, Any]
+) -> dict[str, Any]:
     contract = profile.get("statistics")
-    if not isinstance(contract, dict) or contract.get("status") != "enabled":
+    if not isinstance(contract, dict) or contract.get("status") not in {
+        "inferential",
+        "descriptive",
+    }:
         raise BenchmarkConfigError(
-            f"Runnable profile {profile.get('id')!r} has no enabled statistics contract"
+            f"Runnable profile {profile.get('id')!r} has no analysis contract"
         )
+    inferential = contract["status"] == "inferential"
+    inferential_fields = {
+        "alpha",
+        "random_seed",
+        "seed_derivation",
+        "permutations",
+        "bootstrap_resamples",
+    }
+    if inferential:
+        missing = sorted(inferential_fields - set(contract))
+        if missing:
+            raise BenchmarkConfigError(
+                f"Inferential analysis contract omits required fields: {missing}"
+            )
+        try:
+            validate_plan_seed_record(
+                seed_plan,
+                seed=contract["random_seed"],
+                seed_derivation=contract["seed_derivation"],
+                required_namespace="full.test",
+                required_stream="statistical",
+                required_coordinates={"purpose": "phase_root"},
+            )
+        except SeedPlanError as exc:
+            raise BenchmarkConfigError(f"Invalid statistical seed contract: {exc}") from exc
+    else:
+        unexpected = sorted(inferential_fields & set(contract))
+        if unexpected:
+            raise BenchmarkConfigError(
+                f"Descriptive analysis contract contains inferential fields: {unexpected}"
+            )
     for comparison in contract["comparisons"]:
+        inferential_comparison_fields = {"posthoc_scope", "correction"}
+        observed_inferential_fields = inferential_comparison_fields & set(comparison)
+        if inferential and observed_inferential_fields != inferential_comparison_fields:
+            raise BenchmarkConfigError(
+                f"Inferential comparison {comparison.get('id')!r} has no complete "
+                "multiplicity contract"
+            )
+        if not inferential and observed_inferential_fields:
+            raise BenchmarkConfigError(
+                f"Descriptive comparison {comparison.get('id')!r} contains inferential "
+                f"fields: {sorted(observed_inferential_fields)}"
+            )
+        if not inferential and comparison.get("comparison_role") != "exploratory":
+            raise BenchmarkConfigError(
+                f"Descriptive comparison {comparison.get('id')!r} cannot claim a confirmatory role"
+            )
+        if comparison.get("aggregation") != {
+            "block_unit": "dataset_id",
+            "hierarchy": ["simulator_id", "condition_id", "dataset_id"],
+            "weighting": "equal_dataset",
+        }:
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']!r} has an unsupported aggregation"
+            )
+        analysis_kind = comparison.get("analysis_kind")
+        truth_scope = comparison.get("truth_scope")
+        if analysis_kind == "invariant_network_stability":
+            if (
+                truth_scope != "invariant"
+                or comparison["comparison_role"] != "exploratory"
+                or comparison["primary_metric"] != "invariant_edge_stability"
+            ):
+                raise BenchmarkConfigError(
+                    f"Invariant comparison {comparison['id']!r} has inconsistent semantics"
+                )
+        elif analysis_kind != "network_accuracy":
+            raise BenchmarkConfigError(
+                f"Statistics comparison {comparison['id']!r} has an unknown analysis kind"
+            )
         configurations = comparison["configuration_ids"]
         if comparison["control_configuration_id"] not in configurations:
             raise BenchmarkConfigError(
@@ -664,6 +795,7 @@ def _extract_panel(
     metric: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     configurations = list(comparison["configuration_ids"])
+    expected_seeds_by_configuration = algorithm_seeds_by_configuration(comparison)
     selected = [
         row
         for row in rows
@@ -688,6 +820,7 @@ def _extract_panel(
         execution_counts: dict[str, int] = {}
         seeds_by_configuration: dict[str, set[int | None]] = {}
         candidate_universes: dict[str, set[tuple[int, int, int, int]]] = defaultdict(set)
+        semantic_universes: dict[str, set[tuple[str, ...]]] = defaultdict(set)
         simulator_ids = {row["simulator_id"] for row in members}
         if len(simulator_ids) > 1:
             raise BenchmarkConfigError(
@@ -777,10 +910,27 @@ def _extract_panel(
                                 )
                             )
                         )
+                        semantic_universes[context].add(
+                            tuple(
+                                _sha256_digest(
+                                    row[field],
+                                    label=(f"{field} for {configuration_id}/{run_id}/{context}"),
+                                )
+                                for field in SEMANTIC_UNIVERSE_FIELDS
+                            )
+                        )
                 if len(values) == len(contexts) and values:
                     execution_values.append(fmean(values))
             seeds_by_configuration[configuration_id] = set(observed_seeds)
             execution_counts[configuration_id] = len(by_run)
+            expected_seeds = set(expected_seeds_by_configuration[configuration_id])
+            if set(observed_seeds) != expected_seeds:
+                reasons.append(
+                    f"algorithm_seed_contract:{configuration_id}:"
+                    f"expected={sorted(expected_seeds)},"
+                    "observed="
+                    f"{sorted(observed_seeds, key=lambda seed: -1 if seed is None else seed)}"
+                )
             if len(execution_values) == len(by_run) and execution_values:
                 scores[configuration_id] = fmean(execution_values)
 
@@ -806,6 +956,17 @@ def _extract_panel(
                 for context, universes in sorted(inconsistent_universes.items())
             )
             reasons.append(f"unbalanced_candidate_universe:{rendered}")
+        inconsistent_semantic_universes = {
+            context: universes
+            for context, universes in semantic_universes.items()
+            if len(universes) > 1
+        }
+        if inconsistent_semantic_universes:
+            rendered = ";".join(
+                f"{context}={sorted(universes)}"
+                for context, universes in sorted(inconsistent_semantic_universes.items())
+            )
+            reasons.append(f"unbalanced_semantic_universe:{rendered}")
         if reasons:
             excluded.append(
                 {
@@ -819,6 +980,13 @@ def _extract_panel(
             {
                 "dataset_id": dataset_id,
                 "simulator_id": simulator_id,
+                "condition_id": str(
+                    next(
+                        item["condition_id"]
+                        for item in state["datasets"]
+                        if str(item["dataset_id"]) == dataset_id
+                    )
+                ),
                 "scores": scores,
                 "n_contexts": len(contexts),
                 "contexts": sorted(contexts),
@@ -826,6 +994,10 @@ def _extract_panel(
                 "algorithm_seeds": {
                     configuration_id: sorted(seeds, key=lambda seed: -1 if seed is None else seed)
                     for configuration_id, seeds in sorted(seeds_by_configuration.items())
+                },
+                "expected_algorithm_seeds": {
+                    configuration_id: list(seeds)
+                    for configuration_id, seeds in expected_seeds_by_configuration.items()
                 },
                 "candidate_universe_by_context": {
                     context: dict(
@@ -841,6 +1013,16 @@ def _extract_panel(
                         )
                     )
                     for context, universes in sorted(candidate_universes.items())
+                },
+                "semantic_universe_by_context": {
+                    context: dict(
+                        zip(
+                            SEMANTIC_UNIVERSE_FIELDS,
+                            next(iter(universes)),
+                            strict=True,
+                        )
+                    )
+                    for context, universes in sorted(semantic_universes.items())
                 },
             }
         )
@@ -862,8 +1044,11 @@ def _analyze_one(
     comparison: dict[str, Any],
     stratum: dict[str, str],
     metric: str,
+    seed_plan: dict[str, Any],
+    statistical_namespace: str | None,
 ) -> dict[str, Any]:
     configurations = list(comparison["configuration_ids"])
+    regulator_scopes = inference_regulator_scopes(comparison)
     metadata = {
         configuration_id: _tool_metadata(rows, configuration_id)
         for configuration_id in configurations
@@ -895,6 +1080,7 @@ def _analyze_one(
         rankings.append(
             {
                 **metadata[configuration_id],
+                "inference_regulator_scope": regulator_scopes[configuration_id],
                 "mean_score": fmean(values) if values else None,
                 "median_score": float(median(values)) if values else None,
                 "mean_rank": fmean(ranks) if ranks else None,
@@ -909,28 +1095,41 @@ def _analyze_one(
 
     n_expected = len(blocks) + len(excluded)
     n_complete = len(blocks)
+    declared_blocks = int(comparison["expected_blocks"])
+    if n_expected != declared_blocks:
+        raise BenchmarkConfigError(
+            f"Comparison {comparison['id']!r} declares {declared_blocks} expected blocks "
+            f"but its frozen dataset panel contains {n_expected}."
+        )
     if excluded:
         status = "incomplete_panel"
         reason = "At least one predeclared dataset lacks a complete paired panel."
-    elif state.get("purpose") == "smoke":
-        status = "not_testable"
-        reason = "The smoke profile is a contract check and cannot support inference."
-    elif n_complete < comparison["min_blocks"]:
-        status = "not_testable"
+    elif contract["status"] == "descriptive" and state.get("purpose") == "smoke":
+        status = "contract_only"
+        reason = "The smoke profile verifies the software contract; it makes no accuracy claim."
+    elif contract["status"] == "descriptive":
+        status = "descriptive_only"
         reason = (
-            f"Requires at least {comparison['min_blocks']} independent datasets; "
-            f"found {n_complete}."
+            "This descriptive profile does not "
+            "authorize confidence intervals, hypothesis tests or winner claims."
         )
     else:
         status = "tested"
         reason = None
 
-    base_seed = int(contract["random_seed"])
+    friedman_seed = None
     if status == "tested" and len(configurations) >= 3:
+        assert statistical_namespace is not None
+        friedman_seed = _analysis_seed_record(
+            seed_plan,
+            namespace=statistical_namespace,
+            purpose="friedman_permutation",
+            analysis_id=analysis_id,
+        )
         omnibus = _friedman_test(
             matrix,
             permutations=int(contract["permutations"]),
-            random_seed=_seed(base_seed, analysis_id, "friedman"),
+            random_seed=friedman_seed["seed"],
         )
     elif len(configurations) < 3:
         omnibus = {
@@ -960,6 +1159,7 @@ def _analyze_one(
             "random_seed": None,
             "monte_carlo_standard_error": None,
         }
+    omnibus["seed_record"] = friedman_seed
 
     control = comparison["control_configuration_id"]
     control_index = configurations.index(control)
@@ -969,30 +1169,53 @@ def _analyze_one(
             continue
         competitor_index = configurations.index(competitor)
         differences = [row[control_index] - row[competitor_index] for row in matrix]
-        result = _wilcoxon_test(
-            differences,
-            permutations=int(contract["permutations"]),
-            random_seed=_seed(base_seed, analysis_id, control, competitor, "wilcoxon"),
-        )
-        if status != "tested":
-            result["status"] = status
-            result["p_raw"] = None
-            result["method"] = None
-            result["permutations"] = 0
-            result["random_seed"] = None
-            result["monte_carlo_standard_error"] = None
-        bootstrap_seed = _seed(base_seed, analysis_id, control, competitor, "bootstrap")
-        interval = (
-            _bootstrap_median_interval(
+        if status == "tested":
+            assert statistical_namespace is not None
+            wilcoxon_seed = _analysis_seed_record(
+                seed_plan,
+                namespace=statistical_namespace,
+                purpose="wilcoxon_permutation",
+                analysis_id=analysis_id,
+                control_configuration_id=control,
+                competitor_configuration_id=competitor,
+            )
+            result = _wilcoxon_test(
                 differences,
-                [block["simulator_id"] for block in blocks],
+                permutations=int(contract["permutations"]),
+                random_seed=wilcoxon_seed["seed"],
+            )
+            bootstrap_seed = _analysis_seed_record(
+                seed_plan,
+                namespace=statistical_namespace,
+                purpose="paired_bootstrap",
+                analysis_id=analysis_id,
+                control_configuration_id=control,
+                competitor_configuration_id=competitor,
+            )
+            interval = _bootstrap_median_interval(
+                differences,
+                [(str(block["simulator_id"]), str(block["condition_id"])) for block in blocks],
                 resamples=int(contract["bootstrap_resamples"]),
-                random_seed=bootstrap_seed,
+                random_seed=bootstrap_seed["seed"],
                 alpha=float(contract["alpha"]),
             )
-            if status == "tested"
-            else None
-        )
+        else:
+            wilcoxon_seed = None
+            bootstrap_seed = None
+            result = {
+                **_paired_descriptives(differences),
+                "status": status,
+                "wilcoxon_w": None,
+                "rank_biserial": None,
+                "p_raw": None,
+                "exact_minimum_attainable_p": None,
+                "monte_carlo_resolution": None,
+                "method": None,
+                "permutations": 0,
+                "random_seed": None,
+                "monte_carlo_standard_error": None,
+            }
+            interval = None
         pairwise.append(
             {
                 "contrast_id": f"{analysis_id}::{control}::{competitor}",
@@ -1000,17 +1223,23 @@ def _analyze_one(
                 "control_configuration_id": control,
                 "control_configuration_sha256": metadata[control]["configuration_sha256"],
                 "control_tool_id": metadata[control]["tool_id"],
+                "control_inference_regulator_scope": regulator_scopes[control],
                 "competitor_configuration_id": competitor,
                 "competitor_configuration_sha256": metadata[competitor]["configuration_sha256"],
                 "competitor_tool_id": metadata[competitor]["tool_id"],
+                "competitor_inference_regulator_scope": regulator_scopes[competitor],
                 **result,
                 "bootstrap_ci_low": interval[0] if interval else None,
                 "bootstrap_ci_high": interval[1] if interval else None,
                 "bootstrap_method": (
-                    "paired_percentile_bootstrap_stratified_by_simulator" if interval else None
+                    "paired_percentile_bootstrap_fixed_simulator_condition_strata"
+                    if interval
+                    else None
                 ),
                 "bootstrap_resamples": (int(contract["bootstrap_resamples"]) if interval else 0),
-                "bootstrap_random_seed": bootstrap_seed if interval else None,
+                "permutation_seed_record": wilcoxon_seed,
+                "bootstrap_random_seed": bootstrap_seed["seed"] if interval else None,
+                "bootstrap_seed_record": bootstrap_seed if interval else None,
                 "bootstrap_confidence_level": (
                     1.0 - float(contract["alpha"]) if interval else None
                 ),
@@ -1024,7 +1253,11 @@ def _analyze_one(
         "analysis_id": analysis_id,
         "comparison_id": comparison["id"],
         "comparison_role": comparison["comparison_role"],
+        "analysis_kind": comparison["analysis_kind"],
+        "truth_scope": comparison["truth_scope"],
+        "aggregation": comparison["aggregation"],
         "candidate_space": comparison["candidate_space"],
+        "inference_regulator_scope_by_configuration": regulator_scopes,
         "stratum": stratum,
         "metric": metric,
         "analysis_role": (
@@ -1032,6 +1265,8 @@ def _analyze_one(
             if is_primary
             else "contract_check"
             if state.get("purpose") == "smoke"
+            else "descriptive"
+            if contract["status"] == "descriptive"
             else "exploratory"
         ),
         "higher_is_better": True,
@@ -1134,7 +1369,24 @@ def _build_report(
     rows: list[dict[str, str]],
     state: dict[str, Any],
     benchmark_environment: dict[str, Any],
+    seed_plan: dict[str, Any],
 ) -> dict[str, Any]:
+    inferential = contract["status"] == "inferential"
+    root_seed = (
+        validate_plan_seed_record(
+            seed_plan,
+            seed=contract["random_seed"],
+            seed_derivation=contract["seed_derivation"],
+            required_namespace="full.test",
+            required_stream="statistical",
+            required_coordinates={"purpose": "phase_root"},
+        )
+        if inferential
+        else None
+    )
+    statistical_namespace = (
+        root_seed["seed_derivation"]["namespace"] if root_seed is not None else None
+    )
     analyses: list[dict[str, Any]] = []
     for comparison in contract["comparisons"]:
         for stratum in _expected_strata(state, comparison):
@@ -1147,9 +1399,12 @@ def _build_report(
                         comparison=comparison,
                         stratum=stratum,
                         metric=metric,
+                        seed_plan=seed_plan,
+                        statistical_namespace=statistical_namespace,
                     )
                 )
-    _apply_multiplicity(analyses, alpha=float(contract["alpha"]))
+    if inferential:
+        _apply_multiplicity(analyses, alpha=float(contract["alpha"]))
     controls = {
         comparison["id"]: comparison["control_configuration_id"]
         for comparison in contract["comparisons"]
@@ -1162,11 +1417,24 @@ def _build_report(
 
     tested = sum(analysis["status"] == "tested" for analysis in analyses)
     incomplete = sum(analysis["status"] == "incomplete_panel" for analysis in analyses)
-    overall_status = "tested" if tested else "not_testable"
-    if incomplete:
+    confirmatory = [
+        analysis for analysis in analyses if analysis["analysis_role"] == "confirmatory"
+    ]
+    confirmatory_tested = sum(analysis["status"] == "tested" for analysis in confirmatory)
+    if contract["status"] == "descriptive":
+        overall_status = (
+            ("contract_only" if purpose == "smoke" else "descriptive_only")
+            if analyses
+            else "incomplete_panel"
+        )
+    else:
+        overall_status = "tested" if tested else "incomplete_panel"
+    if inferential and confirmatory and confirmatory_tested != len(confirmatory):
+        overall_status = "confirmatory_incomplete"
+    elif incomplete:
         overall_status = "incomplete_panel" if not tested else "partially_tested"
     benchmark = input_manifest.get("benchmark_repository") or {}
-    return {
+    report = {
         "schema_version": STATISTICS_SCHEMA_VERSION,
         "profile_id": profile_id,
         "purpose": purpose,
@@ -1192,28 +1460,61 @@ def _build_report(
             "aggregation_order": [
                 "equal-weight group contexts within one execution",
                 "equal-weight algorithmic executions within configuration and dataset",
-                "one paired score per configuration and independent dataset",
+                "one equally weighted paired score per configuration and independent dataset",
             ],
-            "omnibus": "Friedman with midranks, tie correction and exact/Monte Carlo within-block label permutations",
-            "posthoc": "two-sided paired Wilcoxon signed-rank with zero differences discarded and exact/Monte Carlo sign permutations",
-            "multiplicity": "Holm step-down family-wise error control",
-            "effect_interval": "paired percentile bootstrap of the median difference, stratified by simulator",
+            "analysis_mode": contract["status"],
+            "omnibus": (
+                "Friedman with midranks, tie correction and exact/Monte Carlo "
+                "within-block label permutations"
+                if inferential
+                else None
+            ),
+            "posthoc": (
+                "two-sided paired Wilcoxon signed-rank with zero differences discarded "
+                "and exact/Monte Carlo sign permutations"
+                if inferential
+                else None
+            ),
+            "multiplicity": "Holm step-down family-wise error control" if inferential else None,
+            "effect_interval": (
+                "paired percentile bootstrap of the median difference with fixed "
+                "simulator-by-condition design strata"
+                if inferential
+                else None
+            ),
+            "descriptive_effects": (
+                None
+                if inferential
+                else "paired point estimates, ranks, win/tie/loss counts and effect sizes"
+            ),
             "missing_data": "complete predeclared panel required; no imputation or pairwise deletion",
             "candidate_space_validation": (
-                "identical ANDREA candidate-universe counts required for every paired context"
+                "identical dataset, source, target, candidate-edge and truth-edge identities, "
+                "plus identical ANDREA candidate-universe counts, required for every paired "
+                "context"
             ),
         },
         "summary": {
             "n_analyses": len(analyses),
-            "n_tested": tested,
-            "n_not_testable": sum(analysis["status"] == "not_testable" for analysis in analyses),
+            "n_inferential": tested,
+            "n_descriptive": sum(analysis["status"] == "descriptive_only" for analysis in analyses),
+            "n_contract_only": sum(analysis["status"] == "contract_only" for analysis in analyses),
             "n_incomplete": incomplete,
+            "n_confirmatory": len(confirmatory),
+            "n_confirmatory_inferential": confirmatory_tested,
             "n_control_wins": sum(
                 analysis["conclusion"] == "control_wins" for analysis in analyses
             ),
         },
         "analyses": analyses,
     }
+    if root_seed is not None:
+        report["seed_contract"] = {
+            "seed_plan": "experiments/v1/seeds/seed-plan.json",
+            "seed_plan_sha256": canonical_json_sha256(seed_plan),
+            "root": root_seed,
+        }
+    return report
 
 
 def _ranking_rows(report: dict[str, Any]) -> Iterable[dict[str, Any]]:
@@ -1234,6 +1535,7 @@ def _ranking_rows(report: dict[str, Any]) -> Iterable[dict[str, Any]]:
             yield {
                 **common,
                 "configuration_id": ranking["configuration_id"],
+                "inference_regulator_scope": ranking["inference_regulator_scope"],
                 "configuration_sha256": ranking["configuration_sha256"],
                 "tool_id": ranking["tool_id"],
                 "mean_score": ranking["mean_score"],
@@ -1266,13 +1568,19 @@ def _markdown_number(value: Any) -> str:
 
 
 def _markdown(report: dict[str, Any]) -> str:
+    inferential = report["contract"]["status"] == "inferential"
     lines = [
-        f"# Statistical benchmark report: {report['profile_id']}",
+        f"# Benchmark analysis report: {report['profile_id']}",
         "",
         f"Overall status: `{report['status']}`.",
         "",
         "Independent datasets are the paired blocks. Group contexts and algorithmic seeds "
-        "are averaged before testing; missing panels are never imputed.",
+        + (
+            "are averaged before testing; missing panels are never imputed."
+            if inferential
+            else "are averaged before descriptive comparison; no hypothesis test, confidence "
+            "interval or winner claim is produced."
+        ),
         "",
     ]
     for analysis in report["analyses"]:
@@ -1282,7 +1590,15 @@ def _markdown(report: dict[str, Any]) -> str:
                 f"## {analysis['comparison_id']} / {analysis['metric']}",
                 "",
                 f"- Stratum: `{stratum}`",
-                f"- Candidate space: `{analysis['candidate_space']}`",
+                f"- Evaluation candidate space: `{analysis['candidate_space']}`",
+                "- Inference regulator scopes: `"
+                + ", ".join(
+                    f"{configuration}={scope}"
+                    for configuration, scope in analysis[
+                        "inference_regulator_scope_by_configuration"
+                    ].items()
+                )
+                + "`",
                 f"- Role: `{analysis['analysis_role']}`",
                 f"- Status: `{analysis['status']}`",
                 f"- Blocks: {analysis['n_complete_blocks']}/{analysis['n_expected_blocks']}",
@@ -1300,6 +1616,31 @@ def _markdown(report: dict[str, Any]) -> str:
                 f"{mean_rank} | {mean_score} |"
             )
         lines.append("")
+        if not inferential:
+            lines.extend(
+                [
+                    "### Paired descriptive effects",
+                    "",
+                    "Positive differences favor the SPATHI control.",
+                    "",
+                    "| Competitor | Wins | Ties | Losses | Probability of superiority | "
+                    "Median difference | Hodges-Lehmann |",
+                    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+                ]
+            )
+            for pair in analysis["pairwise"]:
+                lines.append(
+                    f"| {pair['competitor_tool_id']} "
+                    f"(`{pair['competitor_configuration_id']}`) | {pair['wins']} | "
+                    f"{pair['ties']} | {pair['losses']} | "
+                    f"{_markdown_number(pair['probability_of_superiority'])} | "
+                    f"{_markdown_number(pair['median_difference'])} | "
+                    f"{_markdown_number(pair['hodges_lehmann'])} |"
+                )
+            lines.append("")
+            if analysis["reason"]:
+                lines.extend([analysis["reason"], ""])
+            continue
         omnibus = analysis["omnibus"]
         lines.extend(
             [
@@ -1315,7 +1656,8 @@ def _markdown(report: dict[str, Any]) -> str:
                 "### Post-hoc paired Wilcoxon tests",
                 "",
                 "Positive differences and rank-biserial effects favor the SPATHI control. "
-                "Intervals are paired percentile bootstrap intervals stratified by simulator.",
+                "Intervals are paired percentile bootstrap intervals with fixed "
+                "simulator-by-condition design strata.",
                 "",
                 "| Competitor | W | Raw p | p-Holm | Reject | Rank-biserial | Median difference | "
                 "Hodges-Lehmann | Bootstrap interval |",
@@ -1371,24 +1713,60 @@ def _write_outputs(directory: Path, report: dict[str, Any]) -> None:
 
 def _output_paths(directory: Path) -> tuple[Path, Path, Path, Path]:
     return (
-        directory / "statistics.json",
-        directory / "rankings.csv",
-        directory / "pairwise.csv",
-        directory / "report.md",
+        directory / STATISTICS_FILENAMES[0],
+        directory / STATISTICS_FILENAMES[1],
+        directory / STATISTICS_FILENAMES[2],
+        directory / STATISTICS_FILENAMES[3],
     )
 
 
-def _statistics_state_record(directory: Path, report: dict[str, Any]) -> dict[str, Any]:
+def _statistics_state_record(
+    directory: Path,
+    report: dict[str, Any],
+    run_root: Path,
+) -> dict[str, Any]:
+    safe_run_root = path_below_no_symlinks(
+        run_root,
+        run_root,
+        "statistics run root",
+        require_directory=True,
+    )
+    reports_root = path_below_no_symlinks(
+        safe_run_root / "reports",
+        safe_run_root,
+        "statistics reports root",
+        require_directory=True,
+    )
+    expected_directory = reports_root / "statistics"
+    if directory != expected_directory:
+        raise BenchmarkConfigError("Statistics directory is not the canonical run directory")
+    directory = path_below_no_symlinks(
+        directory,
+        reports_root,
+        "statistics directory",
+        require_directory=True,
+    )
+    if {member.name for member in directory.iterdir()} != set(STATISTICS_FILENAMES):
+        raise BenchmarkConfigError("Statistics directory has a non-canonical member set")
+    paths = tuple(
+        path_below_no_symlinks(
+            path,
+            directory,
+            f"statistics output {path.name}",
+            require_file=True,
+        )
+        for path in _output_paths(directory)
+    )
     files = {
         path.name: {
-            "path": str(path.resolve()),
+            "path": str(path),
             "sha256": sha256_file(path),
         }
-        for path in _output_paths(directory)
+        for path in paths
     }
     return {
         "schema_version": STATISTICS_SCHEMA_VERSION,
-        "directory": str(directory.resolve()),
+        "directory": str(directory),
         "input_metrics_sha256": report["inputs"]["metrics_csv"]["sha256"],
         "input_summary_sha256": report["inputs"]["summary_json"]["sha256"],
         "benchmark_environment_fingerprint": report["inputs"]["benchmark_environment"][
@@ -1410,14 +1788,27 @@ def _validate_existing_outputs(
         return None
     if not isinstance(record, dict) or record.get("schema_version") != STATISTICS_SCHEMA_VERSION:
         raise BenchmarkConfigError("Completed statistics state has an invalid schema")
-    expected_directory = (run_root / "reports" / "statistics").resolve()
-    directory = Path(str(record.get("directory", ""))).resolve()
-    if directory != expected_directory:
-        raise BenchmarkConfigError("Recorded statistics directory escapes this run")
-    if record.get("input_metrics_sha256") != sha256_file(metrics_path) or record.get(
-        "input_summary_sha256"
-    ) != sha256_file(summary_path):
-        raise BenchmarkConfigError("Recorded statistics were computed from different reports")
+    safe_run_root = path_below_no_symlinks(
+        run_root,
+        run_root,
+        "statistics run root",
+        require_directory=True,
+    )
+    reports_root = path_below_no_symlinks(
+        safe_run_root / "reports",
+        safe_run_root,
+        "statistics reports root",
+        require_directory=True,
+    )
+    expected_directory = reports_root / "statistics"
+    if record.get("directory") != str(expected_directory):
+        raise BenchmarkConfigError("Recorded statistics directory is not canonical for this run")
+    directory = path_below_no_symlinks(
+        expected_directory,
+        reports_root,
+        "statistics directory",
+        require_directory=True,
+    )
     if record.get("benchmark_environment_fingerprint") != (
         state.get("benchmark_environment") or {}
     ).get("fingerprint"):
@@ -1425,17 +1816,30 @@ def _validate_existing_outputs(
             "Recorded statistics were computed in a different benchmark environment"
         )
     files = record.get("files")
-    if not isinstance(files, dict):
-        raise BenchmarkConfigError("Completed statistics state has no file manifest")
+    if not isinstance(files, dict) or set(files) != set(STATISTICS_FILENAMES):
+        raise BenchmarkConfigError("Completed statistics state has a non-canonical file manifest")
+    observed_members = {member.name for member in directory.iterdir()}
+    if observed_members != set(STATISTICS_FILENAMES):
+        raise BenchmarkConfigError("Completed statistics directory has non-canonical members")
     paths = _output_paths(directory)
+    validated: list[tuple[Path, dict[str, Any]]] = []
     for path in paths:
         entry = files.get(path.name)
-        if (
-            not isinstance(entry, dict)
-            or Path(str(entry.get("path", ""))).resolve() != path.resolve()
-            or not path.is_file()
-            or entry.get("sha256") != sha256_file(path)
-        ):
+        if not isinstance(entry, dict) or entry.get("path") != str(path):
+            raise BenchmarkConfigError(f"Recorded statistical report is missing or changed: {path}")
+        safe_path = path_below_no_symlinks(
+            path,
+            directory,
+            f"statistics output {path.name}",
+            require_file=True,
+        )
+        validated.append((safe_path, entry))
+    if record.get("input_metrics_sha256") != sha256_file(metrics_path) or record.get(
+        "input_summary_sha256"
+    ) != sha256_file(summary_path):
+        raise BenchmarkConfigError("Recorded statistics were computed from different reports")
+    for path, entry in validated:
+        if entry.get("sha256") != sha256_file(path):
             raise BenchmarkConfigError(f"Recorded statistical report is missing or changed: {path}")
     return paths
 
@@ -1449,6 +1853,11 @@ def analyze_statistics(
     """Produce deterministic rankings and paired non-parametric comparisons."""
 
     input_manifest = validate_run_inputs(repo_root, profile_id, run_root)
+    validate_inference_attribution_contract(
+        repo_root=repo_root,
+        profile_id=profile_id,
+        run_root=run_root,
+    )
     state = load_state(run_root, profile_id)
     require_status(state, "completed", "Statistical analysis")
     benchmark_environment = benchmark_host_environment()
@@ -1459,18 +1868,19 @@ def analyze_statistics(
         raise BenchmarkConfigError(
             "The SPATHI-benchmarks Python environment changed after preflight; use a new run ID"
         )
-    reports = state.get("reports")
-    if not isinstance(reports, dict):
-        raise BenchmarkConfigError("Completed benchmark state has no summary reports")
-    reports_root = (run_root / "reports").resolve()
-    metrics_path = Path(str(reports.get("metrics_csv", ""))).resolve()
-    summary_path = Path(str(reports.get("summary_json", ""))).resolve()
-    if not metrics_path.is_relative_to(reports_root) or not summary_path.is_relative_to(
-        reports_root
-    ):
-        raise BenchmarkConfigError("Summary reports escape this benchmark run")
-    if not metrics_path.is_file() or not summary_path.is_file():
-        raise BenchmarkConfigError("Summary reports required for statistics are missing")
+    metrics_path, summary_path = validate_summary_reports(state, run_root)
+    safe_run_root = path_below_no_symlinks(
+        run_root,
+        run_root,
+        "statistics run root",
+        require_directory=True,
+    )
+    reports_root = path_below_no_symlinks(
+        safe_run_root / "reports",
+        safe_run_root,
+        "statistics reports root",
+        require_directory=True,
+    )
     existing = _validate_existing_outputs(
         state=state,
         run_root=run_root,
@@ -1481,43 +1891,12 @@ def analyze_statistics(
         return existing
 
     profile = frozen_profile(run_root, profile_id)
-    contract = _validate_statistics_contract(profile)
+    try:
+        seed_plan = load_seed_plan(repo_root / "experiments/v1/seeds/seed-plan.json")
+    except SeedPlanError as exc:
+        raise BenchmarkConfigError(f"Invalid benchmark seed plan: {exc}") from exc
+    contract = _validate_statistics_contract(profile, seed_plan)
     rows = _read_metrics(metrics_path)
-    statistics_dir = reports_root / "statistics"
-    if statistics_dir.exists():
-        try:
-            recovered = load_json_object(
-                statistics_dir / "statistics.json", "recoverable statistical report"
-            )
-        except BenchmarkConfigError as exc:
-            raise BenchmarkConfigError(
-                f"Incomplete statistics directory already exists: {statistics_dir}"
-            ) from exc
-        paths = _output_paths(statistics_dir)
-        if (
-            recovered.get("schema_version") != STATISTICS_SCHEMA_VERSION
-            or recovered.get("profile_id") != profile_id
-            or recovered.get("purpose") != state["purpose"]
-            or recovered.get("inputs", {}).get("metrics_csv", {}).get("sha256")
-            != sha256_file(metrics_path)
-            or recovered.get("inputs", {}).get("summary_json", {}).get("sha256")
-            != sha256_file(summary_path)
-            or recovered.get("inputs", {}).get("benchmark_environment", {}).get("fingerprint")
-            != benchmark_environment["fingerprint"]
-            or not all(path.is_file() for path in paths)
-            or any(
-                recovered.get("outputs", {}).get(path.name, {}).get("sha256") != sha256_file(path)
-                for path in paths[1:]
-            )
-        ):
-            raise BenchmarkConfigError(
-                f"Incomplete or stale statistics directory already exists: {statistics_dir}"
-            )
-        state["statistics"] = _statistics_state_record(statistics_dir, recovered)
-        state["updated_at"] = _utc_now()
-        write_state(run_root, state)
-        return paths
-
     report = _build_report(
         profile_id=profile_id,
         purpose=state["purpose"],
@@ -1528,7 +1907,46 @@ def analyze_statistics(
         rows=rows,
         state=state,
         benchmark_environment=benchmark_environment,
+        seed_plan=seed_plan,
     )
+    statistics_dir = reports_root / "statistics"
+    if statistics_dir.exists() or statistics_dir.is_symlink():
+        statistics_dir = path_below_no_symlinks(
+            statistics_dir,
+            reports_root,
+            "statistics directory",
+            require_directory=True,
+        )
+        expected_directory = Path(
+            tempfile.mkdtemp(prefix=".statistics-recovery-", dir=reports_root)
+        )
+        try:
+            _write_outputs(expected_directory, report)
+            expected_paths = _output_paths(expected_directory)
+            observed_paths = _output_paths(statistics_dir)
+            expected_members = {path.name for path in expected_paths}
+            observed_members = (
+                {path.name for path in statistics_dir.iterdir()}
+                if statistics_dir.is_dir() and not statistics_dir.is_symlink()
+                else set()
+            )
+            matches = observed_members == expected_members and all(
+                observed.is_file()
+                and not observed.is_symlink()
+                and sha256_file(observed) == sha256_file(expected)
+                for observed, expected in zip(observed_paths, expected_paths, strict=True)
+            )
+        finally:
+            shutil.rmtree(expected_directory)
+        if not matches:
+            raise BenchmarkConfigError(
+                f"Incomplete or stale statistics directory already exists: {statistics_dir}"
+            )
+        state["statistics"] = _statistics_state_record(statistics_dir, report, safe_run_root)
+        state["updated_at"] = _utc_now()
+        write_state(run_root, state)
+        return _output_paths(statistics_dir)
+
     temporary = Path(tempfile.mkdtemp(prefix=".statistics-", dir=reports_root))
     try:
         _write_outputs(temporary, report)
@@ -1536,7 +1954,7 @@ def analyze_statistics(
     finally:
         if temporary.exists():
             shutil.rmtree(temporary)
-    state["statistics"] = _statistics_state_record(statistics_dir, report)
+    state["statistics"] = _statistics_state_record(statistics_dir, report, safe_run_root)
     state["updated_at"] = _utc_now()
     write_state(run_root, state)
     return _output_paths(statistics_dir)

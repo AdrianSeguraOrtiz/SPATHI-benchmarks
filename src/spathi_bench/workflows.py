@@ -1,15 +1,14 @@
 """High-level calibration and comparison workflows.
 
-The public workflows keep adaptive artifacts below ``work/`` and rely on the
+The public workflows keep staged-search artifacts below ``work/`` and rely on the
 normal pipeline snapshot to freeze them by content.  Git remains responsible
 only for source inputs; no intermediate commit is required.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +24,6 @@ from .config import (
     BenchmarkConfigError,
     load_json_object,
     load_repo_lock,
-    validate_calibration_contracts,
 )
 from .pipeline import (
     build_spathi_image,
@@ -37,27 +35,35 @@ from .pipeline import (
     run_inference,
     validate_handoffs,
 )
+from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
+from .report_publication import publish_workflow_report
 from .reporting import render_calibration_report, render_comparison_report
+from .reporting.common import central_report_path
+from .runtime import (
+    andrea_host_environment,
+    benchmark_host_environment,
+    docker_runtime_environment,
+)
+from .safe_io import atomic_write_json, path_below_no_symlinks
 from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
 
-CALIBRATION_STAGES = ("convergence", "structure", "estimator", "validation")
+CALIBRATION_STAGES = (
+    "geometry",
+    "estimator",
+    "interaction",
+    "estimator_scale_transfer",
+    "convergence",
+    "validation",
+)
 CALIBRATION_BUDGETS = ("reduced", "full")
 _WORKFLOW_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
-    return path
-
-
 def _workflow_identity(repo_root: Path) -> dict[str, str]:
-    root = repo_root.resolve()
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
     benchmark = observe_benchmark_repository(root, require_clean=True)
     repository_lock = load_repo_lock(root)
     search_path = root / "experiments/v1/spathi/search-space.json"
@@ -67,6 +73,9 @@ def _workflow_identity(repo_root: Path) -> dict[str, str]:
         "spathi_commit": str(repository_lock["repositories"]["spathi"]["commit"]),
         "andrea_commit": str(repository_lock["repositories"]["andrea"]["commit"]),
         "search_space_sha256": sha256_file(search_path),
+        "andrea_environment": str(andrea_host_environment()["fingerprint"]),
+        "benchmark_environment": str(benchmark_host_environment()["fingerprint"]),
+        "docker_runtime_environment": str(docker_runtime_environment()["fingerprint"]),
     }
     identity["fingerprint"] = canonical_json_sha256(identity)
     return identity
@@ -90,18 +99,21 @@ def _calibration_identity(identity: dict[str, str], calibration_budget: str) -> 
 
 
 def _workflow_work_root(repo_root: Path, work_root: Path) -> tuple[Path, Path]:
-    root = repo_root.resolve()
-    work = work_root.resolve()
-    if not work.is_relative_to(root / "work"):
-        raise BenchmarkConfigError("High-level workflow work root must be below repository work/")
+    root = path_below_no_symlinks(repo_root, repo_root, "Benchmark repository")
+    work = path_below_no_symlinks(
+        work_root,
+        root / "work",
+        "High-level workflow work root",
+    )
     return root, work
 
 
-def _completed_workflow_root(
+def _reportable_workflow_root(
     *,
     base: Path,
     workflow_type: str,
     requested_id: str | None,
+    required_fields: dict[str, Any] | None = None,
 ) -> Path:
     if requested_id is not None:
         if not _WORKFLOW_ID.fullmatch(requested_id):
@@ -113,28 +125,93 @@ def _completed_workflow_root(
             (path.parent for path in base.glob("*/workflow.json")),
             key=lambda path: path.name,
         )
-    completed: list[Path] = []
+    reportable: list[Path] = []
     for candidate in candidates:
         state_path = candidate / "workflow.json"
         if not state_path.is_file():
             continue
-        state = load_json_object(state_path, f"{workflow_type} workflow state")
-        if state.get("workflow_type") == workflow_type and state.get("status") == "complete":
-            completed.append(candidate.resolve())
-    if requested_id is not None and not completed:
-        raise BenchmarkConfigError(
-            f"No completed {workflow_type} workflow named {requested_id!r} exists below {base}"
+        safe_state_path = path_below_no_symlinks(
+            state_path,
+            base,
+            f"{workflow_type} workflow state",
+            require_file=True,
         )
-    if not completed:
-        raise BenchmarkConfigError(f"No completed {workflow_type} workflow exists below {base}")
-    if len(completed) > 1:
-        option = "--run-id" if workflow_type == "calibration" else "--calibration-run-id"
-        identifiers = ", ".join(path.name for path in completed)
+        state = load_json_object(safe_state_path, f"{workflow_type} workflow state")
+        if (
+            state.get("workflow_type") == workflow_type
+            and state.get("status") in {"publishing", "complete"}
+            and all(state.get(key) == value for key, value in (required_fields or {}).items())
+        ):
+            reportable.append(safe_state_path.parent)
+    if requested_id is not None and not reportable:
         raise BenchmarkConfigError(
-            f"Multiple completed {workflow_type} workflows exist ({identifiers}); select one with "
+            f"No reportable {workflow_type} workflow named {requested_id!r} exists below {base}"
+        )
+    if not reportable:
+        raise BenchmarkConfigError(f"No reportable {workflow_type} workflow exists below {base}")
+    if len(reportable) > 1:
+        option = "--run-id" if workflow_type == "calibration" else "--efficiency-run-id"
+        identifiers = ", ".join(path.name for path in reportable)
+        raise BenchmarkConfigError(
+            f"Multiple reportable {workflow_type} workflows exist ({identifiers}); select one with "
             f"{option}"
         )
-    return completed[0]
+    return reportable[0]
+
+
+def _report_paths(
+    *, version_root: Path, workflow_type: str, scope: str, flow_id: str
+) -> tuple[Path, Path]:
+    html_path = central_report_path(
+        version_root=version_root,
+        report_type=workflow_type,
+        scope=scope,
+        flow_id=flow_id,
+    )
+    return html_path, html_path.parent / f"{workflow_type}-report.manifest.json"
+
+
+def _publishing_state(state: dict[str, Any], *, workflow_type: str) -> dict[str, Any]:
+    if state.get("status") not in {"publishing", "complete"}:
+        raise BenchmarkConfigError(
+            f"{workflow_type.title()} report publication requires frozen workflow outputs"
+        )
+    publishing = dict(state)
+    publishing["status"] = "publishing"
+    publishing.pop("reports", None)
+    return publishing
+
+
+def _publish_report(
+    *,
+    repo_root: Path,
+    version_root: Path,
+    workflow_root: Path,
+    state: dict[str, Any],
+    workflow_type: str,
+    scope: str,
+    render: Callable[[], dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    html_path, manifest_path = _report_paths(
+        version_root=version_root,
+        workflow_type=workflow_type,
+        scope=scope,
+        flow_id=str(state.get("flow_id", "")),
+    )
+    expected_report = html_path.relative_to(repo_root.resolve()).as_posix()
+    if state.get("interactive_report") != expected_report:
+        raise BenchmarkConfigError(
+            f"{workflow_type.title()} workflow records a non-canonical report path"
+        )
+    return publish_workflow_report(
+        repo_root=repo_root,
+        workflow_path=workflow_root / "workflow.json",
+        publishing_state=_publishing_state(state, workflow_type=workflow_type),
+        html_path=html_path,
+        manifest_path=manifest_path,
+        render=render,
+        label=workflow_type,
+    )
 
 
 def rebuild_calibration_report(
@@ -149,21 +226,26 @@ def rebuild_calibration_report(
     if calibration_budget not in CALIBRATION_BUDGETS:
         raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
     root, work = _workflow_work_root(repo_root, work_root)
-    workflow_root = _completed_workflow_root(
+    workflow_root = _reportable_workflow_root(
         base=work / "v1/workflows/calibration" / calibration_budget,
         workflow_type="calibration",
         requested_id=run_id,
     )
     with run_lock(workflow_root):
-        report = render_calibration_report(
+        state = load_json_object(workflow_root / "workflow.json", "calibration workflow state")
+        _state, report = _publish_report(
             repo_root=root,
             version_root=work / "v1",
             workflow_root=workflow_root,
+            state=state,
+            workflow_type="calibration",
+            scope=calibration_budget,
+            render=lambda: render_calibration_report(
+                repo_root=root,
+                version_root=work / "v1",
+                workflow_root=workflow_root,
+            ),
         )
-        state_path = workflow_root / "workflow.json"
-        state = load_json_object(state_path, "calibration workflow state")
-        state["reports"] = report
-        _write_json(state_path, state)
     return report
 
 
@@ -172,43 +254,39 @@ def rebuild_comparison_report(
     repo_root: Path,
     work_root: Path,
     profile: str,
-    calibration_run_id: str | None,
+    efficiency_run_id: str | None,
 ) -> dict[str, Any]:
     """Rebuild only the presentation layer of one completed comparison."""
 
     if profile not in {"reduced", "full"}:
         raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
     root, work = _workflow_work_root(repo_root, work_root)
-    requested_flow_id = (
-        f"{profile}-{calibration_run_id}" if calibration_run_id is not None else None
-    )
-    workflow_root = _completed_workflow_root(
+    if efficiency_run_id is not None and not _WORKFLOW_ID.fullmatch(efficiency_run_id):
+        raise BenchmarkConfigError(f"Invalid efficiency run ID: {efficiency_run_id!r}")
+    workflow_root = _reportable_workflow_root(
         base=work / "v1/workflows/comparison" / profile,
         workflow_type="comparison",
-        requested_id=requested_flow_id,
+        requested_id=None,
+        required_fields=(
+            {"efficiency_flow_id": efficiency_run_id} if efficiency_run_id is not None else None
+        ),
     )
     with run_lock(workflow_root):
-        report = render_comparison_report(
+        state = load_json_object(workflow_root / "workflow.json", "comparison workflow state")
+        _state, report = _publish_report(
             repo_root=root,
             version_root=work / "v1",
             workflow_root=workflow_root,
+            state=state,
+            workflow_type="comparison",
+            scope=profile,
+            render=lambda: render_comparison_report(
+                repo_root=root,
+                version_root=work / "v1",
+                workflow_root=workflow_root,
+            ),
         )
-        state_path = workflow_root / "workflow.json"
-        state = load_json_object(state_path, "comparison workflow state")
-        state["reports"] = report
-        stage = require_mapping_for_workflow(state, "comparison")
-        pipeline = stage.get("pipeline")
-        if isinstance(pipeline, dict):
-            pipeline["interactive_report"] = report["html"]
-        _write_json(state_path, state)
     return report
-
-
-def require_mapping_for_workflow(state: dict[str, Any], stage_id: str) -> dict[str, Any]:
-    stages = state.get("stages")
-    if not isinstance(stages, dict) or not isinstance(stages.get(stage_id), dict):
-        raise BenchmarkConfigError(f"Completed workflow has no {stage_id!r} stage")
-    return stages[stage_id]
 
 
 def _adopt_workflow(
@@ -234,7 +312,7 @@ def _adopt_workflow(
             raise BenchmarkConfigError(
                 f"Existing {workflow_type} workflow {flow_id!r} has incompatible {key}"
             )
-    if observed.get("status") not in {"running", "complete"}:
+    if observed.get("status") not in {"running", "publishing", "complete"}:
         raise BenchmarkConfigError(f"Existing {workflow_type} workflow has invalid status")
     if not isinstance(observed.get("stages"), dict):
         raise BenchmarkConfigError(f"Existing {workflow_type} workflow has invalid stages")
@@ -274,6 +352,44 @@ def run_profile_pipeline(
         export_analysis(**common, andrea_repo=andrea_repo)
         report_paths = summarize(**common)
         statistics_paths = analyze_statistics(**common) if statistics else ()
+        if statistics_paths:
+            statistics_report = load_json_object(
+                statistics_paths[0], "comparison statistical report"
+            )
+            contract = statistics_report.get("contract")
+            analysis_mode = contract.get("status") if isinstance(contract, dict) else None
+            if analysis_mode == "inferential":
+                confirmatory = [
+                    analysis
+                    for analysis in statistics_report.get("analyses", [])
+                    if isinstance(analysis, dict)
+                    and analysis.get("analysis_role") == "confirmatory"
+                ]
+                if not confirmatory or any(
+                    analysis.get("status") != "tested" for analysis in confirmatory
+                ):
+                    raise BenchmarkConfigError(
+                        "Comparison cannot complete unless every confirmatory primary analysis "
+                        "is tested on its complete predeclared panel"
+                    )
+            else:
+                analyses = statistics_report.get("analyses")
+                descriptive_statuses = {"contract_only", "descriptive_only"}
+                if (
+                    analysis_mode != "descriptive"
+                    or statistics_report.get("status") not in descriptive_statuses
+                    or not isinstance(analyses, list)
+                    or not analyses
+                    or any(
+                        not isinstance(analysis, dict)
+                        or analysis.get("status") not in descriptive_statuses
+                        for analysis in analyses
+                    )
+                ):
+                    raise BenchmarkConfigError(
+                        "Descriptive comparison cannot complete unless every predeclared paired "
+                        "analysis is complete"
+                    )
     return {
         "run_root": str(run_root.resolve()),
         "summary": str((run_root / "reports/summary.json").resolve()),
@@ -291,7 +407,7 @@ def run_calibration_workflow(
     calibration_budget: str = "full",
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Run or resume the complete four-stage adaptive SPATHI calibration."""
+    """Run or resume the complete bounded six-stage SPATHI calibration."""
 
     if calibration_budget not in CALIBRATION_BUDGETS:
         raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
@@ -308,122 +424,105 @@ def run_calibration_workflow(
             identity=identity,
             extra={"calibration_budget": calibration_budget},
         )
-        _write_json(state_path, state)
-        parent_ranking: Path | None = None
-        for stage_id in CALIBRATION_STAGES:
-            profile_id = stage_profile_id(stage_id, calibration_budget)
-            stage_root = workflow_root / "stages" / stage_id
-            bundle = stage_root / "requests"
-            profile_file = stage_root / f"{profile_id}.json"
-            ranking = stage_root / "ranking.json"
-            run_root = work / "v1" / profile_id / f"{flow_id}-{stage_id}"
-            materialize_calibration_stage(
-                repo_root=root,
-                stage_id=stage_id,
-                calibration_budget=calibration_budget,
-                parent_ranking_path=parent_ranking,
-                output_dir=bundle,
-                profile_output=profile_file,
+        if state["status"] == "running":
+            atomic_write_json(
+                state_path,
+                state,
+                "calibration workflow state",
+                boundary=work,
             )
-            pipeline = run_profile_pipeline(
-                repo_root=root,
-                profile_id=profile_id,
-                profile_file=profile_file,
-                run_root=run_root,
-                andrea_repo=andrea_repo,
-                spathi_repo=spathi_repo,
-                statistics=False,
-            )
-            rank_calibration_stage(
-                repo_root=root,
-                stage_id=stage_id,
-                calibration_budget=calibration_budget,
-                manifest_path=bundle / "calibration-manifest.json",
-                summary_path=run_root / "reports/summary.json",
-                output_path=ranking,
-            )
-            state["stages"][stage_id] = {
-                "profile_id": profile_id,
-                "profile": str(profile_file.relative_to(root)),
-                "run_root": str(run_root.relative_to(root)),
-                "ranking": str(ranking.relative_to(root)),
-                "ranking_sha256": sha256_file(ranking),
-                "status": "ranked",
-                "pipeline": pipeline,
-            }
-            _write_json(state_path, state)
-            parent_ranking = ranking
+            parent_ranking: Path | None = None
+            for stage_id in CALIBRATION_STAGES:
+                profile_id = stage_profile_id(stage_id, calibration_budget)
+                stage_root = workflow_root / "stages" / stage_id
+                bundle = stage_root / "requests"
+                profile_file = stage_root / f"{profile_id}.json"
+                ranking = stage_root / "ranking.json"
+                run_root = work / "v1" / profile_id / f"{flow_id}-{stage_id}"
+                materialize_calibration_stage(
+                    repo_root=root,
+                    stage_id=stage_id,
+                    calibration_budget=calibration_budget,
+                    parent_ranking_path=parent_ranking,
+                    output_dir=bundle,
+                    profile_output=profile_file,
+                )
+                pipeline = run_profile_pipeline(
+                    repo_root=root,
+                    profile_id=profile_id,
+                    profile_file=profile_file,
+                    run_root=run_root,
+                    andrea_repo=andrea_repo,
+                    spathi_repo=spathi_repo,
+                    statistics=False,
+                )
+                rank_calibration_stage(
+                    repo_root=root,
+                    stage_id=stage_id,
+                    calibration_budget=calibration_budget,
+                    manifest_path=bundle / "calibration-manifest.json",
+                    summary_path=run_root / "reports/summary.json",
+                    output_path=ranking,
+                )
+                state["stages"][stage_id] = {
+                    "profile_id": profile_id,
+                    "profile": str(profile_file.relative_to(root)),
+                    "run_root": str(run_root.relative_to(root)),
+                    "ranking": str(ranking.relative_to(root)),
+                    "ranking_sha256": sha256_file(ranking),
+                    "status": "ranked",
+                    "pipeline": pipeline,
+                }
+                atomic_write_json(
+                    state_path,
+                    state,
+                    "calibration workflow state",
+                    boundary=work,
+                )
+                parent_ranking = ranking
 
-        if parent_ranking is None:
-            raise AssertionError("Calibration workflow produced no validation ranking")
-        selected_config = workflow_root / "selected-config.json"
-        freeze_calibration_selection(
-            repo_root=root,
-            ranking_path=parent_ranking,
-            output_path=selected_config,
-        )
-        state.update(
-            {
-                "status": "complete",
-                "selected_config": str(selected_config.relative_to(root)),
-                "selected_config_sha256": sha256_file(selected_config),
-            }
-        )
-        _write_json(state_path, state)
-        report = render_calibration_report(
+            if parent_ranking is None:
+                raise AssertionError("Calibration workflow produced no validation ranking")
+            selected_config = workflow_root / "selected-config.json"
+            freeze_calibration_selection(
+                repo_root=root,
+                ranking_path=parent_ranking,
+                output_path=selected_config,
+            )
+            report_path, _manifest_path = _report_paths(
+                version_root=work / "v1",
+                workflow_type="calibration",
+                scope=calibration_budget,
+                flow_id=flow_id,
+            )
+            state.update(
+                {
+                    "status": "publishing",
+                    "selected_config": str(selected_config.relative_to(root)),
+                    "selected_config_sha256": sha256_file(selected_config),
+                    "interactive_report": report_path.relative_to(root).as_posix(),
+                }
+            )
+            atomic_write_json(
+                state_path,
+                state,
+                "calibration workflow state",
+                boundary=work,
+            )
+        state, _report = _publish_report(
             repo_root=root,
             version_root=work / "v1",
             workflow_root=workflow_root,
+            state=state,
+            workflow_type="calibration",
+            scope=calibration_budget,
+            render=lambda: render_calibration_report(
+                repo_root=root,
+                version_root=work / "v1",
+                workflow_root=workflow_root,
+            ),
         )
-        state["reports"] = report
-        _write_json(state_path, state)
     return state
-
-
-def _calibration_selection(
-    *,
-    repo_root: Path,
-    work_root: Path,
-    identity: dict[str, str],
-    calibration_budget: str,
-    calibration_run_id: str | None,
-) -> tuple[str, Path]:
-    calibration_identity = _calibration_identity(identity, calibration_budget)
-    calibration_id = _flow_id(calibration_identity, calibration_run_id)
-    workflow_root = work_root / "v1/workflows/calibration" / calibration_budget / calibration_id
-    state_path = workflow_root / "workflow.json"
-    if not state_path.is_file():
-        raise BenchmarkConfigError(
-            f"No completed {calibration_budget} calibration matches the current SPATHI "
-            f"and benchmark inputs; run scripts/calibrate.sh --profile {calibration_budget} "
-            "first"
-        )
-    state = load_json_object(state_path, "calibration workflow state")
-    if (
-        state.get("status") != "complete"
-        or state.get("identity") != calibration_identity
-        or state.get("calibration_budget") != calibration_budget
-    ):
-        raise BenchmarkConfigError(
-            f"No completed {calibration_budget} calibration matches the current SPATHI "
-            f"and benchmark inputs; run scripts/calibrate.sh --profile {calibration_budget} "
-            "first"
-        )
-    raw_selected = state.get("selected_config")
-    if not isinstance(raw_selected, str):
-        raise BenchmarkConfigError("Completed calibration has no selected configuration")
-    selected = (repo_root / raw_selected).resolve()
-    if not selected.is_relative_to(workflow_root.resolve()) or not selected.is_file():
-        raise BenchmarkConfigError("Calibration selected configuration escapes its workflow")
-    if sha256_file(selected) != state.get("selected_config_sha256"):
-        raise BenchmarkConfigError("Calibration selected configuration changed after freezing")
-    _search, selection = validate_calibration_contracts(repo_root, selected)
-    if selection.get("calibration_budget") != calibration_budget:
-        raise BenchmarkConfigError(
-            f"Calibration {calibration_id!r} uses budget "
-            f"{selection.get('calibration_budget')!r}, not {calibration_budget!r}"
-        )
-    return calibration_id, selected
 
 
 def run_comparison_workflow(
@@ -433,7 +532,7 @@ def run_comparison_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str = "full",
-    calibration_run_id: str | None = None,
+    efficiency_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Run or resume one selected-SPATHI comparison with all declared baselines."""
 
@@ -441,14 +540,14 @@ def run_comparison_workflow(
         raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
     root, work = _workflow_work_root(repo_root, work_root)
     identity = _workflow_identity(root)
-    calibration_id, selected_config = _calibration_selection(
+    production_config, _production = completed_production_config(
         repo_root=root,
         work_root=work,
-        identity=identity,
-        calibration_budget=profile,
-        calibration_run_id=calibration_run_id,
+        budget=profile,
+        efficiency_run_id=efficiency_run_id,
     )
-    flow_id = f"{profile}-{calibration_id}"
+    efficiency_id = production_config.parent.name
+    flow_id = f"{profile}-{efficiency_id}-{identity['fingerprint'][:10]}"
     workflow_root = work / "v1/workflows/comparison" / profile / flow_id
     state_path = workflow_root / "workflow.json"
     profile_id = f"{profile}-v1"
@@ -460,47 +559,71 @@ def run_comparison_workflow(
             identity=identity,
             extra={
                 "profile": profile,
-                "calibration_budget": profile,
-                "calibration_flow_id": calibration_id,
+                "efficiency_budget": profile,
+                "efficiency_flow_id": efficiency_id,
+                "production_config": str(production_config.relative_to(root)),
+                "production_config_sha256": sha256_file(production_config),
             },
         )
-        _write_json(state_path, state)
-        bundle = workflow_root / "requests"
-        profile_file = workflow_root / f"{profile_id}.json"
-        materialize_benchmark_plan(
-            repo_root=root,
-            template_profile_id=profile,
-            baseline_plan_path=root / f"experiments/v1/inference/plans/{profile}-v1.json",
-            output_dir=bundle,
-            profile_output=profile_file,
-            selected_config_path=selected_config,
-        )
-        run_root = work / "v1" / profile_id / flow_id
-        pipeline = run_profile_pipeline(
-            repo_root=root,
-            profile_id=profile_id,
-            profile_file=profile_file,
-            run_root=run_root,
-            andrea_repo=andrea_repo,
-            spathi_repo=spathi_repo,
-            statistics=True,
-        )
-        state.update(
-            {
-                "status": "complete",
-                "stages": {"comparison": {"status": "complete", "pipeline": pipeline}},
-                "profile_file": str(profile_file.relative_to(root)),
-                "profile_sha256": sha256_file(profile_file),
-            }
-        )
-        _write_json(state_path, state)
-        report = render_comparison_report(
+        if state["status"] == "running":
+            atomic_write_json(
+                state_path,
+                state,
+                "comparison workflow state",
+                boundary=work,
+            )
+            bundle = workflow_root / "requests"
+            profile_file = workflow_root / f"{profile_id}.json"
+            materialize_benchmark_plan(
+                repo_root=root,
+                template_profile_id=profile,
+                baseline_plan_path=root / f"experiments/v1/inference/plans/{profile}-v1.json",
+                output_dir=bundle,
+                profile_output=profile_file,
+                production_config_path=production_config,
+            )
+            run_root = work / "v1" / profile_id / flow_id
+            pipeline = run_profile_pipeline(
+                repo_root=root,
+                profile_id=profile_id,
+                profile_file=profile_file,
+                run_root=run_root,
+                andrea_repo=andrea_repo,
+                spathi_repo=spathi_repo,
+                statistics=True,
+            )
+            report_path, _manifest_path = _report_paths(
+                version_root=work / "v1",
+                workflow_type="comparison",
+                scope=profile,
+                flow_id=flow_id,
+            )
+            state.update(
+                {
+                    "status": "publishing",
+                    "stages": {"comparison": {"status": "complete", "pipeline": pipeline}},
+                    "profile_file": str(profile_file.relative_to(root)),
+                    "profile_sha256": sha256_file(profile_file),
+                    "interactive_report": report_path.relative_to(root).as_posix(),
+                }
+            )
+            atomic_write_json(
+                state_path,
+                state,
+                "comparison workflow state",
+                boundary=work,
+            )
+        state, _report = _publish_report(
             repo_root=root,
             version_root=work / "v1",
             workflow_root=workflow_root,
-            run_root=run_root,
+            state=state,
+            workflow_type="comparison",
+            scope=profile,
+            render=lambda: render_comparison_report(
+                repo_root=root,
+                version_root=work / "v1",
+                workflow_root=workflow_root,
+            ),
         )
-        state["reports"] = report
-        state["stages"]["comparison"]["pipeline"]["interactive_report"] = report["html"]
-        _write_json(state_path, state)
     return state

@@ -1,0 +1,174 @@
+{% extends "base.html.j2" %}
+
+{% block title %}Dimensional transfer · SPATHI Benchmarks{% endblock %}
+{% block kicker %}POST-FREEZE ACCURACY TRANSFER{% endblock %}
+{% block heading %}Does SPATHI preserve accuracy as one problem dimension reaches a declared stress level?{% endblock %}
+{% block lead %}Dynamic group-specific truth, a frozen production policy, and a budget-specific operational or descriptive scale panel.{% endblock %}
+
+{% block content %}
+  <section class="section dataset-overview-section" aria-labelledby="scope-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Scientific scope</p>
+        <h2 id="scope-heading">What this experiment can establish</h2>
+      </div>
+      <p class="section-help">Only the full budget expands one axis at a time. The reduced budget is a low-cost operational subset; the conjunctive stress panel belongs to computational scalability and carries no accuracy claim.</p>
+    </div>
+    <div id="scope-notice"></div>
+    <div id="overview-cards" class="stat-grid"></div>
+  </section>
+
+  <section class="section" aria-labelledby="dimensions-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Evidence base</p>
+        <h2 id="dimensions-heading">Budget-specific truth-bearing conditions and routing controls</h2>
+      </div>
+      <p class="section-help">Marker area represents candidate TF count. Blue intensity represents mean adjusted AUPR; both axes are logarithmic so every declared shape remains visible.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="shape-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Dimensional panel</p>
+            <h3 id="shape-chart-title">Cells, genes, TFs, and adjusted AUPR</h3>
+          </div>
+        </div>
+        <div id="shape-chart" class="plot" role="img" aria-label="Cells versus genes with TF count and adjusted AUPR"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="accuracy-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Truth-bearing accuracy</p>
+            <h3 id="accuracy-chart-title">Raw and prevalence-adjusted AUPR</h3>
+          </div>
+        </div>
+        <div id="accuracy-chart" class="plot" role="img" aria-label="Raw and adjusted AUPR by transfer condition"></div>
+      </section>
+    </div>
+    <section class="card" aria-labelledby="condition-table-title">
+      <div class="card-heading card-heading--actions">
+        <div>
+          <p class="card-kicker">Declared conditions</p>
+          <h3 id="condition-table-title">Condition-level summaries</h3>
+        </div>
+        <div id="condition-table-actions"></div>
+      </div>
+      <div id="condition-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="exact-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Post-freeze diagnostic</p>
+        <h2 id="exact-heading">Exact reference versus production policy</h2>
+      </div>
+      <p class="section-help">The same algorithm seed is paired within each dataset. This diagnostic measures transfer after selection and can never reopen the frozen policy decision.</p>
+    </div>
+    <div id="exact-notice"></div>
+    <div id="exact-summary" class="stat-grid"></div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="exact-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Production minus exact</p>
+            <h3 id="exact-chart-title">Accuracy and coverage deltas</h3>
+          </div>
+        </div>
+        <div id="exact-chart" class="plot" role="img" aria-label="Paired production minus exact deltas in adjusted AUPR and coverage"></div>
+      </section>
+      <section class="card" aria-labelledby="exact-table-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Every pair</p>
+            <h3 id="exact-table-title">Accuracy, coverage, and cost</h3>
+          </div>
+        </div>
+        <div id="exact-table" class="table-wrap"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="contrast-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Descriptive transfer</p>
+        <h2 id="contrast-heading">Full-budget change from each matched anchor</h2>
+      </div>
+      <p class="section-help">The full-budget bars are descriptive one-axis scale contrasts in mean adjusted AUPR, not hypothesis tests or confidence intervals. This panel is intentionally empty for reduced runs.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="contrast-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Scale endpoint minus anchor</p>
+            <h3 id="contrast-chart-title">Descriptive one-axis adjusted-AUPR contrasts</h3>
+          </div>
+        </div>
+        <div id="contrast-chart" class="plot" role="img" aria-label="Descriptive adjusted AUPR differences for genes TFs and cells"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="runtime-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Execution cost</p>
+            <h3 id="runtime-chart-title">Median SPATHI wall time</h3>
+          </div>
+        </div>
+        <div id="runtime-chart" class="plot" role="img" aria-label="Median SPATHI wall time by transfer condition"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="dataset-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Independent units</p>
+        <h2 id="dataset-heading">Every generated dataset and seed</h2>
+      </div>
+      <p class="section-help">The full budget repeats only the bounded 2,200-gene anchor. Endpoint observations remain visible rather than being presented as inferential replication.</p>
+    </div>
+    <section class="card">
+      <div id="dataset-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="feasibility-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Prospective execution boundary</p>
+        <h2 id="feasibility-heading">Why the full-budget scale endpoints were admitted</h2>
+      </div>
+      <p class="section-help">The scheduled workflow is the sole evidence and retains both completion and attributable failure.</p>
+    </div>
+    <section class="card">
+      <div id="admission-summary" class="stat-grid"></div>
+      <div id="endpoint-admission"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="policy-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Frozen method</p>
+        <h2 id="policy-heading">Production policy and interpretation limits</h2>
+      </div>
+      <p class="section-help">No result from this phase can change the selected SPATHI configuration.</p>
+    </div>
+    <div id="policy-summary" class="stat-grid"></div>
+    <div class="provenance-grid">
+      <div id="limitations" class="card"></div>
+      <div id="comparison-reuse" class="card"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="provenance-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Traceability and reuse</p>
+        <h2 id="provenance-heading">Scientific inputs and ANDREA inter-stage ZIPs</h2>
+      </div>
+    </div>
+    <div id="report-links" class="card"></div>
+  </section>
+{% endblock %}

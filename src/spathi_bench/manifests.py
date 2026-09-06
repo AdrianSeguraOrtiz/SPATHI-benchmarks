@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import BenchmarkConfigError, load_json_object
+from .safe_io import path_below_no_symlinks
 
 
 def unique_direct_manifest(output_root: Path, filename: str) -> Path:
-    candidates = sorted(output_root.glob(f"*/{filename}"))
+    if not filename or Path(filename).name != filename or "\\" in filename:
+        raise BenchmarkConfigError(f"Manifest filename is not canonical: {filename!r}")
+    root = path_below_no_symlinks(
+        output_root,
+        output_root,
+        "manifest output root",
+        require_directory=True,
+    )
+    candidates = sorted(root.glob(f"*/{filename}"))
     if len(candidates) != 1:
         raise BenchmarkConfigError(
-            f"Expected exactly one {filename} directly below {output_root}; found {len(candidates)}"
+            f"Expected exactly one {filename} directly below {root}; found {len(candidates)}"
         )
-    return candidates[0].resolve()
+    return path_below_no_symlinks(
+        candidates[0],
+        root,
+        f"direct {filename}",
+        require_file=True,
+    )
 
 
 def resolve_manifest_member(root: Path, raw_path: Any, label: str) -> Path:
@@ -29,20 +44,35 @@ def resolve_manifest_member(root: Path, raw_path: Any, label: str) -> Path:
         or any(part in {".", ".."} for part in relative.parts)
     ):
         raise BenchmarkConfigError(f"{label} must be a canonical relative path: {raw_path}")
-    candidate = (root / Path(*relative.parts)).resolve()
-    if not candidate.is_relative_to(root.resolve()):
-        raise BenchmarkConfigError(f"{label} escapes its package root: {raw_path}")
+    safe_root = path_below_no_symlinks(
+        root,
+        root,
+        f"{label} package root",
+        require_directory=True,
+    )
+    candidate = Path(os.path.abspath(safe_root / Path(*relative.parts)))
+    candidate = path_below_no_symlinks(
+        candidate,
+        safe_root,
+        label,
+    )
     if not candidate.is_file():
         raise BenchmarkConfigError(f"{label} does not exist: {candidate}")
     return candidate
 
 
 def datasets_from_benchmark(manifest_path: Path, generation_job: str) -> list[dict[str, Any]]:
-    manifest = load_json_object(manifest_path, "benchmark manifest")
+    safe_manifest = path_below_no_symlinks(
+        manifest_path,
+        manifest_path.parent,
+        "benchmark manifest",
+        require_file=True,
+    )
+    manifest = load_json_object(safe_manifest, "benchmark manifest")
     raw_datasets = manifest.get("datasets")
     if not isinstance(raw_datasets, list) or not raw_datasets:
         raise BenchmarkConfigError("benchmark-manifest.json has no datasets")
-    root = manifest_path.parent
+    root = safe_manifest.parent
     datasets: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in raw_datasets:

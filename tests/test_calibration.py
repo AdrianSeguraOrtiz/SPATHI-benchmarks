@@ -16,19 +16,25 @@ from spathi_bench.calibration import (
     expand_stage_runs,
     expand_validation_runs,
     load_search_space,
-    select_stage_candidates,
-    select_validation_candidate,
+    materialize_group_policy,
+    rank_stage_candidates,
+    rank_validation_candidates,
+    resolve_group_policy,
     stage_profile_id,
+    validate_calibration_panel,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _candidate_by_variant(
-    candidates: tuple[CandidateConfiguration, ...],
-    variant_id: str,
+    candidates: tuple[CandidateConfiguration, ...], variant_id: str
 ) -> CandidateConfiguration:
     return next(candidate for candidate in candidates if candidate.variant_id == variant_id)
+
+
+def _seeds(search: dict[str, Any], budget: str, stage: str) -> tuple[int, ...]:
+    return tuple(search["calibration_budgets"][budget]["algorithmic_seeds"][stage])
 
 
 def _summary_rows(
@@ -36,14 +42,11 @@ def _summary_rows(
     *,
     role: str,
     seeds: tuple[int, ...],
-    datasets: tuple[str, ...] = ("dataset_a", "dataset_b"),
     aupr: dict[tuple[str, str, int], float] | None = None,
     wall_time: dict[str, float] | None = None,
-    peak_memory: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     aupr = aupr or {}
     wall_time = wall_time or {}
-    peak_memory = peak_memory or {}
     return [
         {
             "configuration_id": candidate.configuration_id,
@@ -57,363 +60,424 @@ def _summary_rows(
                 else f"{candidate.configuration_id}__seed_{seed}"
             ),
             "execution_sha256": "1" * 64,
-            "aupr_directed": aupr.get(
-                (candidate.configuration_id, dataset_id, seed),
-                0.5,
-            ),
+            "aupr_directed": aupr.get((candidate.configuration_id, dataset_id, seed), 0.5),
             "wall_time_seconds": wall_time.get(candidate.configuration_id, 10.0),
-            "peak_memory_mb": peak_memory.get(candidate.configuration_id, 100.0),
+            "peak_memory_mb": 100.0,
             "n_group_contexts": 2,
             "group_contexts": ["group:a", "group:b"],
         }
         for candidate in candidates
-        for dataset_id in datasets
+        for dataset_id in ("dataset_a", "dataset_b")
         for seed in seeds
     ]
 
 
-def test_loads_validated_search_space() -> None:
-    search_space = load_search_space(REPO_ROOT)
+def _stage_chain(search: dict[str, Any]) -> dict[str, tuple[CandidateConfiguration, ...]]:
+    geometry = expand_stage_candidates(search, "geometry")
+    estimator = expand_stage_candidates(search, "estimator", parents=geometry[:3])
+    interaction = expand_stage_candidates(search, "interaction", parents=estimator[:3])
+    scale_transfer = expand_stage_candidates(
+        search, "estimator_scale_transfer", parents=interaction[:3]
+    )
+    convergence = expand_stage_candidates(search, "convergence", parents=scale_transfer[:2])
+    return {
+        "geometry": geometry,
+        "estimator": estimator,
+        "interaction": interaction,
+        "estimator_scale_transfer": scale_transfer,
+        "convergence": convergence,
+    }
 
-    assert search_space["id"] == "spathi_calibration_v1"
-    assert search_space["smoke_contract"]["configuration_id"] == "spathi_smoke"
-    assert search_space["smoke_contract"]["eligible_for_scientific_selection"] is False
+
+def _panel_for_rows(
+    rows: list[dict[str, Any]],
+    *,
+    contexts: tuple[str, ...] = ("group:a", "group:b"),
+) -> dict[str, Any]:
+    dataset_ids = sorted({row["dataset_id"] for row in rows})
+    run_ids = sorted({row["run_id"] for row in rows})
+    return {
+        "schema_version": "1.0",
+        "dataset_role": rows[0]["dataset_role"],
+        "dataset_ids": dataset_ids,
+        "run_ids": run_ids,
+        "n_expected_executions": len(dataset_ids) * len(run_ids),
+        "handoff_validation_sha256": "a" * 64,
+        "datasets": [
+            {
+                "dataset_id": dataset_id,
+                "expected_group_contexts": list(contexts),
+                "n_group_contexts": len(contexts),
+                "dataset_manifest_sha256": "b" * 64,
+                "group_assignments_sha256": "c" * 64,
+                "ground_truth_manifest_sha256": "d" * 64,
+                "truth_network_sha256": "e" * 64,
+            }
+            for dataset_id in dataset_ids
+        ],
+    }
 
 
-def test_expands_convergence_deterministically_with_all_seeds() -> None:
-    search_space = load_search_space(REPO_ROOT)
+def test_calibration_panel_rejects_systematic_context_omission() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidate = expand_stage_candidates(search, "geometry")[:1]
+    rows = _summary_rows(
+        candidate,
+        role="development",
+        seeds=_seeds(search, "full", "geometry"),
+    )
+    panel = _panel_for_rows(rows, contexts=("group:a", "group:b", "group:c"))
 
-    candidates = expand_stage_candidates(search_space, "convergence")
-    runs = expand_stage_runs(search_space, "convergence", "full")
+    with pytest.raises(CalibrationError, match="does not cover its declared group contexts"):
+        validate_calibration_panel(panel, rows, expected_role="development")
 
-    assert [candidate.variant_id for candidate in candidates] == [
-        "reference",
-        "trees_100",
-        "trees_250",
-        "trees_1000",
+
+def test_calibration_panel_requires_the_complete_dataset_run_product() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidate = expand_stage_candidates(search, "geometry")[:1]
+    rows = _summary_rows(
+        candidate,
+        role="development",
+        seeds=_seeds(search, "full", "geometry"),
+    )
+    panel = _panel_for_rows(rows)
+    validate_calibration_panel(panel, rows, expected_role="development")
+
+    with pytest.raises(CalibrationError, match="omits planned executions"):
+        validate_calibration_panel(panel, rows[:-1], expected_role="development")
+
+
+def test_search_is_bounded_staged_and_covers_current_scientific_parameters() -> None:
+    search = load_search_space(REPO_ROOT)
+
+    assert [stage["id"] for stage in search["stages"]] == [
+        "geometry",
+        "estimator",
+        "interaction",
+        "estimator_scale_transfer",
+        "convergence",
     ]
-    assert len(runs) == 20
-    assert runs[0].run_id == "convergence__reference__seed_1729"
-    assert [run.algorithm_seed for run in runs[:5]] == [1729, 2718, 31415, 57721, 104729]
-    assert all(run.dataset_role == "development" for run in runs)
-    assert len({candidate.configuration_sha256 for candidate in candidates}) == 4
-    assert runs[0].parameters["random_seed"] == 1729
+    assert search["stages"][-1]["strategy"] == "fixed_ceiling_sweep"
+    geometry_overrides = [item["parameter_overrides"] for item in search["stages"][0]["candidates"]]
+    estimator_overrides = [
+        item["parameter_overrides"] for item in search["stages"][1]["candidates"]
+    ]
+    assert {20, 100} <= {
+        item["n_components"] for item in geometry_overrides if "n_components" in item
+    }
+    assert {"none", "standard"} <= {
+        search["base_configuration"]["distance_standardization"],
+        *(
+            item["distance_standardization"]
+            for item in geometry_overrides
+            if "distance_standardization" in item
+        ),
+    }
+    observed_max_features = [
+        search["base_configuration"]["max_features"],
+        *[item["max_features"] for item in estimator_overrides if "max_features" in item],
+    ]
+    assert {"sqrt", "log2", 0.25, 0.5} <= set(observed_max_features)
+    assert any(type(item) is int and item == 1 for item in observed_max_features)
+    assert any(type(item) is float and item == 1.0 for item in observed_max_features)
+    assert {2, 5} <= {
+        item["min_samples_leaf"] for item in estimator_overrides if "min_samples_leaf" in item
+    }
+    assert any(item.get("max_depth") == 20 for item in estimator_overrides)
+    assert any(item.get("bootstrap") is True for item in estimator_overrides)
+    assert any(
+        item.get("tree_method") == "random-forest" and item.get("bootstrap") is False
+        for item in estimator_overrides
+    )
+    assert {0.5, 2.0} <= {
+        item["bandwidth_scale"] for item in geometry_overrides if "bandwidth_scale" in item
+    }
+    assert search["base_configuration"]["distance_metric"] == "cosine"
+    assert search["base_configuration"]["n_estimators"] == 250
+    assert search["base_configuration"]["max_features"] == "sqrt"
+    assert search["calibration_constraints"]["fixed_parameters"] == {
+        "pca_svd_solver": "auto",
+        "bandwidth": "auto",
+        "target_eligibility": "all",
+        "adaptive_trees": False,
+    }
 
 
-def test_reduced_budget_changes_evidence_only_and_has_distinct_profile_ids() -> None:
-    search_space = load_search_space(REPO_ROOT)
+def test_conditional_policy_has_one_total_routing_rule_and_shared_estimators() -> None:
+    search = load_search_space(REPO_ROOT)
+    policy = materialize_group_policy(search, search["base_configuration"])
 
-    full_candidates = expand_stage_candidates(search_space, "convergence")
-    reduced_candidates = expand_stage_candidates(search_space, "convergence")
-    reduced_runs = expand_stage_runs(search_space, "convergence", "reduced")
+    single = resolve_group_policy(policy, 1)
+    multi = resolve_group_policy(policy, 2)
+    assert (single["weight_mode"], single["distance_metric"], single["group_size_correction"]) == (
+        "cell-distance",
+        "euclidean",
+        "none",
+    )
+    assert multi == search["base_configuration"]
+    for parameter in policy["shared_parameters"]:
+        assert single[parameter] == multi[parameter]
+    with pytest.raises(CalibrationError, match="positive integer"):
+        resolve_group_policy(policy, 0)
 
-    assert reduced_candidates == full_candidates
-    assert len(reduced_runs) == 8
-    assert [run.algorithm_seed for run in reduced_runs[:2]] == [1729, 31415]
-    assert stage_profile_id("convergence", "reduced") == "calibration-reduced-convergence"
+
+def test_geometry_expansion_and_requests_are_deterministic_and_policy_aware() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidates = expand_stage_candidates(search, "geometry")
+    runs = expand_stage_runs(search, "geometry", "full")
+    seeds = _seeds(search, "full", "geometry")
+
+    assert candidates[0].variant_id == "base"
+    assert len(candidates) == 14
+    assert len(runs) == len(candidates) * len(seeds)
+    assert [run.algorithm_seed for run in runs[: len(seeds)]] == list(seeds)
+    assert runs[0].parameters["random_seed"] == seeds[0]
+    assert resolve_group_policy(runs[0].parameters["group_policy"], 1)["weight_mode"] == (
+        "cell-distance"
+    )
+    tools, custom, metadata = build_andrea_requests(
+        runs,
+        docker_image="spathi:locked",
+        calibration_budget="full",
+    )
+    assert len(tools["runs"]) == len(custom["tools"]) == len(metadata["runs"]) == len(runs)
+    assert tools["runs"][0]["params"] == runs[0].parameters
+    assert metadata["runs"][0]["selection_role"] == "base"
+
+
+def test_reduced_and_full_algorithmic_seed_domains_are_disjoint() -> None:
+    search = load_search_space(REPO_ROOT)
+
+    for stage in (
+        "geometry",
+        "estimator",
+        "estimator_scale_transfer",
+        "interaction",
+        "convergence",
+        "validation",
+    ):
+        assert set(_seeds(search, "reduced", stage)).isdisjoint(_seeds(search, "full", stage))
+    assert stage_profile_id("interaction", "reduced") == "calibration-reduced-interaction"
     assert stage_profile_id("validation", "full") == "selection-full-validation"
-    with pytest.raises(CalibrationError, match="Unknown calibration budget"):
-        expand_stage_runs(search_space, "convergence", "quick")
 
 
 def test_stage_profile_cannot_mix_budget_and_template() -> None:
     template = json.loads(
-        (REPO_ROOT / "experiments/v1/profiles/calibration-reduced.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "experiments/v1/profiles/calibration-reduced.json").read_text()
     )
-
     profile = build_stage_profile(
         template,
-        "convergence",
+        "geometry",
         "reduced",
-        bundle_path="work/calibration/reduced/convergence/plan",
+        bundle_path="work/calibration/reduced/geometry/plan",
+        search_space=load_search_space(REPO_ROOT),
     )
-
-    assert profile["id"] == "calibration-reduced-convergence"
-    assert profile["calibration_budget"] == "reduced"
+    assert profile["id"] == "calibration-reduced-geometry"
+    assert {job["split_id"] for job in profile["generation_jobs"]} == {"development_v1"}
+    scale_profile = build_stage_profile(
+        template,
+        "estimator_scale_transfer",
+        "reduced",
+        bundle_path="work/calibration/reduced/estimator-scale-transfer/plan",
+        search_space=load_search_space(REPO_ROOT),
+    )
+    assert [job["condition_id"] for job in scale_profile["generation_jobs"]] == [
+        "scmultisim_estimator_scale_transfer"
+    ]
+    assert scale_profile["generation_jobs"][0]["split_id"] == (
+        "development_estimator_scale_transfer_v1"
+    )
     with pytest.raises(CalibrationError, match="full.*template"):
         build_stage_profile(
             template,
-            "convergence",
+            "geometry",
             "full",
-            bundle_path="work/calibration/full/convergence/plan",
+            bundle_path="work/calibration/full/geometry/plan",
+            search_space=load_search_space(REPO_ROOT),
         )
-
-
-def test_renders_calibration_runs_as_standard_andrea_requests() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    runs = expand_stage_runs(search_space, "convergence", "full")
-
-    tools, custom, metadata = build_andrea_requests(runs, docker_image="spathi:locked")
-
-    assert len(tools["runs"]) == len(custom["tools"]) == len(metadata["runs"]) == 20
-    assert tools["runs"][0]["tool_id"] == f"custom_{runs[0].run_id}"
-    assert tools["runs"][0]["params"]["random_seed"] == 1729
-    assert custom["tools"][0]["docker_image"] == "spathi:locked"
-    assert metadata["runs"][0]["algorithm_seed_parameter"] == "random_seed"
 
 
 def test_later_stages_are_bounded_and_parent_order_independent() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    convergence = expand_stage_candidates(search_space, "convergence")
-    convergence_parent = _candidate_by_variant(convergence, "trees_250")
-    structures = expand_stage_candidates(
-        search_space,
-        "structure",
-        parents=(convergence_parent,),
-    )
+    search = load_search_space(REPO_ROOT)
+    geometry = expand_stage_candidates(search, "geometry")
+    parents = (geometry[0], geometry[1], geometry[2])
+    forward = expand_stage_candidates(search, "estimator", parents=parents)
+    reverse = expand_stage_candidates(search, "estimator", parents=tuple(reversed(parents)))
 
-    assert len(structures) == 7
-    assert (
-        len(
-            expand_stage_runs(
-                search_space,
-                "structure",
-                "full",
-                parents=(convergence_parent,),
-            )
-        )
-        == 21
+    assert forward == reverse
+    assert len(forward) <= 3 * 12
+    interaction = expand_stage_candidates(search, "interaction", parents=forward[:3])
+    scale_transfer = expand_stage_candidates(
+        search, "estimator_scale_transfer", parents=interaction[:3]
     )
-
-    first_parent = _candidate_by_variant(structures, "inherited")
-    second_parent = _candidate_by_variant(structures, "group_distance")
-    forward = expand_stage_runs(
-        search_space,
-        "estimator",
-        "full",
-        parents=(first_parent, second_parent),
-    )
-    reversed_order = expand_stage_runs(
-        search_space,
-        "estimator",
-        "full",
-        parents=(second_parent, first_parent),
-    )
-
-    assert len(forward) == 30
-    assert [run.run_id for run in forward] == [run.run_id for run in reversed_order]
+    expected_scale_variants = {
+        "high_tf_features_sqrt",
+        "high_tf_features_log2",
+        "high_tf_features_one",
+        "high_tf_features_fraction_025",
+        "high_tf_features_fraction_050",
+        "high_tf_features_fraction_100",
+    }
+    assert len(scale_transfer) == 3 * len(expected_scale_variants)
+    for parent in interaction[:3]:
+        assert {
+            candidate.variant_id
+            for candidate in scale_transfer
+            if candidate.parent_configuration_id == parent.configuration_id
+        } == expected_scale_variants
+    assert all(candidate.variant_id != "inherited" for candidate in scale_transfer)
+    convergence = expand_stage_candidates(search, "convergence", parents=scale_transfer[:2])
+    assert len(interaction) <= 3 * 6
+    assert len(convergence) <= 3 * 4
+    assert {candidate.parameters["n_estimators"] for candidate in convergence} == {
+        250,
+        500,
+        750,
+        1000,
+    }
 
 
 def test_expansion_rejects_missing_wrong_or_excess_parents() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    convergence = expand_stage_candidates(search_space, "convergence")
-
+    search = load_search_space(REPO_ROOT)
+    geometry = expand_stage_candidates(search, "geometry")
     with pytest.raises(CalibrationError, match="requires parent"):
-        expand_stage_candidates(search_space, "structure")
-    with pytest.raises(CalibrationError, match="requires parents from 'structure'"):
-        expand_stage_candidates(search_space, "estimator", parents=(convergence[0],))
-
-    structure = expand_stage_candidates(search_space, "structure", parents=(convergence[0],))
-    with pytest.raises(CalibrationError, match="at most 2 parents"):
-        expand_stage_candidates(search_space, "estimator", parents=tuple(structure[:3]))
+        expand_stage_candidates(search, "estimator")
+    with pytest.raises(CalibrationError, match="requires parents from 'estimator'"):
+        expand_stage_candidates(search, "interaction", parents=(geometry[0],))
+    with pytest.raises(CalibrationError, match="at most 3 parents"):
+        expand_stage_candidates(search, "estimator", parents=geometry[:4])
 
 
-def test_stage_selection_uses_hierarchical_aupr_before_tie_breakers() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    candidates = expand_stage_candidates(search_space, "convergence")
-    seeds = (1729, 2718, 31415, 57721, 104729)
-    winner = _candidate_by_variant(candidates, "trees_100")
-    aupr = {(winner.configuration_id, "dataset_a", seed): 0.9 for seed in seeds} | {
-        (winner.configuration_id, "dataset_b", seed): 0.3 for seed in seeds
-    }
-    rows = _summary_rows(
-        candidates,
-        role="development",
-        seeds=seeds,
-        aupr=aupr,
-        wall_time={winner.configuration_id: 1000.0},
-        peak_memory={winner.configuration_id: 1000.0},
-    )
-
-    selected = select_stage_candidates(
-        search_space,
-        "convergence",
-        candidates,
-        rows,
-        calibration_budget="full",
-    )
-
-    assert len(selected) == 1
-    assert selected[0].candidate == winner
-    assert selected[0].hierarchical_aupr == pytest.approx(0.6)
-    assert selected[0].dataset_count == 2
-    assert selected[0].algorithm_seed_count == 5
-
-
-def test_tie_breakers_apply_stability_then_cost_then_simplicity() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    candidates = expand_stage_candidates(search_space, "convergence")
-    seeds = (1729, 2718, 31415, 57721, 104729)
-    reference = _candidate_by_variant(candidates, "reference")
-    unstable = _candidate_by_variant(candidates, "trees_100")
+def test_stage_selection_uses_aupr_before_stability_and_simplicity() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidates = expand_stage_candidates(search, "geometry")
+    seeds = _seeds(search, "full", "geometry")
+    winner = candidates[1]
     aupr = {
-        (unstable.configuration_id, dataset_id, seed): value
-        for dataset_id in ("dataset_a", "dataset_b")
-        for seed, value in zip(seeds, (0.3, 0.4, 0.5, 0.6, 0.7), strict=True)
+        (winner.configuration_id, dataset_id, seed): score
+        for dataset_id, score in (("dataset_a", 0.9), ("dataset_b", 0.3))
+        for seed in seeds
     }
-
-    stable_selection = select_stage_candidates(
-        search_space,
-        "convergence",
+    ranking = rank_stage_candidates(
+        search,
+        "geometry",
         candidates,
         _summary_rows(
             candidates,
             role="development",
             seeds=seeds,
             aupr=aupr,
-            wall_time={
-                **{candidate.configuration_id: 100.0 for candidate in candidates},
-                unstable.configuration_id: 1.0,
-            },
+            wall_time={winner.configuration_id: 1000.0},
         ),
         calibration_budget="full",
     )
-    assert stable_selection[0].candidate == reference
+    assert ranking[0].candidate == winner
+    assert ranking[0].hierarchical_aupr == pytest.approx(0.6)
 
-    cheap = _candidate_by_variant(candidates, "trees_250")
-    cost_selection = select_stage_candidates(
-        search_space,
-        "convergence",
+
+def test_calibration_does_not_use_runtime_as_a_selection_tie_breaker() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidates = expand_stage_candidates(search, "geometry")
+    by_simplicity: dict[int, list[CandidateConfiguration]] = {}
+    for candidate in candidates:
+        by_simplicity.setdefault(candidate.base_parameter_changes, []).append(candidate)
+    tied = next(items[:2] for items in by_simplicity.values() if len(items) >= 2)
+    expected = min(tied, key=lambda candidate: candidate.configuration_id)
+    seeds = _seeds(search, "full", "geometry")
+    aupr = {
+        (candidate.configuration_id, dataset_id, seed): (0.8 if candidate in tied else 0.1)
+        for candidate in candidates
+        for dataset_id in ("dataset_a", "dataset_b")
+        for seed in seeds
+    }
+    wall_time = {candidate.configuration_id: 1.0 for candidate in candidates}
+    wall_time[expected.configuration_id] = 10_000.0
+
+    ranking = rank_stage_candidates(
+        search,
+        "geometry",
         candidates,
         _summary_rows(
             candidates,
             role="development",
             seeds=seeds,
-            wall_time={cheap.configuration_id: 1.0},
+            aupr=aupr,
+            wall_time=wall_time,
         ),
         calibration_budget="full",
     )
-    assert cost_selection[0].candidate == cheap
 
-    simplicity_selection = select_stage_candidates(
-        search_space,
+    assert ranking[0].candidate == expected
+
+
+def test_convergence_promotes_the_smallest_noninferior_stable_ceiling_per_parent() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidates = _stage_chain(search)["convergence"]
+    seeds = _seeds(search, "reduced", "convergence")
+    parents = sorted({candidate.parent_configuration_id for candidate in candidates})
+    parent_quality = dict(zip(parents, (0.80, 0.75), strict=True))
+    aupr: dict[tuple[str, str, int], float] = {}
+    for candidate in candidates:
+        ceiling = int(candidate.parameters["n_estimators"])
+        score = parent_quality[candidate.parent_configuration_id] - (
+            0.001 if ceiling == 250 else 0.0
+        )
+        for dataset_id in ("dataset_a", "dataset_b"):
+            for seed in seeds:
+                aupr[(candidate.configuration_id, dataset_id, seed)] = score
+
+    ranking = rank_stage_candidates(
+        search,
         "convergence",
         candidates,
-        _summary_rows(candidates, role="development", seeds=seeds),
-        calibration_budget="full",
+        _summary_rows(candidates, role="development", seeds=seeds, aupr=aupr),
+        calibration_budget="reduced",
     )
-    assert simplicity_selection[0].candidate == reference
+
+    promoted = ranking[:2]
+    assert len({item.candidate.parent_configuration_id for item in promoted}) == 2
+    assert {item.candidate.parameters["n_estimators"] for item in promoted} == {250}
 
 
-def test_selection_rejects_role_mixing_and_unbalanced_rows() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    candidates = expand_stage_candidates(search_space, "convergence")
-    seeds = (1729, 2718, 31415, 57721, 104729)
-    rows = _summary_rows(candidates, role="development", seeds=seeds)
-    rows[0]["dataset_role"] = "test"
-
-    with pytest.raises(CalibrationError, match="expected 'development'"):
-        select_stage_candidates(
-            search_space,
-            "convergence",
-            candidates,
-            rows,
-            calibration_budget="full",
-        )
-
-    unbalanced = _summary_rows(candidates, role="development", seeds=seeds)
-    unbalanced.pop()
-    with pytest.raises(CalibrationError, match="same algorithmic seeds"):
-        select_stage_candidates(
-            search_space,
-            "convergence",
-            candidates,
-            unbalanced,
-            calibration_budget="full",
-        )
-
-    inconsistent_contexts = _summary_rows(candidates, role="development", seeds=seeds)
-    inconsistent_contexts[0]["group_contexts"] = ["group:a"]
-    inconsistent_contexts[0]["n_group_contexts"] = 1
-    with pytest.raises(CalibrationError, match="same group contexts"):
-        select_stage_candidates(
-            search_space,
-            "convergence",
-            candidates,
-            inconsistent_contexts,
-            calibration_budget="full",
-        )
-
-
-def test_validation_selects_only_from_bounded_estimator_finalists() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    convergence = expand_stage_candidates(search_space, "convergence")
-    structures = expand_stage_candidates(
-        search_space,
-        "structure",
-        parents=(convergence[0],),
-    )
-    estimators = expand_stage_candidates(
-        search_space,
-        "estimator",
-        parents=(structures[0],),
-    )
-    finalists = tuple(estimators[:3])
-    validation_runs = expand_validation_runs(search_space, finalists, "full")
-    assert len(validation_runs) == 9
-    assert all(run.dataset_role == "validation" for run in validation_runs)
-    seeds = (1729, 31415, 104729)
+def test_validation_accepts_only_bounded_convergence_finalists() -> None:
+    search = load_search_space(REPO_ROOT)
+    finalists = _stage_chain(search)["convergence"][:3]
+    seeds = _seeds(search, "full", "validation")
+    runs = expand_validation_runs(search, finalists, "full")
+    assert len(runs) == len(finalists) * len(seeds)
     best = finalists[1]
     aupr = {
         (best.configuration_id, dataset_id, seed): 0.7
         for dataset_id in ("dataset_a", "dataset_b")
         for seed in seeds
     }
-
-    selected = select_validation_candidate(
-        search_space,
+    selected = rank_validation_candidates(
+        search,
         finalists,
         _summary_rows(finalists, role="validation", seeds=seeds, aupr=aupr),
         calibration_budget="full",
     )
-    assert selected.candidate == best
-
-    with pytest.raises(CalibrationError, match="expected 'validation'"):
-        select_validation_candidate(
-            search_space,
-            finalists,
-            _summary_rows(finalists, role="test", seeds=seeds, aupr=aupr),
-            calibration_budget="full",
-        )
-    with pytest.raises(CalibrationError, match="between 2 and 3"):
-        select_validation_candidate(
-            search_space,
-            tuple(estimators[:4]),
-            _summary_rows(tuple(estimators[:4]), role="validation", seeds=seeds),
-            calibration_budget="full",
-        )
+    assert selected[0].candidate == best
+    geometry = expand_stage_candidates(search, "geometry")
+    with pytest.raises(CalibrationError, match="convergence stage"):
+        expand_validation_runs(search, geometry[:3], "full")
 
 
-def test_candidate_role_cannot_be_relabelled_for_search() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    candidates = expand_stage_candidates(search_space, "convergence")
-    contaminated = (replace(candidates[0], dataset_role="validation"), *candidates[1:])
-
+def test_candidate_integrity_rejects_role_and_parameter_mutation() -> None:
+    search = load_search_space(REPO_ROOT)
+    candidates = expand_stage_candidates(search, "geometry")
+    seeds = _seeds(search, "full", "geometry")
+    relabelled = (replace(candidates[0], dataset_role="validation"), *candidates[1:])
     with pytest.raises(CalibrationError, match="must use development"):
-        select_stage_candidates(
-            search_space,
-            "convergence",
-            contaminated,
-            [],
-            calibration_budget="full",
-        )
+        rank_stage_candidates(search, "geometry", relabelled, [], calibration_budget="full")
 
-
-def test_candidate_parameters_cannot_be_mutated_after_expansion() -> None:
-    search_space = load_search_space(REPO_ROOT)
-    candidates = expand_stage_candidates(search_space, "convergence")
-    mutated_parameters = dict(candidates[0].parameters)
-    mutated_parameters["n_estimators"] = 1
-    contaminated = (
-        replace(candidates[0], parameters=mutated_parameters),
-        *candidates[1:],
-    )
-
+    parameters = dict(candidates[0].parameters)
+    parameters["adaptive_trees"] = True
+    mutated = (replace(candidates[0], parameters=parameters), *candidates[1:])
     with pytest.raises(CalibrationError, match="parameter digest is inconsistent"):
-        select_stage_candidates(
-            search_space,
-            "convergence",
-            contaminated,
-            [],
-            calibration_budget="full",
-        )
+        rank_stage_candidates(search, "geometry", mutated, [], calibration_budget="full")
+
+    rows = _summary_rows(candidates, role="development", seeds=seeds)
+    rows.pop()
+    with pytest.raises(CalibrationError, match="same algorithmic seeds"):
+        rank_stage_candidates(search, "geometry", candidates, rows, calibration_budget="full")

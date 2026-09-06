@@ -22,6 +22,13 @@
     valid: "Valid",
     ok: "OK",
     success: "Successful",
+    adoptable: "Adoptable",
+    paired_baseline: "Paired baseline",
+    candidate_adopted: "Candidate adopted",
+    reference_retained: "Exact policy retained",
+    descriptive_only: "Descriptive only",
+    confirmed: "Confirmed",
+    descriptive: "Descriptive",
     exploratory: "Exploratory",
     confirmatory: "Confirmatory",
     incomplete: "Incomplete",
@@ -137,7 +144,6 @@
       epr_at_truth_count: "EPR @ truth edge count",
       group_only: "Group only",
       order_aware: "Order aware",
-      pseudotime_aware: "Pseudotime aware",
       prior_assisted: "Prior assisted",
       directed: "Directed",
       topology: "Topology",
@@ -151,6 +157,7 @@
       no_detected_difference: "No detected difference",
       incomplete_panel: "Incomplete panel",
       partially_tested: "Partially tested",
+      confirmatory_incomplete: "Confirmatory incomplete",
       dyngen: "dyngen",
       scmultisim: "scMultiSim",
       n_estimators: "Number of trees (n_estimators)",
@@ -187,8 +194,8 @@
 
   function statusTone(status) {
     const normalized = String(status || "unknown").toLowerCase();
-    if (["complete", "completed", "selected", "ranked", "tested", "passed", "valid", "ok", "success", "confirmatory"].includes(normalized)) return "success";
-    if (["exploratory", "pending", "warning", "incomplete", "incomplete_panel", "partially_tested", "not_testable", "unavailable"].includes(normalized)) return "warning";
+    if (["complete", "completed", "selected", "ranked", "tested", "passed", "valid", "ok", "success", "confirmatory", "adoptable", "candidate_adopted", "confirmed"].includes(normalized)) return "success";
+    if (["exploratory", "descriptive", "descriptive_only", "pending", "warning", "incomplete", "incomplete_panel", "partially_tested", "confirmatory_incomplete", "not_testable", "unavailable"].includes(normalized)) return "warning";
     if (["failed", "error", "invalid"].includes(normalized)) return "error";
     return "neutral";
   }
@@ -534,8 +541,11 @@
     const badges = query("#header-badges");
     clear(badges);
     badges.appendChild(badge((workflow && workflow.status) || "unknown"));
-    if (workflow && (workflow.calibration_budget || workflow.profile_id)) {
-      badges.appendChild(badge("neutral", humanize(workflow.calibration_budget || workflow.profile_id)));
+    if (workflow && (workflow.calibration_budget || workflow.profile || workflow.profile_id)) {
+      badges.appendChild(badge(
+        "neutral",
+        humanize(workflow.calibration_budget || workflow.profile || workflow.profile_id),
+      ));
     }
     if (integrity && integrity.status) badges.appendChild(badge(integrity.status, `Integrity: ${statusLabel(integrity.status)}`));
 

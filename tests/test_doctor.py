@@ -10,6 +10,15 @@ import pytest
 from spathi_bench.doctor import run_doctor, write_doctor_report
 
 
+def _config_partitions() -> dict[str, list[str]]:
+    return {
+        "paths": ["expression", "groups", "output_dir", "tf_list"],
+        "scientific_inputs": ["centroid_weights", "target_list"],
+        "scientific_parameters": ["weight_mode"],
+        "operational_options": ["report", "threads"],
+    }
+
+
 def _repositories(tmp_path: Path) -> tuple[Path, Path]:
     andrea = tmp_path / "ANDREA"
     spathi = tmp_path / "SPATHI"
@@ -43,8 +52,11 @@ def _successful_runner(
                 {
                     "module": str(spathi_repo / "src" / "spathi" / "__init__.py"),
                     "missing_exports": [],
+                    "config_field_partitions": _config_partitions(),
                     "missing_config_fields": [],
-                    "unsupported_required_config_fields": [],
+                    "unexpected_config_fields": [],
+                    "config_partition_overlap": [],
+                    "requiredness_mismatches": [],
                     "missing_progress_members": [],
                     "missing_result_fields": [],
                     "infer_signature_ok": True,
@@ -180,8 +192,11 @@ def test_spathi_api_check_reports_missing_public_exports(tmp_path: Path) -> None
             payload = {
                 "module": str(spathi / "src/spathi/__init__.py"),
                 "missing_exports": ["infer"],
+                "config_field_partitions": _config_partitions(),
                 "missing_config_fields": [],
-                "unsupported_required_config_fields": [],
+                "unexpected_config_fields": [],
+                "config_partition_overlap": [],
+                "requiredness_mismatches": [],
                 "missing_progress_members": [],
                 "missing_result_fields": [],
                 "infer_signature_ok": True,
@@ -223,9 +238,12 @@ def test_spathi_api_check_reports_an_incompatible_adapter_contract(
             payload = {
                 "module": str(spathi / "src/spathi/__init__.py"),
                 "missing_exports": [],
+                "config_field_partitions": _config_partitions(),
                 "missing_config_fields": ["report"],
-                "unsupported_required_config_fields": ["new_required_option"],
-                "missing_progress_members": ["model_fraction"],
+                "unexpected_config_fields": ["new_required_option"],
+                "config_partition_overlap": [],
+                "requiredness_mismatches": [],
+                "missing_progress_members": ["total_models"],
                 "missing_result_fields": ["warnings"],
                 "infer_signature_ok": False,
             }
@@ -249,11 +267,11 @@ def test_spathi_api_check_reports_an_incompatible_adapter_contract(
     assert report["ok"] is False
     assert check["status"] == "fail"
     assert check["details"]["missing_config_fields"] == ["report"]  # type: ignore[index]
-    assert check["details"]["unsupported_required_config_fields"] == [  # type: ignore[index]
+    assert check["details"]["unexpected_config_fields"] == [  # type: ignore[index]
         "new_required_option"
     ]
     assert check["details"]["missing_progress_members"] == [  # type: ignore[index]
-        "model_fraction"
+        "total_models"
     ]
     assert check["details"]["missing_result_fields"] == ["warnings"]  # type: ignore[index]
     assert check["details"]["infer_signature_ok"] is False  # type: ignore[index]

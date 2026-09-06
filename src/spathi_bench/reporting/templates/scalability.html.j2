@@ -1,0 +1,176 @@
+{% extends "base.html.j2" %}
+
+{% block title %}Scalability · SPATHI Benchmarks{% endblock %}
+{% block kicker %}COMPUTATIONAL SCALABILITY{% endblock %}
+{% block heading %}Can the frozen SPATHI policy complete across the declared scale grid?{% endblock %}
+{% block lead %}Fresh-run wall time, peak container RSS, disk use, execution volume, and completion across deterministic synthetic dimensional stressors.{% endblock %}
+
+{% block content %}
+  <section class="section dataset-overview-section" aria-labelledby="dataset-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Evidence base</p>
+        <h2 id="dataset-heading">Datasets and dimensions tested</h2>
+      </div>
+      <p class="section-help">Inspect every dimensional shape, seed, network mode, and policy branch before interpreting resource use.</p>
+    </div>
+    <div id="dataset-overview" class="dataset-overview-grid"></div>
+    <div id="scope-notice"></div>
+  </section>
+
+  <section class="section section--overview" aria-labelledby="overview-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Completion</p>
+        <h2 id="overview-heading">Scale study at a glance</h2>
+      </div>
+    </div>
+    <div id="overview-cards" class="stat-grid"></div>
+  </section>
+
+  <section id="failure-section" class="section" aria-labelledby="failure-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Failed endpoints</p>
+        <h2 id="failure-heading">Attributable failure evidence</h2>
+      </div>
+      <p class="section-help">A row appears here only when ANDREA produced a validated failed report for the exact requested dataset and SPATHI run. Missing or inconsistent contracts abort the workflow instead.</p>
+    </div>
+    <div id="failure-notice"></div>
+    <div id="failure-table" class="card table-wrap"></div>
+  </section>
+
+  <section class="section" aria-labelledby="shape-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Scale grid</p>
+        <h2 id="shape-heading">Problem size and measured runtime</h2>
+      </div>
+      <p class="section-help">The bubble chart shows cells against genes; bubble area reflects TF count. Blue intensity represents SPATHI wall time only for completed runs; failed endpoints are marked separately.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="dimensions-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Input dimensions</p>
+            <h3 id="dimensions-chart-title">Cells, genes, TFs, and policy branch</h3>
+          </div>
+        </div>
+        <div id="dimensions-chart" class="plot" role="img" aria-label="Cells versus genes with transcription-factor count and SPATHI runtime"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="runtime-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Fresh execution</p>
+            <h3 id="runtime-chart-title">Wall time by dataset</h3>
+          </div>
+        </div>
+        <div id="runtime-chart" class="plot" role="img" aria-label="Generation, SPATHI, ANDREA, and harness wall time by dataset"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="resources-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Resource envelope</p>
+        <h2 id="resources-heading">Memory and output footprint</h2>
+      </div>
+      <p class="section-help">Peak RSS is sampled from the SPATHI container process tree. Output size covers SPATHI files inside the inference artifact.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="memory-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Observed and estimated memory</p>
+            <h3 id="memory-chart-title">Peak RSS by dataset</h3>
+          </div>
+        </div>
+        <div id="memory-chart" class="plot" role="img" aria-label="Observed peak RSS and SPATHI memory estimate by dataset"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="disk-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Disk use</p>
+            <h3 id="disk-chart-title">Expression, SPATHI output, and artifacts</h3>
+          </div>
+        </div>
+        <div id="disk-chart" class="plot" role="img" aria-label="Expression, output, dataset artifact, and inference artifact sizes by dataset"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="work-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Execution accounting</p>
+        <h2 id="work-heading">Targets, models, trees, threads, and completion</h2>
+      </div>
+      <p class="section-help">The work-count axis is logarithmic because trees, models, and targets occupy different orders of magnitude; completion remains on a linear percentage scale.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="work-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Work performed</p>
+            <h3 id="work-chart-title">Targets, completed models, and fitted trees</h3>
+          </div>
+        </div>
+        <div id="work-chart" class="plot" role="img" aria-label="Targets, completed models, and fitted trees by dataset on a logarithmic scale"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="completion-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Coverage and reliability</p>
+            <h3 id="completion-chart-title">Eligible targets and completed models</h3>
+          </div>
+        </div>
+        <div id="completion-chart" class="plot" role="img" aria-label="Target eligibility and model completion fractions by dataset"></div>
+      </section>
+    </div>
+    <section class="card" aria-labelledby="dataset-table-title">
+      <div class="card-heading card-heading--actions">
+        <div>
+          <p class="card-kicker">Recorded outcomes</p>
+          <h3 id="dataset-table-title">Per-dataset audit table</h3>
+        </div>
+        <div id="dataset-table-actions"></div>
+      </div>
+      <div id="dataset-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="policy-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Frozen method</p>
+        <h2 id="policy-heading">Production policy used</h2>
+      </div>
+      <p class="section-help">Every shape executes the immutable same-budget policy selected by the completed efficiency phase.</p>
+    </div>
+    <div id="policy-summary" class="stat-grid"></div>
+    <section class="card" aria-labelledby="policy-table-title">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Branch parameters</p>
+          <h3 id="policy-table-title">Frozen SPATHI configuration</h3>
+        </div>
+      </div>
+      <div id="policy-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="provenance-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Traceability</p>
+        <h2 id="provenance-heading">Execution environment and artifacts</h2>
+      </div>
+    </div>
+    <div class="provenance-grid">
+      <div id="environment" class="card"></div>
+      <div id="report-links" class="card"></div>
+    </div>
+    <div id="study-notes" class="card"></div>
+  </section>
+{% endblock %}

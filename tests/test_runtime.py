@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from copy import deepcopy
 from pathlib import Path
@@ -126,6 +127,47 @@ def test_catalog_image_leases_reject_conflicting_duplicate_requirements(tmp_path
             lock_root=tmp_path / "locks",
         ):
             pass
+
+
+def test_docker_runtime_fingerprint_uses_build_contract_not_context_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = tmp_path / "docker"
+    executable.write_bytes(b"docker-cli-fixture")
+    payload = {
+        "Client": {
+            "Version": "25.0.1",
+            "ApiVersion": "1.44",
+            "GitCommit": "client-commit",
+            "Context": "mutable-alias",
+        },
+        "Server": {
+            "Version": "25.0.1",
+            "ApiVersion": "1.44",
+            "GitCommit": "server-commit",
+            "Components": [{"Name": "runc", "Version": "1.1.12"}],
+        },
+    }
+    monkeypatch.setattr(runtime.shutil, "which", lambda _value: str(executable))
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "run",
+        lambda command, **_kwargs: CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(payload),
+            stderr="",
+        ),
+    )
+
+    observed = runtime.docker_runtime_environment()
+
+    assert "Context" not in observed["client"]
+    assert observed["server"]["Components"][0]["Version"] == "1.1.12"
+    assert observed["fingerprint"] == runtime.canonical_json_sha256(
+        {key: value for key, value in observed.items() if key != "fingerprint"}
+    )
 
 
 def test_validate_andrea_import_uses_configured_andrea_python(

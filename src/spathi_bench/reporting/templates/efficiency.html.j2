@@ -1,0 +1,224 @@
+{% extends "base.html.j2" %}
+
+{% block title %}Efficiency · SPATHI Benchmarks{% endblock %}
+{% block kicker %}EFFICIENCY JUSTIFICATION{% endblock %}
+{% block heading %}Can SPATHI run faster without a relevant loss of accuracy?{% endblock %}
+{% block lead %}A paired, predeclared non-inferiority study of target eligibility and adaptive trees, with accuracy, coverage, completion, and runtime gates kept visible.{% endblock %}
+
+{% block content %}
+  <section class="section dataset-overview-section" aria-labelledby="dataset-overview-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Evidence base</p>
+        <h2 id="dataset-overview-heading">Datasets in the efficiency panel</h2>
+      </div>
+      <p class="section-help">Review simulator, condition, scale, split, and seed before interpreting the aggregate decision.</p>
+    </div>
+    <div id="dataset-overview" class="dataset-overview-grid"></div>
+  </section>
+
+  <section class="section section--overview" aria-labelledby="overview-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Summary</p>
+        <h2 id="overview-heading">Study at a glance</h2>
+      </div>
+    </div>
+    <div id="overview-cards" class="stat-grid"></div>
+    <div id="interpretation-limit"></div>
+    <div id="design-sensitivity-note"></div>
+  </section>
+
+  <section class="section" aria-labelledby="policies-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Predeclared policies</p>
+        <h2 id="policies-heading">Policies and parameter values evaluated</h2>
+      </div>
+      <p class="section-help">Every candidate changes only the displayed efficiency parameters; both group-count branches remain explicit.</p>
+    </div>
+    <div id="policy-cards" class="efficiency-policy-grid"></div>
+    <section class="card" aria-labelledby="policy-table-heading">
+      <div class="card-heading card-heading--actions">
+        <div>
+          <p class="card-kicker">Exact configuration</p>
+          <h3 id="policy-table-heading">Complete policy by group-count branch</h3>
+        </div>
+        <div id="policy-table-actions"></div>
+      </div>
+      <div id="policy-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section id="formal-failures-section" class="section" aria-labelledby="formal-failures-heading" hidden>
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Fail-safe evidence</p>
+        <h2 id="formal-failures-heading">Bound candidate execution failures</h2>
+      </div>
+      <p class="section-help">No estimate, confidence bound, or favourable gate is computed for an incomplete candidate. Any such failure retains exact SPATHI globally.</p>
+    </div>
+    <div id="formal-failures-note"></div>
+    <div id="formal-failures-table" class="table-wrap"></div>
+  </section>
+
+  <section class="section" aria-labelledby="accuracy-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Primary endpoint</p>
+        <h2 id="accuracy-heading">Accuracy and non-inferiority</h2>
+      </div>
+      <p class="section-help">Differences are candidate minus exact SPATHI on the full requested target universe. Full reports show predeclared one-sided decisions; reduced reports show estimates only.</p>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="accuracy-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Directed AUPR</p>
+            <h3 id="accuracy-chart-title">Difference from exact SPATHI</h3>
+          </div>
+        </div>
+        <div id="accuracy-chart" class="plot" role="img" aria-label="Directed AUPR differences and, for the full design, one-sided confidence bounds"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="gate-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Adoption criteria</p>
+            <h3 id="gate-chart-title">Gate outcomes</h3>
+          </div>
+        </div>
+        <div id="gate-chart" class="plot" role="img" aria-label="Accuracy, coverage, completion, and runtime gate outcomes"></div>
+      </section>
+    </div>
+    <section class="card" aria-labelledby="accuracy-table-title">
+      <div class="card-heading card-heading--actions">
+        <div>
+          <p class="card-kicker">Audit table</p>
+          <h3 id="accuracy-table-title">Non-inferiority results and margins</h3>
+        </div>
+        <div id="accuracy-table-actions"></div>
+      </div>
+      <div id="accuracy-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="coverage-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Safeguards</p>
+        <h2 id="coverage-heading">Coverage and completion</h2>
+      </div>
+    </div>
+    <div class="chart-grid chart-grid--two">
+      <section class="card chart-card" aria-labelledby="coverage-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Eligibility</p>
+            <h3 id="coverage-chart-title">Target and truth-edge coverage</h3>
+          </div>
+        </div>
+        <div id="coverage-chart" class="plot" role="img" aria-label="Coverage estimates, per-dataset and per-condition guardrails, and, for the full design, confidence bounds"></div>
+      </section>
+      <section class="card chart-card" aria-labelledby="completion-chart-title">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">Reliability</p>
+            <h3 id="completion-chart-title">Run and model completion</h3>
+          </div>
+        </div>
+        <div id="completion-chart" class="plot" role="img" aria-label="Reference and candidate completion fractions"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cost-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Computational cost</p>
+        <h2 id="cost-heading">Runtime, memory, output, targets, and trees</h2>
+      </div>
+      <p class="section-help">Ratios below 1 favor the candidate. Runtime uses paired log ratios and a hierarchical geometric mean; absolute medians are descriptive and deduplicate runs repeated across group contexts.</p>
+    </div>
+    <section class="card chart-card" aria-labelledby="cost-chart-title">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Paired ratios</p>
+          <h3 id="cost-chart-title">Candidate / exact SPATHI</h3>
+        </div>
+      </div>
+      <div id="cost-chart" class="plot plot--wide" role="img" aria-label="Paired computational cost ratios"></div>
+    </section>
+    <section class="card" aria-labelledby="resource-table-title">
+      <div class="card-heading card-heading--actions">
+        <div>
+          <p class="card-kicker">Absolute measurements</p>
+          <h3 id="resource-table-title">Median run resources</h3>
+        </div>
+        <div id="resource-table-actions"></div>
+      </div>
+      <div id="resource-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="efficiency-safety-heading">
+    <div class="section-heading section-heading--split">
+      <div>
+        <p class="section-kicker">Pre-freeze transfer safeguard</p>
+        <h2 id="efficiency-safety-heading">Pre-freeze efficiency safety</h2>
+      </div>
+      <p class="section-help">After the formal decision, only its sole provisional winner faces six predeclared scale and grouping conditions with three independent datasets each. This descriptive veto cannot select a fallback.</p>
+    </div>
+    <div id="efficiency-safety-summary" class="stat-grid"></div>
+    <div id="efficiency-safety-note"></div>
+    <section class="card" aria-labelledby="efficiency-safety-gates-heading">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Frozen decision rule</p>
+          <h3 id="efficiency-safety-gates-heading">Safety and operational vetoes</h3>
+        </div>
+      </div>
+      <div id="efficiency-safety-gates" class="table-wrap"></div>
+    </section>
+    <section class="card" aria-labelledby="efficiency-safety-condition-table-heading">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Condition safeguards</p>
+          <h3 id="efficiency-safety-condition-table-heading">Accuracy and completion by condition</h3>
+        </div>
+      </div>
+      <div id="efficiency-safety-condition-table" class="table-wrap"></div>
+    </section>
+    <section class="card" aria-labelledby="efficiency-safety-table-heading">
+      <div class="card-heading">
+        <div>
+          <p class="card-kicker">Paired evidence</p>
+          <h3 id="efficiency-safety-table-heading">Accuracy, coverage, and wall-time by dataset</h3>
+        </div>
+      </div>
+      <div id="efficiency-safety-table" class="table-wrap"></div>
+    </section>
+  </section>
+
+  <section class="section" aria-labelledby="decision-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Frozen outcome</p>
+        <h2 id="decision-heading">Final decision</h2>
+      </div>
+    </div>
+    <div id="decision-card" class="efficiency-decision"></div>
+  </section>
+
+  <section class="section" aria-labelledby="provenance-heading">
+    <div class="section-heading">
+      <div>
+        <p class="section-kicker">Traceability</p>
+        <h2 id="provenance-heading">Provenance and artifacts</h2>
+      </div>
+    </div>
+    <div class="provenance-grid">
+      <div id="provenance" class="card"></div>
+      <div id="report-links" class="card"></div>
+    </div>
+  </section>
+{% endblock %}

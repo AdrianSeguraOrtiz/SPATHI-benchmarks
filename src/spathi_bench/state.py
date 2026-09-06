@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .config import BenchmarkConfigError, load_json_object
+from .safe_io import atomic_write_text, reject_symlink_components
 
-STATE_SCHEMA_VERSION = "3.0"
+STATE_SCHEMA_VERSION = "1.0"
 STAGE_ORDER = {
     "preflighted": 0,
     "image_ready": 1,
@@ -34,8 +34,11 @@ def state_path(run_root: Path) -> Path:
 def run_lock(run_root: Path) -> Iterator[None]:
     """Prevent two CLI stages from mutating the same concrete run concurrently."""
 
+    run_root = reject_symlink_components(run_root, "Benchmark run directory")
     run_root.mkdir(parents=True, exist_ok=True)
+    reject_symlink_components(run_root, "Benchmark run directory")
     lock_path = run_root / ".run.lock"
+    reject_symlink_components(lock_path, "Benchmark run lock")
     with lock_path.open("a", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -50,7 +53,8 @@ def run_lock(run_root: Path) -> Iterator[None]:
 
 
 def load_state(run_root: Path, profile_id: str) -> dict[str, Any]:
-    path = state_path(run_root)
+    run_root = reject_symlink_components(run_root, "Benchmark run directory")
+    path = reject_symlink_components(state_path(run_root), "Benchmark state")
     state = load_json_object(path, "benchmark state")
     if state.get("schema_version") != STATE_SCHEMA_VERSION:
         raise BenchmarkConfigError(f"Unsupported benchmark state schema at {path}")
@@ -79,12 +83,13 @@ def require_status(state: dict[str, Any], expected: str, stage: str) -> None:
 
 
 def write_state(run_root: Path, state: dict[str, Any]) -> Path:
+    run_root = reject_symlink_components(run_root, "Benchmark run directory")
     run_root.mkdir(parents=True, exist_ok=True)
+    reject_symlink_components(run_root, "Benchmark run directory")
     target = state_path(run_root)
-    temporary = run_root / ".state.json.tmp"
-    temporary.write_text(
+    atomic_write_text(
+        target,
         json.dumps(state, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        "Benchmark state",
     )
-    os.replace(temporary, target)
     return target

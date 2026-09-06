@@ -51,6 +51,35 @@ def test_resolve_manifest_member_confines_member_to_package(tmp_path: Path) -> N
         resolve_manifest_member(package, "missing.json", "dataset")
 
 
+def test_resolve_manifest_member_rejects_symlinked_file_and_ancestor(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    external_file = outside / "manifest.json"
+    _write_json(external_file, {})
+
+    (package / "linked-file.json").symlink_to(external_file)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        resolve_manifest_member(package, "linked-file.json", "member")
+
+    (package / "linked-directory").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        resolve_manifest_member(package, "linked-directory/manifest.json", "member")
+
+
+def test_unique_direct_manifest_rejects_symlinked_manifest(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    run = output / "run-a"
+    run.mkdir(parents=True)
+    external = tmp_path / "external.json"
+    _write_json(external, {})
+    (run / "run_report.json").symlink_to(external)
+
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        unique_direct_manifest(output, "run_report.json")
+
+
 @pytest.mark.parametrize(
     "raw_path",
     ["/absolute/member.json", "nested/./member.json", "nested\\member.json"],
