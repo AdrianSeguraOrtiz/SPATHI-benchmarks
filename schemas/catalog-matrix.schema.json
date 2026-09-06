@@ -3,10 +3,26 @@
   "$id": "https://spathi.dev/benchmarks/catalog-matrix.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "andrea_commit", "entries"],
+  "required": ["schema_version", "andrea_commit", "external_parameter_policy", "entries"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "andrea_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "external_parameter_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection", "tuning", "permitted_overrides", "failure_policy"],
+      "properties": {
+        "selection": {"const": "upstream_library_defaults"},
+        "tuning": {"const": "none_on_benchmark_outcomes"},
+        "permitted_overrides": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["caller_seed_for_reproducibility", "execution_mode_for_common_group_contract", "common_tf_candidate_input"]}
+        },
+        "failure_policy": {"type": "string", "minLength": 1}
+      }
+    },
     "entries": {
       "type": "array",
       "minItems": 1,
@@ -17,13 +33,21 @@
     "entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tool_id", "disposition", "tf_list_handling", "routes", "reason"],
+      "required": [
+        "tool_id",
+        "disposition",
+        "tf_list_handling",
+        "reproducibility",
+        "routes",
+        "reason"
+      ],
       "properties": {
         "tool_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
         "disposition": {"enum": ["candidate", "blocked", "assisted_only"]},
         "tf_list_handling": {
           "enum": ["candidate_restriction", "prior_information", "not_supported"]
         },
+        "reproducibility": {"$ref": "#/$defs/reproducibility"},
         "routes": {
           "type": "array",
           "items": {"$ref": "#/$defs/route"}
@@ -31,20 +55,57 @@
         "reason": {"type": "string", "minLength": 1}
       }
     },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "seed_parameter", "evidence"],
+      "properties": {
+        "class": {
+          "enum": [
+            "caller_seeded",
+            "deterministic",
+            "fixed_internal_seed",
+            "uncontrolled_stochastic"
+          ]
+        },
+        "seed_parameter": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "evidence": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"class": {"const": "caller_seeded"}}},
+          "then": {"properties": {"seed_parameter": {"type": "string"}}},
+          "else": {"properties": {"seed_parameter": {"type": "null"}}}
+        }
+      ]
+    },
     "route": {
       "type": "object",
       "additionalProperties": false,
       "required": ["regime", "execution_mode", "variant", "role", "status"],
       "properties": {
         "regime": {
-          "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+          "enum": ["group_only", "order_aware", "prior_assisted"]
         },
         "execution_mode": {
           "enum": ["group_native", "group_emulated", "group_aggregated"]
         },
         "variant": {"type": "string", "minLength": 1},
-        "role": {"enum": ["primary", "secondary", "assisted"]},
-        "status": {"enum": ["candidate", "blocked"]}
+        "role": {"enum": ["primary", "secondary", "implementation_sensitivity", "assisted"]},
+        "status": {"enum": ["candidate", "blocked"]},
+        "configuration_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "evaluation_levels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["directed", "topology"]}
+        }
       }
     }
   }

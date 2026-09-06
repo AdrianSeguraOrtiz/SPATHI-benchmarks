@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/efficiency-design-sensitivity.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "id", "status", "timing", "study_path", "budget",
+    "purpose", "interpretation", "method", "target_design", "scenario_grid", "reporting"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "spathi_efficiency_design_sensitivity_v1"},
+    "status": {"const": "predeclared"},
+    "timing": {"const": "before_full_efficiency_outcomes"},
+    "study_path": {"const": "experiments/v1/spathi/efficiency-study.json"},
+    "budget": {"const": "full"},
+    "purpose": {"type": "string", "minLength": 1},
+    "interpretation": {"const": "prospective_assumption_conditional_operating_characteristics_not_an_empirical_power_guarantee"},
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "random_sampling", "familywise_alpha", "confirmatory_candidate_count",
+        "per_candidate_one_sided_alpha", "weighting", "assumptions"
+      ],
+      "properties": {
+        "id": {"const": "closed_form_normal_location_sensitivity"},
+        "random_sampling": {"const": false},
+        "familywise_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
+        "confirmatory_candidate_count": {"type": "integer", "minimum": 1},
+        "per_candidate_one_sided_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
+        "weighting": {"const": "equal_simulator_equal_condition_equal_dataset"},
+        "assumptions": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "target_design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "expected_independent_datasets", "expected_effective_sample_size", "strata"],
+      "properties": {
+        "profile": {"const": "efficiency-full"},
+        "expected_independent_datasets": {"type": "integer", "minimum": 2},
+        "expected_effective_sample_size": {"type": "number", "exclusiveMinimum": 0},
+        "strata": {
+          "type": "array", "minItems": 2,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["generation_job", "simulator_id", "condition_id", "replicates"],
+            "properties": {
+              "generation_job": {"type": "string", "minLength": 1},
+              "simulator_id": {"type": "string", "minLength": 1},
+              "condition_id": {"type": "string", "minLength": 1},
+              "replicates": {"type": "integer", "minimum": 2}
+            }
+          }
+        }
+      }
+    },
+    "scenario_grid": {
+      "type": "object", "additionalProperties": false, "required": ["accuracy", "runtime"],
+      "properties": {
+        "accuracy": {
+          "type": "object", "additionalProperties": false,
+          "required": ["estimand", "noninferiority_margin", "true_mean_differences", "within_stratum_standard_deviations"],
+          "properties": {
+            "estimand": {"const": "mean_candidate_minus_reference_absolute_aupr"},
+            "noninferiority_margin": {"type": "number", "exclusiveMinimum": 0},
+            "true_mean_differences": {"$ref": "#/$defs/number_grid"},
+            "within_stratum_standard_deviations": {"$ref": "#/$defs/positive_grid"}
+          }
+        },
+        "runtime": {
+          "type": "object", "additionalProperties": false,
+          "required": ["estimand", "maximum_ratio", "true_geometric_mean_ratios", "within_stratum_log_standard_deviations"],
+          "properties": {
+            "estimand": {"const": "hierarchical_geometric_mean_candidate_over_reference_ratio"},
+            "maximum_ratio": {"const": 1.0},
+            "true_geometric_mean_ratios": {"$ref": "#/$defs/positive_grid"},
+            "within_stratum_log_standard_deviations": {"$ref": "#/$defs/positive_grid"}
+          }
+        }
+      }
+    },
+    "reporting": {
+      "type": "object", "additionalProperties": false,
+      "required": ["accuracy_probability", "runtime_probability", "required_caveat"],
+      "properties": {
+        "accuracy_probability": {"const": "probability_that_the_approximate_one_sided_lower_bound_meets_the_margin"},
+        "runtime_probability": {"const": "probability_that_the_approximate_one_sided_upper_bound_is_below_one"},
+        "required_caveat": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "number_grid": {
+      "type": "array", "minItems": 2, "uniqueItems": true,
+      "items": {"type": "number"}
+    },
+    "positive_grid": {
+      "type": "array", "minItems": 2, "uniqueItems": true,
+      "items": {"type": "number", "exclusiveMinimum": 0}
+    }
+  }
+}

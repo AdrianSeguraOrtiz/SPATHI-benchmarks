@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/external-comparison-design-sensitivity.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "status", "timing", "plan_path", "profile", "comparison_id", "purpose", "interpretation", "method", "target_design", "scenario_grid", "reporting"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "spathi_external_comparison_design_sensitivity_v1"},
+    "status": {"const": "predeclared"},
+    "timing": {"const": "before_full_test_outcomes"},
+    "plan_path": {"const": "experiments/v1/inference/plans/full-v1.json"},
+    "profile": {"const": "full"},
+    "comparison_id": {"const": "full-dynamic-directed-accuracy"},
+    "purpose": {"type": "string", "minLength": 1},
+    "interpretation": {"const": "prospective_assumption_conditional_planning_sensitivity_not_an_empirical_power_guarantee"},
+    "method": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "random_sampling", "familywise_alpha", "two_sided", "holm_family_size", "planning_alpha", "weighting", "assumptions"],
+      "properties": {
+        "id": {"const": "paired_normal_location_holm_worst_case_sensitivity"},
+        "random_sampling": {"const": false},
+        "familywise_alpha": {"const": 0.05},
+        "two_sided": {"const": true},
+        "holm_family_size": {"type": "integer", "minimum": 1},
+        "planning_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.05},
+        "weighting": {"const": "equal_dataset"},
+        "assumptions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "target_design": {
+      "type": "object", "additionalProperties": false,
+      "required": ["expected_independent_blocks", "simulator_blocks", "primary_configuration_count", "implementation_sensitivities_excluded"],
+      "properties": {
+        "expected_independent_blocks": {"type": "integer", "minimum": 3},
+        "simulator_blocks": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}, "minProperties": 2},
+        "primary_configuration_count": {"type": "integer", "minimum": 3},
+        "implementation_sensitivities_excluded": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "scenario_grid": {
+      "type": "object", "additionalProperties": false,
+      "required": ["standardized_paired_effects", "paired_aupr_standard_deviations"],
+      "properties": {
+        "standardized_paired_effects": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "paired_aupr_standard_deviations": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "number", "exclusiveMinimum": 0}}
+      }
+    },
+    "reporting": {
+      "type": "object", "additionalProperties": false,
+      "required": ["power", "precision", "required_caveat"],
+      "properties": {
+        "power": {"const": "approximate_two_sided_rejection_probability_at_the_first_holm_threshold"},
+        "precision": {"const": "simultaneous_familywise_95_percent_normal_approximation_half_width_using_the_first_holm_threshold"},
+        "required_caveat": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

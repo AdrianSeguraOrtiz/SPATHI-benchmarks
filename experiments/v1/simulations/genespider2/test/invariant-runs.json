@@ -5,7 +5,7 @@
       "run_id": "genespider2_invariant_scalefree_test",
       "simulator_id": "genespider2",
       "replicates": 5,
-      "base_seed": 44001,
+      "base_seed": 596607996,
       "params": {
         "network_source": "scalefree2",
         "num_genes": 80,

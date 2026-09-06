@@ -32,8 +32,8 @@
         "taxonomic_group": "synthetic",
         "ncbi_taxon_id": null
       },
-      "description": "Independent validation-only synthetic topology; it is not reused across dataset roles."
+      "description": "Validation-only topology input constructed over the common synthetic TF-target universe; its complete graph is not reused across dataset roles."
     }
   },
-  "notes": "Validation dynamic-GRN partition with a role-exclusive regulatory topology."
+  "notes": "Validation dynamic-GRN partition with a role-exclusive complete topology input."
 }

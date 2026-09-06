@@ -2,172 +2,292 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "aracne3_default_seed_1729",
+      "run_id": "aracne3_default_seed_1201401544",
       "configuration_id": "aracne3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "aracne3_default_seed_31415",
+      "run_id": "aracne3_default_seed_1474962550",
       "configuration_id": "aracne3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "aracne3_default_seed_104729",
+      "run_id": "aracne3_default_seed_1019643605",
       "configuration_id": "aracne3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "genie3_default_seed_1729",
+      "run_id": "genie3_default_seed_1201401544",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "genie3_default_seed_31415",
+      "run_id": "genie3_default_seed_1474962550",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "genie3_default_seed_104729",
+      "run_id": "genie3_default_seed_1019643605",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_1729",
+      "run_id": "grnboost2_default_seed_1201401544",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_31415",
+      "run_id": "grnboost2_default_seed_1474962550",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_104729",
+      "run_id": "grnboost2_default_seed_1019643605",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_1729",
+      "run_id": "infercsn_none_seed_1201401544",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_31415",
+      "run_id": "infercsn_none_seed_1474962550",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_104729",
+      "run_id": "infercsn_none_seed_1019643605",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "pyscenic_default_seed_1729",
+      "run_id": "pyscenic_default_seed_1201401544",
       "configuration_id": "pyscenic_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "pyscenic_default_seed_31415",
+      "run_id": "pyscenic_default_seed_1474962550",
       "configuration_id": "pyscenic_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "pyscenic_default_seed_104729",
+      "run_id": "pyscenic_default_seed_1019643605",
       "configuration_id": "pyscenic_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "scminer_custom_tf_seed_1729",
-      "configuration_id": "scminer_custom_tf",
-      "selection_role": "baseline",
-      "algorithm_seed": 1729,
-      "algorithm_seed_parameter": "random_seed",
-      "family": "catalog_tf_restricted"
-    },
-    {
-      "run_id": "scminer_custom_tf_seed_31415",
-      "configuration_id": "scminer_custom_tf",
-      "selection_role": "baseline",
-      "algorithm_seed": 31415,
-      "algorithm_seed_parameter": "random_seed",
-      "family": "catalog_tf_restricted"
-    },
-    {
-      "run_id": "scminer_custom_tf_seed_104729",
-      "configuration_id": "scminer_custom_tf",
-      "selection_role": "baseline",
-      "algorithm_seed": 104729,
-      "algorithm_seed_parameter": "random_seed",
-      "family": "catalog_tf_restricted"
-    },
-    {
-      "run_id": "tigress_default_seed_1729",
+      "run_id": "tigress_default_seed_1201401544",
       "configuration_id": "tigress_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1201401544,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "tigress_default_seed_31415",
+      "run_id": "tigress_default_seed_1474962550",
       "configuration_id": "tigress_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 1474962550,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "tigress_default_seed_104729",
+      "run_id": "tigress_default_seed_1019643605",
       "configuration_id": "tigress_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 1019643605,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "full.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     }
   ]
 }

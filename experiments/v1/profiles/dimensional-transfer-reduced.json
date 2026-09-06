@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "id": "dimensional-transfer-reduced",
+  "status": "runnable",
+  "purpose": "dimensional_transfer",
+  "description": "Low-cost operational post-freeze check over two moderate truth-bearing conditions and two routing controls; it does not estimate scale-endpoint contrasts.",
+  "generation_jobs": [
+    {
+      "id": "transfer_g3000_tf100_c300_reduced",
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf100.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf100-reduced-runs.json",
+      "dataset_role": "dimensional_transfer",
+      "split_id": "dimensional_transfer_reduced_v1",
+      "condition_id": "g3000_tf100_c300"
+    },
+    {
+      "id": "transfer_g100_tf10_c300_reduced",
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-reduced-runs.json",
+      "dataset_role": "dimensional_transfer",
+      "split_id": "dimensional_transfer_reduced_v1",
+      "condition_id": "g100_tf10_c300"
+    },
+    {
+      "id": "transfer_g100_tf10_c500_single_group_reduced",
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10-single-group.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c500-single-group-reduced-runs.json",
+      "dataset_role": "dimensional_transfer",
+      "split_id": "dimensional_transfer_reduced_v1",
+      "condition_id": "g100_tf10_c500_single_group"
+    },
+    {
+      "id": "transfer_g100_tf10_c300_groups_10_40_250_reduced",
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-groups-10-40-250-reduced-runs.json",
+      "dataset_role": "dimensional_transfer",
+      "split_id": "dimensional_transfer_reduced_v1",
+      "condition_id": "g100_tf10_c300_groups_10_40_250"
+    }
+  ],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {"max_parallel_tasks": 1, "max_cores": 8, "max_ram_gb": 48},
+    "infer_network": {
+      "max_parallel_runs": 1,
+      "max_cores": 8,
+      "max_ram_gb": 48,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 120
+    }
+  },
+  "planned_design": {
+    "simulators": ["scmultisim"],
+    "replicates_per_condition": 1,
+    "regimes": ["group_only"],
+    "factors": ["moderate_conditions", "routing"],
+    "notes": [
+      "The reduced budget contains only g3000_tf100_c300, g100_tf10_c300 and the two routing controls, with one independently generated dataset each.",
+      "It intentionally omits the 15,000-gene, 1,500-TF and 10,000-cell endpoints and therefore reports no one-axis scale contrast.",
+      "Only the frozen same-budget SPATHI policy is executed; this phase cannot select parameters.",
+      "Its condition and routing observations are operational and must not be pooled into the confirmatory tool ranking."
+    ]
+  },
+  "statistics": {"status": "not_applicable", "comparisons": []}
+}

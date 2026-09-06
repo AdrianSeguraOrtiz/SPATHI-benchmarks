@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_scmultisim_dimensional_transfer_tf10_v1",
+  "data_axes": {
+    "measurement": "rna_expression",
+    "resolution": "single_cell",
+    "column_kind": "cells",
+    "experimental_design": "differentiation"
+  },
+  "truth_requirements": {
+    "contexts": ["global", "group"]
+  },
+  "organism": {
+    "taxonomic_group": "synthetic",
+    "ncbi_taxon_id": null
+  },
+  "requested_extras": [
+    "groups",
+    "tf_list",
+    "cluster_identities"
+  ],
+  "inputs": {
+    "regulatory_network": {
+      "path": "regulatory-network-tf10.tsv",
+      "format": "tsv",
+      "organism": {
+        "taxonomic_group": "synthetic",
+        "ncbi_taxon_id": null
+      },
+      "description": "Deterministic 10-TF, 50-target transfer topology with two directed regulators per target."
+    },
+    "tree_newick": {
+      "path": "tree-three-groups.nwk",
+      "format": "newick",
+      "description": "Fixed three-leaf tree used by every dimensional-transfer condition."
+    }
+  },
+  "notes": "Truth-bearing post-freeze dimensional-transfer scenario; defined solely by the public synthetic design."
+}

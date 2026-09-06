@@ -5,9 +5,17 @@
       "run_id": "spathi_smoke",
       "configuration_id": "spathi_smoke",
       "selection_role": "smoke",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1163786403,
       "algorithm_seed_parameter": "random_seed",
-      "family": "spathi"
+      "family": "spathi",
+      "seed_derivation": {
+        "namespace": "smoke.smoke",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     }
   ]
 }

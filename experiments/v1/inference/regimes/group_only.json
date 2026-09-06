@@ -9,9 +9,9 @@
     {"tool_id": "aracne3", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
     {"tool_id": "genie3", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
     {"tool_id": "grnboost2", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
-    {"tool_id": "infercsn", "execution_mode": "group_emulated", "variant": "sift_method=none,tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
-    {"tool_id": "pyscenic", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
-    {"tool_id": "scminer", "execution_mode": "group_emulated", "variant": "driver_source=custom_tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "infercsn", "execution_mode": "group_emulated", "variant": "upstream default (sift_method=none),tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "pyscenic", "execution_mode": "group_emulated", "variant": "grn_only,tf_list", "role": "implementation_sensitivity", "status": "candidate", "tf_list_handling": "candidate_restriction"},
+    {"tool_id": "scminer", "execution_mode": "group_emulated", "variant": "upstream default driver_source=built_in_tf_sig", "role": "secondary", "status": "blocked", "tf_list_handling": "not_supported"},
     {"tool_id": "tigress", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "tf_list_handling": "candidate_restriction"},
     {"tool_id": "cespgrn", "execution_mode": "group_aggregated", "variant": "kernel_source=expression,prior_mode=none", "role": "secondary", "status": "candidate", "tf_list_handling": "prior_information"},
     {"tool_id": "clr", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
@@ -20,14 +20,19 @@
     {"tool_id": "metasem", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=unlabeled_all_genes", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
     {"tool_id": "pidc", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
     {"tool_id": "ppcor", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
-    {"tool_id": "scgenerai", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
-    {"tool_id": "scing", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"},
-    {"tool_id": "scsgl", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "tf_list_handling": "not_supported"}
+    {"tool_id": "scing", "execution_mode": "group_emulated", "variant": "upstream defaults", "role": "secondary", "status": "blocked", "tf_list_handling": "not_supported"},
+    {"tool_id": "scmtni", "execution_mode": "group_native", "variant": "indep=true,q=0 on multigroup datasets", "role": "secondary", "status": "blocked", "tf_list_handling": "candidate_restriction"}
   ],
   "notes": [
     "Only candidate_restriction variants enter the primary ranking against SPATHI.",
     "ARACNe3 is TF-restricted but undirected, so it enters topology analyses rather than the directed confirmatory family.",
-    "Methods that cannot consume tf_list form a separately labelled all-gene exploratory stratum.",
+    "pySCENIC-GRN delegates network inference to GRNBoost2; it is executed and reported only against GRNBoost2 as an implementation sensitivity and does not enter the primary Friedman ranking.",
+    "External competitors use exact locked ToolSpec defaults without benchmark tuning. Only caller seeds and non-parameter input/execution contracts may differ.",
+    "Methods that cannot consume tf_list form a separately labelled all-gene-inference exploratory stratum; evaluation remains on the simulator-declared TF-to-gene truth universe.",
+    "SCING is blocked because its upstream defaults are dimensionally invalid for part of the declared v1 panel; v1 does not retune methods to make them fit.",
+    "scMINER is blocked because its default species-specific driver resources do not overlap synthetic identifiers; changing driver_source would be competitor tuning.",
+    "scGeneRAI and scSGL are excluded because their locked implementations contain uncontrolled stochastic operations and expose no seed parameter.",
+    "scMTNI indep=true,q=0 passes group_native preflight but rejects multigroup datasets at runtime; group_emulated is not a supported ToolSpec mode.",
     "ANDREA preflight is authoritative for dataset-specific eligibility."
   ]
 }

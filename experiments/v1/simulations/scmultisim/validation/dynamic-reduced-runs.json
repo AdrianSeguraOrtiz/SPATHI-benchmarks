@@ -2,10 +2,10 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "scmultisim_dynamic_custom_validation",
+      "run_id": "scmultisim_dynamic_custom_validation_reduced",
       "simulator_id": "scmultisim",
       "replicates": 1,
-      "base_seed": 24001,
+      "base_seed": 1851271246,
       "params": {
         "grn_source": "input_tsv",
         "tree_preset": "phyla5",
@@ -13,7 +13,9 @@
         "num_cells": 300,
         "num_genes": 80,
         "num_cifs": 30,
-        "velocity": {"enabled": false},
+        "velocity": {
+          "enabled": false
+        },
         "dynamic_grn": {
           "enabled": true,
           "num_steps": 5,
@@ -23,10 +25,14 @@
           "weight_mean": 0,
           "weight_sd": 0.8
         },
-        "technical_noise": {"enabled": false},
-        "batch_effect": {"enabled": false}
+        "technical_noise": {
+          "enabled": false
+        },
+        "batch_effect": {
+          "enabled": false
+        }
       },
-      "notes": "One validation seed over the validation-only topology for the reduced calibration."
+      "notes": "One validation seed over the validation-only topology for the reduced calibration. Its seed is disjoint from the full publication budget."
     }
   ]
 }

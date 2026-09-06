@@ -5,7 +5,7 @@
   "calibration_budget": null,
   "status": "unselected",
   "phase": "planned",
-  "selected_candidate": null,
+  "selected_policy": null,
   "selection_evidence": null,
   "test_accessed_before_freeze": false,
   "notes": [

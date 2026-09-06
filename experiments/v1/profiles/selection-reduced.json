@@ -45,6 +45,30 @@
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "scmultisim_dynamic"
+    },
+    {
+      "id": "scmultisim_validation_imbalanced",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/imbalanced-reduced-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_imbalanced"
+    },
+    {
+      "id": "scmultisim_validation_single_group",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/single-group-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/single-group-reduced-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_single_group"
+    },
+    {
+      "id": "scmultisim_validation_medium",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/medium-reduced-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_medium"
     }
   ],
   "inference_batches": [],
@@ -68,17 +92,13 @@
     "regimes": ["group_only"],
     "factors": ["topology", "kinetics_noise", "bounded finalist selection"],
     "notes": [
-      "Contains five validation datasets: one instance of each of four dyngen conditions and one scMultiSim instance.",
-      "Its seeds and scMultiSim topology are disjoint from development and test.",
-      "Its winner is provisional and may feed only the reduced comparison."
+      "Contains eight validation datasets: four dyngen and four scMultiSim conditions covering balance, group count and scale.",
+      "Its stochastic streams are disjoint from development and test.",
+      "Its winner is the exact reference for the reduced efficiency-validation study and cannot enter comparison directly."
     ]
   },
   "statistics": {
-    "status": "planned",
-    "alpha": 0.05,
-    "random_seed": 1729,
-    "permutations": 99999,
-    "bootstrap_resamples": 20000,
+    "status": "not_applicable",
     "comparisons": []
   }
 }

@@ -5,7 +5,7 @@
       "run_id": "sergio_invariant_steady_state_test",
       "simulator_id": "sergio",
       "replicates": 5,
-      "base_seed": 42001,
+      "base_seed": 596607981,
       "params": {
         "input_preset": "demo_steady_state",
         "simulation_mode": "steady_state",

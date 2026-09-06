@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/noninferiority-results.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "study_id", "budget", "analysis_role",
+    "dataset_role", "inputs", "analysis_implementation_sha256", "analysis",
+    "execution_failures", "comparisons", "global_decision", "adoption", "interpretation_limit"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_efficiency_noninferiority_results"},
+    "study_id": {"$ref": "#/$defs/id"},
+    "budget": {"enum": ["reduced", "full"]},
+    "analysis_role": {"enum": ["descriptive", "confirmatory"]},
+    "dataset_role": {"const": "efficiency_validation"},
+    "inputs": {
+      "type": "object", "additionalProperties": false, "required": ["plan_sha256", "evidence_sha256"],
+      "properties": {"plan_sha256": {"$ref": "#/$defs/sha256"}, "evidence_sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "analysis_implementation_sha256": {"$ref": "#/$defs/sha256"},
+    "seed_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed_plan", "seed_plan_sha256", "root", "effective"],
+      "properties": {
+        "seed_plan": {"const": "experiments/v1/seeds/seed-plan.json"},
+        "seed_plan_sha256": {"$ref": "#/$defs/sha256"},
+        "root": {"$ref": "#/$defs/seed_record"},
+        "effective": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/effective_seed_record"}
+        }
+      }
+    },
+    "analysis": {"type": "object"},
+    "execution_failures": {
+      "type": "array", "items": {"$ref": "#/$defs/execution_failure"}
+    },
+    "comparisons": {"type": "array", "items": {"$ref": "#/$defs/comparison"}},
+    "global_decision": {"enum": ["policy_adopted", "reference_retained", "descriptive_only"]},
+    "adoption": {"$ref": "#/$defs/adoption"},
+    "interpretation_limit": {"type": "string", "minLength": 1}
+  },
+  "anyOf": [
+    {"properties": {"comparisons": {"minItems": 1}}},
+    {"properties": {"execution_failures": {"minItems": 1}}},
+    {
+      "properties": {
+        "analysis": {
+          "required": ["confirmatory_candidate_count"],
+          "properties": {"confirmatory_candidate_count": {"const": 0}}
+        },
+        "comparisons": {"maxItems": 0},
+        "execution_failures": {"maxItems": 0}
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"budget": {"const": "full"}},
+        "required": ["budget"]
+      },
+      "then": {
+        "required": ["seed_contract"],
+        "properties": {"analysis_role": {"const": "confirmatory"}}
+      },
+      "else": {
+        "properties": {"analysis_role": {"const": "descriptive"}},
+        "not": {"required": ["seed_contract"]}
+      }
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "execution_failure": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "dataset_id", "dataset_manifest_sha256", "generation_seed", "algorithm_seed",
+        "configuration_id", "selection_role", "inference_artifact",
+        "failure_marker_sha256", "run_report_sha256", "tool_status", "failure_message"
+      ],
+      "properties": {
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "selection_role": {"const": "candidate"},
+        "inference_artifact": {"$ref": "#/$defs/sha256"},
+        "failure_marker_sha256": {"$ref": "#/$defs/sha256"},
+        "run_report_sha256": {"$ref": "#/$defs/sha256"},
+        "tool_status": {"type": "string", "minLength": 1},
+        "failure_message": {"type": "string", "minLength": 1}
+      }
+    },
+    "seed_derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "stream", "coordinates"],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "pattern": "^(?:reduced|full)\\.efficiency_validation$"
+        },
+        "stream": {"const": "statistical"},
+        "coordinates": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "integer"},
+              {"type": "boolean"}
+            ]
+          }
+        }
+      }
+    },
+    "seed_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed", "seed_derivation"],
+      "properties": {
+        "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {"$ref": "#/$defs/seed_derivation"}
+      }
+    },
+    "effective_seed_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "endpoint", "seed", "seed_derivation"],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "endpoint": {
+          "enum": [
+            "accuracy", "target_coverage", "truth_edge_coverage", "runtime",
+            "peak_memory", "output_bytes", "targets_processed",
+            "models_requested", "trees_fitted"
+          ]
+        },
+        "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {"$ref": "#/$defs/seed_derivation"}
+      }
+    },
+    "accuracy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["metric", "level", "target_universe", "difference", "estimate", "absolute_noninferiority_margin", "one_sided_lower_confidence_bound", "confidence_level", "inference_status", "passed"],
+      "properties": {
+        "metric": {"const": "aupr"},
+        "level": {"const": "directed"},
+        "target_universe": {"const": "full_requested_target_universe"},
+        "difference": {"const": "candidate_minus_reference"},
+        "estimate": {"type": "number"},
+        "absolute_noninferiority_margin": {"type": "number", "exclusiveMinimum": 0},
+        "one_sided_lower_confidence_bound": {"type": ["number", "null"]},
+        "confidence_level": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}]},
+        "inference_status": {"enum": ["confirmatory_interval", "descriptive_only"]},
+        "passed": {"type": ["boolean", "null"]}
+      }
+    },
+    "coverage_endpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "estimate", "one_sided_lower_confidence_bound", "minimum",
+        "minimum_each_dataset", "observed_minimum_dataset", "observed_dataset_guardrail_met",
+        "minimum_each_condition_mean", "observed_minimum_condition_mean",
+        "observed_condition_guardrail_met", "inference_status", "passed"
+      ],
+      "properties": {
+        "estimate": {"type": "number", "minimum": 0, "maximum": 1},
+        "one_sided_lower_confidence_bound": {"oneOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 1}]},
+        "minimum": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "minimum_each_dataset": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "observed_minimum_dataset": {"type": "number", "minimum": 0, "maximum": 1},
+        "observed_dataset_guardrail_met": {"type": "boolean"},
+        "minimum_each_condition_mean": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "observed_minimum_condition_mean": {"type": "number", "minimum": 0, "maximum": 1},
+        "observed_condition_guardrail_met": {"type": "boolean"},
+        "inference_status": {"enum": ["confirmatory_interval", "descriptive_only"]},
+        "passed": {"type": ["boolean", "null"]}
+      }
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_fraction", "truth_edge_fraction", "confidence_level", "threshold_basis"],
+      "properties": {
+        "target_fraction": {"$ref": "#/$defs/coverage_endpoint"},
+        "truth_edge_fraction": {"$ref": "#/$defs/coverage_endpoint"},
+        "confidence_level": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}]},
+        "threshold_basis": {"const": "author_defined_engineering_guardrail_not_validated_for_unobserved_real_truth"}
+      }
+    },
+    "paired_ratio": {
+      "type": "object", "additionalProperties": false,
+      "required": ["unit", "hierarchical_mean_ratio", "median_dataset_ratio", "one_sided_upper_confidence_bound", "confidence_level", "inference_status"],
+      "properties": {
+        "unit": {"enum": ["bytes", "count"]},
+        "hierarchical_mean_ratio": {"type": "number", "minimum": 0},
+        "median_dataset_ratio": {"type": "number", "minimum": 0},
+        "one_sided_upper_confidence_bound": {"oneOf": [{"type": "null"}, {"type": "number", "minimum": 0}]},
+        "confidence_level": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}]},
+        "inference_status": {"enum": ["confirmatory_interval", "descriptive_only"]}
+      }
+    },
+    "runtime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["hierarchical_mean_ratio", "hierarchical_mean_speedup", "median_dataset_ratio", "one_sided_upper_confidence_bound", "maximum", "confidence_level", "inference_status", "passed"],
+      "properties": {
+        "hierarchical_mean_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "hierarchical_mean_speedup": {"type": "number", "exclusiveMinimum": 0},
+        "median_dataset_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "one_sided_upper_confidence_bound": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0}]},
+        "maximum": {"type": "number", "exclusiveMinimum": 0},
+        "confidence_level": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}]},
+        "inference_status": {"enum": ["confirmatory_interval", "descriptive_only"]},
+        "passed": {"type": ["boolean", "null"]}
+      }
+    },
+    "completion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_run_fraction", "candidate_run_fraction", "reference_model_fraction", "candidate_model_fraction", "minimum_run_fraction", "minimum_model_fraction", "observed_complete"],
+      "properties": {
+        "reference_run_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "candidate_run_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "reference_model_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "candidate_model_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_run_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_model_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "observed_complete": {"type": "boolean"}
+      }
+    },
+    "cost": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtime", "peak_memory", "output_size", "targets_processed", "models_requested", "trees_fitted"],
+      "properties": {
+        "runtime": {"$ref": "#/$defs/runtime"},
+        "peak_memory": {"$ref": "#/$defs/paired_ratio"},
+        "output_size": {"$ref": "#/$defs/paired_ratio"},
+        "targets_processed": {"$ref": "#/$defs/paired_ratio"},
+        "models_requested": {"$ref": "#/$defs/paired_ratio"},
+        "trees_fitted": {"$ref": "#/$defs/paired_ratio"}
+      }
+    },
+    "intersection_diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["difference", "estimate", "n_dataset_group_contexts", "interpretation"],
+      "properties": {
+        "difference": {"const": "candidate_minus_reference"},
+        "estimate": {"type": "number"},
+        "n_dataset_group_contexts": {"type": "integer", "minimum": 1},
+        "interpretation": {"const": "diagnostic_only_not_an_adoption_endpoint"}
+      }
+    },
+    "comparison": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "candidate_id", "component", "policy_sha256", "primary_evaluation_policy",
+        "n_independent_datasets", "n_dataset_group_contexts", "n_algorithm_seeds_per_dataset",
+        "accuracy", "intersection_diagnostic", "coverage", "completion", "cost", "decision"
+      ],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "component": {"enum": ["target_eligibility", "adaptive_trees", "combined"]},
+        "policy_sha256": {"$ref": "#/$defs/sha256"},
+        "primary_evaluation_policy": {"const": "full_requested_universe"},
+        "n_independent_datasets": {"type": "integer", "minimum": 2},
+        "n_dataset_group_contexts": {"type": "integer", "minimum": 1},
+        "n_algorithm_seeds_per_dataset": {"type": "integer", "minimum": 1},
+        "accuracy": {"$ref": "#/$defs/accuracy"},
+        "intersection_diagnostic": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/intersection_diagnostic"}]},
+        "coverage": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/coverage"}]},
+        "completion": {"$ref": "#/$defs/completion"},
+        "cost": {"$ref": "#/$defs/cost"},
+        "decision": {"enum": ["adoptable", "not_adoptable", "descriptive_only"]}
+      }
+    },
+    "adoption": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decision", "selection_rule", "selected_policy_id", "selected_policy_sha256", "selected_group_policy", "selected_candidate_id", "reason"],
+      "properties": {
+        "decision": {"enum": ["candidate_adopted", "reference_retained", "descriptive_only"]},
+        "selection_rule": {"const": "lowest_geometric_mean_runtime_ratio_then_candidate_id_among_adoptable"},
+        "selected_policy_id": {"$ref": "#/$defs/id"},
+        "selected_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "selected_group_policy": {"type": "object", "minProperties": 1},
+        "selected_candidate_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

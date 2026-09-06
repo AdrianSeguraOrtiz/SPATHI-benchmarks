@@ -3,209 +3,64 @@
   "$id": "https://spathi.dev/benchmarks/calibration-manifest.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "profile_id",
-    "calibration_budget",
-    "search_space_id",
-    "search_space_sha256",
-    "stage_id",
-    "dataset_role",
-    "spathi_commit",
-    "spathi_build_fingerprint",
-    "spathi_image_tag",
-    "parent_ranking",
-    "candidates",
-    "runs"
-  ],
+  "required": ["schema_version", "profile_id", "calibration_budget", "search_space_id", "search_space_sha256", "stage_id", "dataset_role", "spathi_commit", "spathi_build_fingerprint", "spathi_image_tag", "parent_ranking", "candidates", "runs"],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "profile_id": {
-      "type": "string",
-      "pattern": "^(?:calibration-(?:full|reduced)-(?:convergence|structure|estimator)|selection-(?:full|reduced)-validation)$"
-    },
+    "profile_id": {"type": "string", "pattern": "^(?:calibration-(?:full|reduced)-(?:geometry|estimator|estimator_scale_transfer|interaction|convergence)|selection-(?:full|reduced)-validation)$"},
     "calibration_budget": {"enum": ["full", "reduced"]},
     "search_space_id": {"const": "spathi_calibration_v1"},
     "search_space_sha256": {"$ref": "#/$defs/sha256"},
-    "stage_id": {"enum": ["convergence", "structure", "estimator", "validation"]},
+    "stage_id": {"$ref": "#/$defs/stage_id"},
     "dataset_role": {"enum": ["development", "validation"]},
     "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "spathi_build_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "spathi_build_fingerprint": {"$ref": "#/$defs/sha256"},
     "spathi_image_tag": {"type": "string", "minLength": 1},
-    "parent_ranking": {
-      "anyOf": [
-        {"type": "null"},
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["path", "sha256", "stage_id", "calibration_budget"],
-          "properties": {
-            "path": {"$ref": "#/$defs/relative_path"},
-            "sha256": {"$ref": "#/$defs/sha256"},
-            "stage_id": {"enum": ["convergence", "structure", "estimator"]},
-            "calibration_budget": {"enum": ["full", "reduced"]}
-          }
-        }
-      ]
-    },
-    "candidates": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "configuration_id",
-          "configuration_sha256",
-          "stage_id",
-          "dataset_role",
-          "parent_configuration_id",
-          "variant_id",
-          "parameters",
-          "nonreference_parameter_changes"
-        ],
-        "properties": {
-          "configuration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-          "configuration_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "stage_id": {"enum": ["convergence", "structure", "estimator"]},
-          "dataset_role": {"const": "development"},
-          "parent_configuration_id": {
-            "anyOf": [
-              {"type": "null"},
-              {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}
-            ]
-          },
-          "variant_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-          "parameters": {"type": "object", "minProperties": 1},
-          "nonreference_parameter_changes": {"type": "integer", "minimum": 0}
-        }
-      }
-    },
-    "runs": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "run_id",
-          "configuration_id",
-          "configuration_sha256",
-          "algorithm_seed",
-          "execution_sha256"
-        ],
-        "properties": {
-          "run_id": {"$ref": "#/$defs/id"},
-          "configuration_id": {"$ref": "#/$defs/id"},
-          "configuration_sha256": {"$ref": "#/$defs/sha256"},
-          "algorithm_seed": {"type": "integer", "minimum": 0},
-          "execution_sha256": {"$ref": "#/$defs/sha256"}
-        }
-      }
-    }
+    "parent_ranking": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/parent_ranking"}]},
+    "candidates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/candidate"}},
+    "runs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/run"}}
   },
   "allOf": [
-    {
-      "if": {"properties": {"stage_id": {"const": "validation"}}},
-      "then": {
-        "properties": {
-          "profile_id": {
-            "pattern": "^selection-(?:full|reduced)-validation$"
-          },
-          "dataset_role": {"const": "validation"},
-          "parent_ranking": {
-            "type": "object",
-            "properties": {"stage_id": {"const": "estimator"}}
-          }
-        }
-      },
-      "else": {
-        "properties": {"dataset_role": {"const": "development"}}
-      }
-    },
-    {
-      "if": {"properties": {"stage_id": {"const": "convergence"}}},
-      "then": {
-        "properties": {
-          "profile_id": {
-            "pattern": "^calibration-(?:full|reduced)-convergence$"
-          },
-          "parent_ranking": {"type": "null"}
-        }
-      }
-    },
-    {
-      "if": {"properties": {"stage_id": {"const": "structure"}}},
-      "then": {
-        "properties": {
-          "profile_id": {
-            "pattern": "^calibration-(?:full|reduced)-structure$"
-          },
-          "parent_ranking": {
-            "type": "object",
-            "properties": {"stage_id": {"const": "convergence"}}
-          }
-        }
-      }
-    },
-    {
-      "if": {"properties": {"stage_id": {"const": "estimator"}}},
-      "then": {
-        "properties": {
-          "profile_id": {
-            "pattern": "^calibration-(?:full|reduced)-estimator$"
-          },
-          "parent_ranking": {
-            "type": "object",
-            "properties": {"stage_id": {"const": "structure"}}
-          }
-        }
-      }
-    },
-    {
-      "if": {"properties": {"calibration_budget": {"const": "full"}}},
-      "then": {
-        "properties": {
-          "profile_id": {"pattern": "^(?:calibration-full-|selection-full-)"},
-          "parent_ranking": {
-            "anyOf": [
-              {"type": "null"},
-              {
-                "type": "object",
-                "properties": {"calibration_budget": {"const": "full"}}
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "if": {"properties": {"calibration_budget": {"const": "reduced"}}},
-      "then": {
-        "properties": {
-          "profile_id": {"pattern": "^(?:calibration-reduced-|selection-reduced-)"},
-          "parent_ranking": {
-            "anyOf": [
-              {"type": "null"},
-              {
-                "type": "object",
-                "properties": {"calibration_budget": {"const": "reduced"}}
-              }
-            ]
-          }
-        }
-      }
-    }
+    {"if": {"properties": {"stage_id": {"const": "geometry"}}}, "then": {"properties": {"profile_id": {"pattern": "^calibration-(?:full|reduced)-geometry$"}, "dataset_role": {"const": "development"}, "parent_ranking": {"type": "null"}}}},
+    {"if": {"properties": {"stage_id": {"const": "estimator"}}}, "then": {"properties": {"profile_id": {"pattern": "^calibration-(?:full|reduced)-estimator$"}, "dataset_role": {"const": "development"}, "parent_ranking": {"allOf": [{"$ref": "#/$defs/parent_ranking"}, {"properties": {"stage_id": {"const": "geometry"}}}]}}}},
+    {"if": {"properties": {"stage_id": {"const": "interaction"}}}, "then": {"properties": {"profile_id": {"pattern": "^calibration-(?:full|reduced)-interaction$"}, "dataset_role": {"const": "development"}, "parent_ranking": {"allOf": [{"$ref": "#/$defs/parent_ranking"}, {"properties": {"stage_id": {"const": "estimator"}}}]}}}},
+    {"if": {"properties": {"stage_id": {"const": "estimator_scale_transfer"}}}, "then": {"properties": {"profile_id": {"pattern": "^calibration-(?:full|reduced)-estimator_scale_transfer$"}, "dataset_role": {"const": "development"}, "parent_ranking": {"allOf": [{"$ref": "#/$defs/parent_ranking"}, {"properties": {"stage_id": {"const": "interaction"}}}]}}}},
+    {"if": {"properties": {"stage_id": {"const": "convergence"}}}, "then": {"properties": {"profile_id": {"pattern": "^calibration-(?:full|reduced)-convergence$"}, "dataset_role": {"const": "development"}, "parent_ranking": {"allOf": [{"$ref": "#/$defs/parent_ranking"}, {"properties": {"stage_id": {"const": "estimator_scale_transfer"}}}]}}}},
+    {"if": {"properties": {"stage_id": {"const": "validation"}}}, "then": {"properties": {"profile_id": {"pattern": "^selection-(?:full|reduced)-validation$"}, "dataset_role": {"const": "validation"}, "parent_ranking": {"allOf": [{"$ref": "#/$defs/parent_ranking"}, {"properties": {"stage_id": {"const": "convergence"}}}]}}}},
+    {"if": {"properties": {"calibration_budget": {"const": "full"}}}, "then": {"properties": {"profile_id": {"pattern": "^(?:calibration-full-|selection-full-)"}, "parent_ranking": {"anyOf": [{"type": "null"}, {"type": "object", "properties": {"calibration_budget": {"const": "full"}}}]}}}},
+    {"if": {"properties": {"calibration_budget": {"const": "reduced"}}}, "then": {"properties": {"profile_id": {"pattern": "^(?:calibration-reduced-|selection-reduced-)"}, "parent_ranking": {"anyOf": [{"type": "null"}, {"type": "object", "properties": {"calibration_budget": {"const": "reduced"}}}]}}}}
   ],
   "$defs": {
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
-    "relative_path": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "search_stage_id": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"]},
+    "stage_id": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"]},
+    "parent_ranking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "stage_id", "calibration_budget"],
+      "properties": {"path": {"$ref": "#/$defs/relative_path"}, "sha256": {"$ref": "#/$defs/sha256"}, "stage_id": {"$ref": "#/$defs/search_stage_id"}, "calibration_budget": {"enum": ["full", "reduced"]}}
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configuration_id", "configuration_sha256", "stage_id", "dataset_role", "parent_configuration_id", "variant_id", "parameters", "base_parameter_changes"],
+      "properties": {
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "stage_id": {"$ref": "#/$defs/search_stage_id"},
+        "dataset_role": {"const": "development"},
+        "parent_configuration_id": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]},
+        "variant_id": {"$ref": "#/$defs/id"},
+        "parameters": {"type": "object", "minProperties": 1},
+        "base_parameter_changes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "configuration_id", "configuration_sha256", "algorithm_seed", "execution_sha256"],
+      "properties": {"run_id": {"$ref": "#/$defs/id"}, "configuration_id": {"$ref": "#/$defs/id"}, "configuration_sha256": {"$ref": "#/$defs/sha256"}, "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646}, "execution_sha256": {"$ref": "#/$defs/sha256"}}
     }
   }
 }

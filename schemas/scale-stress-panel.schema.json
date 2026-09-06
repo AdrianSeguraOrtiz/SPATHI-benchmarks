@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/scale-stress-panel.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "description",
+    "seed_plan",
+    "scale_grid",
+    "expression_preparation",
+    "datasets"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"$ref": "#/$defs/id"},
+    "description": {"type": "string", "minLength": 1},
+    "seed_plan": {
+      "type": "string",
+      "const": "experiments/v1/seeds/seed-plan.json"
+    },
+    "scale_grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance", "cells", "genes", "transcription_factors"],
+      "properties": {
+        "provenance": {"const": "author_defined_public_synthetic_grid"},
+        "cells": {"$ref": "#/$defs/positive_levels"},
+        "genes": {"$ref": "#/$defs/positive_levels"},
+        "transcription_factors": {"$ref": "#/$defs/positive_levels"}
+      }
+    },
+    "expression_preparation": {"$ref": "#/$defs/expression_preparation"},
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/dataset"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "positive_probability": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+    "positive_levels": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "expression_preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_scale",
+        "normalization",
+        "target_sum",
+        "library_size_scope",
+        "formula"
+      ],
+      "properties": {
+        "input_scale": {"const": "nonnegative_synthetic_counts_like"},
+        "normalization": {"const": "library-size-log1p"},
+        "target_sum": {"const": 10000.0},
+        "library_size_scope": {"const": "all_generated_genes_before_any_filtering"},
+        "formula": {
+          "const": "log1p(target_sum * raw_value / per_cell_library_size)"
+        }
+      }
+    },
+    "seed_derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "stream", "coordinates"],
+      "properties": {
+        "namespace": {"type": "string", "pattern": "^(?:reduced|full)\\.scalability$"},
+        "stream": {"const": "augmentation"},
+        "coordinates": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "anyOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "integer"},
+              {"type": "boolean"}
+            ]
+          },
+          "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"}
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cells"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "cells": {"type": "integer", "minimum": 1}
+      }
+    },
+    "design_role": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "case_id", "purpose"],
+          "properties": {
+            "kind": {"const": "synthetic_scale_case"},
+            "case_id": {"$ref": "#/$defs/id"},
+            "purpose": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "control_id", "purpose"],
+          "properties": {
+            "kind": {"const": "synthetic_control"},
+            "control_id": {"$ref": "#/$defs/id"},
+            "purpose": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "design_role",
+        "seed",
+        "seed_derivation",
+        "genes",
+        "tfs",
+        "groups",
+        "network_mode",
+        "active_tf_fraction",
+        "regulated_target_fraction",
+        "low_detection_target_fraction",
+        "regulators_per_target",
+        "rewiring_fraction",
+        "base_dropout_probability",
+        "low_detection_dropout_probability",
+        "library_size_log_sd",
+        "latent_factors",
+        "noise_sd"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "design_role": {"$ref": "#/$defs/design_role"},
+        "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {"$ref": "#/$defs/seed_derivation"},
+        "genes": {"type": "integer", "minimum": 10},
+        "tfs": {"type": "integer", "minimum": 2},
+        "groups": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/group"}
+        },
+        "network_mode": {"enum": ["dynamic", "invariant"]},
+        "active_tf_fraction": {"$ref": "#/$defs/positive_probability"},
+        "regulated_target_fraction": {"$ref": "#/$defs/positive_probability"},
+        "low_detection_target_fraction": {"$ref": "#/$defs/probability"},
+        "regulators_per_target": {"type": "integer", "minimum": 1, "maximum": 16},
+        "rewiring_fraction": {"$ref": "#/$defs/probability"},
+        "base_dropout_probability": {"$ref": "#/$defs/probability"},
+        "low_detection_dropout_probability": {"$ref": "#/$defs/probability"},
+        "library_size_log_sd": {"type": "number", "minimum": 0, "maximum": 2},
+        "latent_factors": {"type": "integer", "minimum": 1, "maximum": 32},
+        "noise_sd": {"type": "number", "exclusiveMinimum": 0, "maximum": 5}
+      }
+    }
+  }
+}

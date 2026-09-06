@@ -1,66 +1,33 @@
 {
   "runs": [
     {
-      "run_id": "simic_no_similarity_seed_1729",
-      "tool_id": "simic",
-      "params": {
-        "similarity": false,
-        "random_seed": 1729
-      },
-      "execution": {
-        "mode": "group_native"
-      }
-    },
-    {
-      "run_id": "simic_no_similarity_seed_31415",
-      "tool_id": "simic",
-      "params": {
-        "similarity": false,
-        "random_seed": 31415
-      },
-      "execution": {
-        "mode": "group_native"
-      }
-    },
-    {
-      "run_id": "simic_no_similarity_seed_104729",
-      "tool_id": "simic",
-      "params": {
-        "similarity": false,
-        "random_seed": 104729
-      },
-      "execution": {
-        "mode": "group_native"
-      }
-    },
-    {
-      "run_id": "simic_similarity_seed_1729",
+      "run_id": "simic_default_seed_1201401544",
       "tool_id": "simic",
       "params": {
         "similarity": true,
-        "random_seed": 1729
+        "random_seed": 1201401544
       },
       "execution": {
         "mode": "group_native"
       }
     },
     {
-      "run_id": "simic_similarity_seed_31415",
+      "run_id": "simic_default_seed_1474962550",
       "tool_id": "simic",
       "params": {
         "similarity": true,
-        "random_seed": 31415
+        "random_seed": 1474962550
       },
       "execution": {
         "mode": "group_native"
       }
     },
     {
-      "run_id": "simic_similarity_seed_104729",
+      "run_id": "simic_default_seed_1019643605",
       "tool_id": "simic",
       "params": {
         "similarity": true,
-        "random_seed": 104729
+        "random_seed": 1019643605
       },
       "execution": {
         "mode": "group_native"

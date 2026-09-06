@@ -2,10 +2,10 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "dyngen_linear_noisy",
+      "run_id": "dyngen_linear_noisy_reduced",
       "simulator_id": "dyngen",
       "replicates": 1,
-      "base_seed": 11101,
+      "base_seed": 111929139,
       "native_outputs": [],
       "params": {
         "backbone_template": "linear",

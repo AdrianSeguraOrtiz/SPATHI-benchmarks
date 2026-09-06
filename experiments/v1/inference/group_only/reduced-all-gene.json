@@ -1,0 +1,67 @@
+{
+  "runs": [
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_1107144475",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 1107144475
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_512584353",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 512584353
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_238683595",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 238683595
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "clr_default",
+      "tool_id": "clr",
+      "params": {},
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_1107144475",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 1107144475
+      },
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_512584353",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 512584353
+      },
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_238683595",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 238683595
+      },
+      "execution": {"mode": "group_emulated"}
+    }
+  ]
+}

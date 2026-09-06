@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/spathi-production-config.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "budget",
+    "evidence_role",
+    "status",
+    "decision",
+    "policy",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_production_policy"},
+    "budget": {"enum": ["reduced", "full"]},
+    "evidence_role": {"enum": ["descriptive", "confirmatory"]},
+    "status": {"enum": ["descriptive", "confirmed"]},
+    "decision": {
+      "enum": ["descriptive_only", "reference_retained", "candidate_adopted"]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "policy_sha256", "group_policy", "spathi_commit"],
+      "properties": {
+        "policy_id": {"$ref": "#/$defs/id"},
+        "policy_sha256": {"$ref": "#/$defs/sha256"},
+        "group_policy": {"type": "object", "minProperties": 1},
+        "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calibration_selection",
+        "efficiency_plan",
+        "efficiency_evidence",
+        "efficiency_results"
+      ],
+      "properties": {
+        "calibration_selection": {"$ref": "#/$defs/artifact"},
+        "efficiency_plan": {"$ref": "#/$defs/artifact"},
+        "efficiency_evidence": {"$ref": "#/$defs/artifact"},
+        "efficiency_results": {"$ref": "#/$defs/artifact"},
+        "efficiency_safety": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["panel", "plan", "evidence", "results"],
+          "properties": {
+            "panel": {"$ref": "#/$defs/artifact"},
+            "plan": {"$ref": "#/$defs/artifact"},
+            "evidence": {"$ref": "#/$defs/artifact"},
+            "results": {"$ref": "#/$defs/artifact"}
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"budget": {"const": "full"}}, "required": ["budget"]},
+      "then": {
+        "properties": {
+          "evidence_role": {"const": "confirmatory"},
+          "status": {"const": "confirmed"},
+          "decision": {"enum": ["reference_retained", "candidate_adopted"]}
+        }
+      },
+      "else": {
+        "properties": {
+          "evidence_role": {"const": "descriptive"},
+          "status": {"const": "descriptive"},
+          "decision": {"const": "descriptive_only"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

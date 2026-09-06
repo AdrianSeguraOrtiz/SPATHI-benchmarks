@@ -55,16 +55,23 @@
     "notes": ["This profile is a software smoke test, not an inferential study."]
   },
   "statistics": {
-    "status": "enabled",
-    "alpha": 0.05,
-    "random_seed": 1729,
-    "permutations": 99999,
-    "bootstrap_resamples": 20000,
+    "status": "descriptive",
     "comparisons": [
       {
         "id": "group_only_tf_restricted",
-        "comparison_role": "confirmatory",
+        "comparison_role": "exploratory",
+        "analysis_kind": "network_accuracy",
+        "truth_scope": "group_specific",
+        "aggregation": {
+          "block_unit": "dataset_id",
+          "hierarchy": ["simulator_id", "condition_id", "dataset_id"],
+          "weighting": "equal_dataset"
+        },
         "candidate_space": "tf_restricted",
+        "inference_regulator_scope_by_configuration": {
+          "genie3_smoke": "tf_restricted",
+          "spathi_smoke": "tf_restricted"
+        },
         "dataset_roles": ["smoke"],
         "regime": "group_only",
         "levels": ["directed", "topology"],
@@ -72,6 +79,10 @@
         "primary_level": "directed",
         "primary_metric": "aupr",
         "configuration_ids": ["genie3_smoke", "spathi_smoke"],
+        "algorithm_seeds_by_configuration": {
+          "genie3_smoke": [1163786403],
+          "spathi_smoke": [1163786403]
+        },
         "control_configuration_id": "spathi_smoke",
         "stratify_by": [
           "dataset_role",
@@ -82,9 +93,7 @@
           "regime",
           "level"
         ],
-        "min_blocks": 8,
-        "posthoc_scope": "control_vs_rest",
-        "correction": "holm"
+        "expected_blocks": 1
       }
     ]
   }

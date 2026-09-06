@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/noninferiority-panel.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "selection_validation_manifest_sha256",
+    "selection_validation_ranking",
+    "budget",
+    "dataset_role",
+    "split_id",
+    "datasets"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_efficiency_predeclared_panel"},
+    "selection_validation_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "selection_validation_ranking": {"$ref": "#/$defs/file_reference"},
+    "budget": {"enum": ["reduced", "full"]},
+    "dataset_role": {"const": "efficiency_validation"},
+    "split_id": {"const": "efficiency_validation_v1"},
+    "datasets": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/dataset"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "artifact_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "digest"],
+      "properties": {
+        "kind": {"const": "dataset"},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "file_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "simulator_id",
+        "condition_id",
+        "generation_seed",
+        "contexts",
+        "dataset_artifact"
+      ],
+      "properties": {
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "simulator_id": {"$ref": "#/$defs/id"},
+        "condition_id": {"$ref": "#/$defs/id"},
+        "generation_seed": {"type": "integer", "minimum": 0},
+        "contexts": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^group:[^\\s]+$"}
+        },
+        "dataset_artifact": {"$ref": "#/$defs/artifact_reference"}
+      }
+    }
+  }
+}

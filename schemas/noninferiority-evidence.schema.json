@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/noninferiority-evidence.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "study_id", "plan_sha256", "panel_sha256",
+    "artifact_index", "evidence_builder_sha256", "selection_validation_manifest_sha256",
+    "budget", "dataset_role", "execution_failures", "rows"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {
+      "enum": [
+        "spathi_efficiency_paired_evidence",
+        "spathi_efficiency_safety_evidence"
+      ]
+    },
+    "study_id": {"$ref": "#/$defs/id"},
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "panel_sha256": {"$ref": "#/$defs/sha256"},
+    "artifact_index": {"$ref": "#/$defs/file_reference"},
+    "evidence_builder_sha256": {"$ref": "#/$defs/sha256"},
+    "selection_validation_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "budget": {"enum": ["reduced", "full"]},
+    "dataset_role": {"enum": ["efficiency_validation", "efficiency_safety"]},
+    "execution_failures": {
+      "type": "array", "items": {"$ref": "#/$defs/execution_failure"}
+    },
+    "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"artifact_type": {"const": "spathi_efficiency_safety_evidence"}},
+        "required": ["artifact_type"]
+      },
+      "then": {
+        "anyOf": [
+          {"properties": {"rows": {"minItems": 1}}},
+          {"properties": {"execution_failures": {"minItems": 1}}}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "metric": {"type": "number", "minimum": 0, "maximum": 1},
+    "positive_number": {"type": "number", "exclusiveMinimum": 0},
+    "relative_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "file_reference": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+      "properties": {"path": {"$ref": "#/$defs/relative_path"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "execution_failure": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "dataset_id", "dataset_manifest_sha256", "generation_seed", "algorithm_seed",
+        "configuration_id", "selection_role", "inference_artifact",
+        "failure_marker_sha256", "run_report_sha256", "tool_status", "failure_message"
+      ],
+      "properties": {
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "selection_role": {"const": "candidate"},
+        "inference_artifact": {"$ref": "#/$defs/sha256"},
+        "failure_marker_sha256": {"$ref": "#/$defs/sha256"},
+        "run_report_sha256": {"$ref": "#/$defs/sha256"},
+        "tool_status": {"type": "string", "minLength": 1},
+        "failure_message": {"type": "string", "minLength": 1}
+      }
+    },
+    "source_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset", "reference_inference", "candidate_inference",
+        "reference_network_sha256", "candidate_network_sha256",
+        "reference_target_eligibility_sha256", "reference_model_diagnostics_sha256",
+        "reference_run_metadata_sha256", "reference_resource_measurement_sha256",
+        "candidate_target_eligibility_sha256", "candidate_model_diagnostics_sha256",
+        "candidate_run_metadata_sha256", "candidate_resource_measurement_sha256"
+      ],
+      "properties": {
+        "dataset": {"$ref": "#/$defs/sha256"},
+        "reference_inference": {"$ref": "#/$defs/sha256"},
+        "candidate_inference": {"$ref": "#/$defs/sha256"},
+        "reference_network_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_network_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_target_eligibility_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_model_diagnostics_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_run_metadata_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_resource_measurement_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_target_eligibility_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_model_diagnostics_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_run_metadata_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_resource_measurement_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "candidate_space": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy", "construction", "omitted_target_prediction_policy",
+        "reference_source_universe_sha256", "candidate_source_universe_sha256",
+        "reference_target_universe_sha256", "candidate_target_universe_sha256",
+        "reference_evaluation_target_universe_sha256", "candidate_evaluation_target_universe_sha256",
+        "reference_evaluation_candidate_space_sha256", "candidate_evaluation_candidate_space_sha256",
+        "n_reference_sources", "n_candidate_sources", "n_reference_targets", "n_candidate_targets",
+        "n_reference_evaluation_targets", "n_candidate_evaluation_targets",
+        "n_reference_evaluation_source_target_overlaps", "n_candidate_evaluation_source_target_overlaps",
+        "n_reference_evaluation_candidates", "n_candidate_evaluation_candidates"
+      ],
+      "properties": {
+        "policy": {"const": "full_requested_universe"},
+        "construction": {"const": "directed_source_target_cartesian_excluding_self_edges"},
+        "omitted_target_prediction_policy": {"const": "minimum_score_zero"},
+        "reference_source_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_source_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_target_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_target_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_evaluation_target_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_evaluation_target_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_evaluation_candidate_space_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_evaluation_candidate_space_sha256": {"$ref": "#/$defs/sha256"},
+        "n_reference_sources": {"type": "integer", "minimum": 1},
+        "n_candidate_sources": {"type": "integer", "minimum": 1},
+        "n_reference_targets": {"type": "integer", "minimum": 1},
+        "n_candidate_targets": {"type": "integer", "minimum": 0},
+        "n_reference_evaluation_targets": {"type": "integer", "minimum": 1},
+        "n_candidate_evaluation_targets": {"type": "integer", "minimum": 1},
+        "n_reference_evaluation_source_target_overlaps": {"type": "integer", "minimum": 0},
+        "n_candidate_evaluation_source_target_overlaps": {"type": "integer", "minimum": 0},
+        "n_reference_evaluation_candidates": {"type": "integer", "minimum": 1},
+        "n_candidate_evaluation_candidates": {"type": "integer", "minimum": 1}
+      }
+    },
+    "target_coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["eligibility_manifest_sha256", "truth_accessed_by_eligibility", "n_reference_truth_edges", "n_retained_truth_edges"],
+      "properties": {
+        "eligibility_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "truth_accessed_by_eligibility": {"const": false},
+        "n_reference_truth_edges": {"type": "integer", "minimum": 1},
+        "n_retained_truth_edges": {"type": "integer", "minimum": 0}
+      }
+    },
+    "run_measurements": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "run_completed", "wall_time_seconds", "peak_memory_bytes", "output_bytes",
+        "targets_requested", "targets_processed", "models_requested", "models_completed",
+        "models_trained", "trees_fitted"
+      ],
+      "properties": {
+        "run_completed": {"const": true},
+        "wall_time_seconds": {"$ref": "#/$defs/positive_number"},
+        "peak_memory_bytes": {"type": "integer", "minimum": 1},
+        "output_bytes": {"type": "integer", "minimum": 1},
+        "targets_requested": {"type": "integer", "minimum": 1},
+        "targets_processed": {"type": "integer", "minimum": 0},
+        "models_requested": {"type": "integer", "minimum": 1},
+        "models_completed": {"type": "integer", "minimum": 0},
+        "models_trained": {"type": "integer", "minimum": 0},
+        "trees_fitted": {"type": "integer", "minimum": 0}
+      }
+    },
+    "intersection_diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_universe_sha256", "candidate_space_sha256", "n_targets", "n_candidates", "n_truth_edges", "reference_value", "candidate_value"],
+      "properties": {
+        "target_universe_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_space_sha256": {"$ref": "#/$defs/sha256"},
+        "n_targets": {"type": "integer", "minimum": 1},
+        "n_candidates": {"type": "integer", "minimum": 1},
+        "n_truth_edges": {"type": "integer", "minimum": 1},
+        "reference_value": {"$ref": "#/$defs/metric"},
+        "candidate_value": {"$ref": "#/$defs/metric"}
+      }
+    },
+    "row": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "candidate_id", "dataset_id", "dataset_manifest_sha256", "context_id",
+        "simulator_id", "condition_id", "generation_seed", "algorithm_seed",
+        "reference_policy_sha256", "candidate_policy_sha256",
+        "reference_configuration_sha256", "candidate_configuration_sha256",
+        "metric", "level", "reference_value", "candidate_value",
+        "reference_measurements", "candidate_measurements", "candidate_space",
+        "target_coverage", "intersection_diagnostic", "source_artifacts"
+      ],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "context_id": {"type": "string", "pattern": "^group:[^\\s]+$"},
+        "simulator_id": {"$ref": "#/$defs/id"},
+        "condition_id": {"$ref": "#/$defs/id"},
+        "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "reference_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_configuration_sha256": {"$ref": "#/$defs/sha256"},
+        "metric": {"const": "aupr"},
+        "level": {"const": "directed"},
+        "reference_value": {"$ref": "#/$defs/metric"},
+        "candidate_value": {"$ref": "#/$defs/metric"},
+        "reference_measurements": {"$ref": "#/$defs/run_measurements"},
+        "candidate_measurements": {"$ref": "#/$defs/run_measurements"},
+        "candidate_space": {"$ref": "#/$defs/candidate_space"},
+        "target_coverage": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/target_coverage"}]},
+        "intersection_diagnostic": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/intersection_diagnostic"}]},
+        "source_artifacts": {"$ref": "#/$defs/source_artifacts"}
+      }
+    }
+  }
+}

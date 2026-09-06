@@ -16,7 +16,7 @@
     {
       "tool_id": "simic",
       "execution_mode": "group_native",
-      "variant": "similarity=false",
+      "variant": "upstream default (similarity=true)",
       "role": "secondary",
       "status": "candidate",
       "tf_list_handling": "candidate_restriction"
@@ -24,16 +24,20 @@
     {
       "tool_id": "simic",
       "execution_mode": "group_native",
-      "variant": "similarity=true",
+      "variant": "similarity=true with a fingerprinted permuted-order dataset view",
       "role": "secondary",
-      "status": "candidate",
+      "status": "blocked",
       "tf_list_handling": "candidate_restriction"
     }
   ],
   "notes": [
+    "This is a simulator-oracle-information sensitivity, not a fair-information main comparison: the synthetic group order is generated from the simulator trajectory and is unavailable to SPATHI.",
+    "Results are interpreted as an information-advantaged upper-bound sensitivity and never enter the primary ranking.",
     "scMTNI indep=true is not a valid multigroup baseline with the current wrapper.",
     "Simulator lineage_tree gain/loss rates are derived from true group GRNs; native files are leaky and forbidden for an order-only comparison.",
     "scMTNI stays blocked until a justified neutral lineage-rate dataset is derived with a new fingerprint.",
-    "Both SimiC variants consume ordered column phenotypes."
+    "The sole executable SimiC route consumes observed ordered column phenotypes with every scientific parameter at its upstream default.",
+    "The non-default similarity=false variant is intentionally not executed.",
+    "The permuted-order negative control is blocked: order is the column_phenotypes.tsv dataset extra, so a permutation must be represented as a content-addressed derived dataset view with its own fingerprint; current evaluation and joint-integration contracts require one unchanged fingerprint per dataset comparison."
   ]
 }

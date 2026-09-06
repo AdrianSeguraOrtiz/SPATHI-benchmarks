@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/spathi-parameter-accountability.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "scope",
+    "principle",
+    "inference_parameters",
+    "optional_inputs",
+    "operational_parameters",
+    "preparation_parameters"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "spathi_parameter_accountability_v1"},
+    "scope": {"const": "spathi_infer"},
+    "principle": {"type": "string", "minLength": 1},
+    "inference_parameters": {
+      "type": "array",
+      "minItems": 27,
+      "maxItems": 27,
+      "items": {"$ref": "#/$defs/parameter"}
+    },
+    "optional_inputs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/parameter"}
+    },
+    "operational_parameters": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/parameter"}
+    },
+    "preparation_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["study_scope", "parameters", "rationale"],
+      "properties": {
+        "study_scope": {"const": "outside_synthetic_inference_calibration"},
+        "parameters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/parameter"}
+        },
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+    "json_scalar": {
+      "type": ["string", "number", "integer", "boolean", "null"]
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "domain", "disposition", "levels", "rationale"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "domain": {"type": "string", "minLength": 1},
+        "disposition": {
+          "enum": [
+            "calibrated",
+            "conditional",
+            "efficiency_development_then_validation",
+            "fixed_numerical",
+            "repetition",
+            "excluded_unavailable_input",
+            "excluded_annotation_assisted_input",
+            "operational_equivalence",
+            "fixed_preparation_contract"
+          ]
+        },
+        "levels": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/json_scalar"}
+        },
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -45,6 +45,38 @@
       "dataset_role": "development",
       "split_id": "development_v1",
       "condition_id": "scmultisim_dynamic"
+    },
+    {
+      "id": "scmultisim_development_imbalanced",
+      "scenario": "experiments/v1/simulations/scmultisim/development/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/development/imbalanced-reduced-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "scmultisim_imbalanced"
+    },
+    {
+      "id": "scmultisim_development_single_group",
+      "scenario": "experiments/v1/simulations/scmultisim/development/single-group-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/development/single-group-reduced-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "scmultisim_single_group"
+    },
+    {
+      "id": "scmultisim_development_medium",
+      "scenario": "experiments/v1/simulations/scmultisim/development/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/development/medium-reduced-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_v1",
+      "condition_id": "scmultisim_medium"
+    },
+    {
+      "id": "scmultisim_development_estimator_scale_transfer",
+      "scenario": "experiments/v1/simulations/scmultisim/estimator_scale_transfer/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/estimator_scale_transfer/dynamic-reduced-runs.json",
+      "dataset_role": "development",
+      "split_id": "development_estimator_scale_transfer_v1",
+      "condition_id": "scmultisim_estimator_scale_transfer"
     }
   ],
   "inference_batches": [],
@@ -66,19 +98,16 @@
     "simulators": ["dyngen", "scmultisim"],
     "replicates_per_condition": 1,
     "regimes": ["group_only"],
-    "factors": ["topology", "kinetics_noise", "convergence", "structure", "estimator"],
+    "factors": ["topology", "kinetics_noise", "geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"],
     "notes": [
-      "Contains five development datasets: one instance of each of four dyngen conditions and one scMultiSim instance.",
+      "Contains eight ordinary development datasets spanning balanced, imbalanced, single-group, small and medium-scale conditions, plus one independent 1,000-TF estimator-scale-transfer dataset.",
+      "This budget is descriptive workflow coverage; only full may support publication claims.",
       "Uses the same candidate space as the full calibration with the reduced algorithmic-seed budget.",
       "Its selected configuration is provisional and cannot support the full benchmark."
     ]
   },
   "statistics": {
-    "status": "planned",
-    "alpha": 0.05,
-    "random_seed": 1729,
-    "permutations": 99999,
-    "bootstrap_resamples": 20000,
+    "status": "not_applicable",
     "comparisons": []
   }
 }

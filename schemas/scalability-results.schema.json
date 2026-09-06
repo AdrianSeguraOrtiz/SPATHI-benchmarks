@@ -1,0 +1,466 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/scalability-results.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "budget",
+    "evidence_role",
+    "claim_scope",
+    "status",
+    "expression_preparation",
+    "profile",
+    "production_config",
+    "execution_environment",
+    "summary",
+    "datasets",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_scalability_results"},
+    "budget": {"enum": ["reduced", "full"]},
+    "evidence_role": {"enum": ["operational", "publication"]},
+    "claim_scope": {"const": "computational_scale_stress_only"},
+    "status": {"const": "complete"},
+    "expression_preparation": {"$ref": "#/$defs/expression_preparation"},
+    "profile": {"$ref": "#/$defs/artifact"},
+    "production_config": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {
+          "type": "object",
+          "required": ["policy_id", "policy_sha256", "decision"],
+          "properties": {
+            "policy_id": {"$ref": "#/$defs/id"},
+            "policy_sha256": {"$ref": "#/$defs/sha256"},
+            "decision": {
+              "enum": ["descriptive_only", "reference_retained", "candidate_adopted"]
+            }
+          }
+        }
+      ]
+    },
+    "execution_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spathi_commit",
+        "andrea_commit",
+        "spathi_image_id",
+        "andrea_environment_fingerprint",
+        "benchmark_environment_fingerprint",
+        "docker_runtime_environment_fingerprint",
+        "system",
+        "kernel_release",
+        "machine",
+        "cpu_model",
+        "logical_cpus",
+        "host_memory_bytes",
+        "max_cores",
+        "max_ram_gb",
+        "rss_measurement_method",
+        "rss_sample_interval_seconds"
+      ],
+      "properties": {
+        "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "andrea_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "spathi_image_id": {"type": "string", "minLength": 1},
+        "andrea_environment_fingerprint": {"$ref": "#/$defs/sha256"},
+        "benchmark_environment_fingerprint": {"$ref": "#/$defs/sha256"},
+        "docker_runtime_environment_fingerprint": {"$ref": "#/$defs/sha256"},
+        "system": {"type": "string", "minLength": 1},
+        "kernel_release": {"type": "string", "minLength": 1},
+        "machine": {"type": "string", "minLength": 1},
+        "cpu_model": {"type": "string", "minLength": 1},
+        "logical_cpus": {"type": "integer", "minimum": 1},
+        "host_memory_bytes": {"type": "integer", "minimum": 1},
+        "max_cores": {"type": "integer", "minimum": 1},
+        "max_ram_gb": {"type": "number", "minimum": 1},
+        "rss_measurement_method": {"const": "linux_ps_process_tree_rss_sum"},
+        "rss_sample_interval_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasets_requested",
+        "datasets_completed",
+        "datasets_failed",
+        "all_completed",
+        "failure_kinds",
+        "total_generation_wall_time_seconds",
+        "total_inference_wall_time_seconds",
+        "datasets_with_peak_rss",
+        "maximum_peak_rss_bytes",
+        "total_spathi_output_bytes",
+        "total_trees_fitted"
+      ],
+      "properties": {
+        "datasets_requested": {"type": "integer", "minimum": 1},
+        "datasets_completed": {"type": "integer", "minimum": 0},
+        "datasets_failed": {"type": "integer", "minimum": 0},
+        "all_completed": {"type": "boolean"},
+        "failure_kinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["oom", "timeout", "tool_error", "infrastructure_error"],
+          "properties": {
+            "oom": {"type": "integer", "minimum": 0},
+            "timeout": {"type": "integer", "minimum": 0},
+            "tool_error": {"type": "integer", "minimum": 0},
+            "infrastructure_error": {"type": "integer", "minimum": 0}
+          }
+        },
+        "total_generation_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "total_inference_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "datasets_with_peak_rss": {"type": "integer", "minimum": 0},
+        "maximum_peak_rss_bytes": {"type": "integer", "minimum": 0},
+        "total_spathi_output_bytes": {"type": "integer", "minimum": 0},
+        "total_trees_fitted": {"type": "integer", "minimum": 0}
+      }
+    },
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/dataset"}
+    },
+    "notes": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"budget": {"const": "full"}}, "required": ["budget"]},
+      "then": {"properties": {"evidence_role": {"const": "publication"}}},
+      "else": {"properties": {"evidence_role": {"const": "operational"}}}
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "nonnegative_number": {
+      "type": "number",
+      "minimum": 0
+    },
+    "expression_preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_scale",
+        "normalization",
+        "target_sum",
+        "library_size_scope",
+        "formula"
+      ],
+      "properties": {
+        "input_scale": {"const": "nonnegative_synthetic_counts_like"},
+        "normalization": {"const": "library-size-log1p"},
+        "target_sum": {"const": 10000.0},
+        "library_size_scope": {"const": "all_generated_genes_before_any_filtering"},
+        "formula": {
+          "const": "log1p(target_sum * raw_value / per_cell_library_size)"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "policy_id": {"$ref": "#/$defs/id"},
+        "policy_sha256": {"$ref": "#/$defs/sha256"},
+        "decision": {
+          "enum": ["descriptive_only", "reference_retained", "candidate_adopted"]
+        }
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cells", "genes", "groups", "transcription_factors", "targets"],
+      "properties": {
+        "cells": {"type": "integer", "minimum": 1},
+        "genes": {"type": "integer", "minimum": 10},
+        "groups": {"type": "integer", "minimum": 1},
+        "transcription_factors": {"type": "integer", "minimum": 2},
+        "targets": {"type": "integer", "minimum": 1}
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wall_time_seconds",
+        "cache_hit",
+        "dataset_artifact_bytes",
+        "expression_bytes"
+      ],
+      "properties": {
+        "wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "cache_hit": {"type": "boolean"},
+        "dataset_artifact_bytes": {"type": "integer", "minimum": 1},
+        "expression_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "execution_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_parallel_runs",
+        "max_cores",
+        "max_ram_gb",
+        "planner",
+        "planner_time_limit_seconds",
+        "inference_wall_time_limit_seconds"
+      ],
+      "properties": {
+        "max_parallel_runs": {"const": 1},
+        "max_cores": {"type": "integer", "minimum": 1},
+        "max_ram_gb": {"type": "number", "minimum": 1},
+        "planner": {"enum": ["heuristic", "cp_sat"]},
+        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "inference_wall_time_limit_seconds": {"type": "null"}
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "andrea_wall_time_seconds",
+        "spathi_wall_time_seconds",
+        "harness_wall_time_seconds",
+        "peak_rss_bytes",
+        "rss_samples",
+        "cache_hit",
+        "inference_artifact_bytes",
+        "spathi_output_bytes",
+        "targets_requested",
+        "targets_eligible",
+        "targets_ineligible",
+        "models_requested",
+        "models_completed",
+        "models_trained",
+        "models_failed",
+        "trees_fitted",
+        "threads_requested",
+        "threads_effective",
+        "threads_available",
+        "estimated_peak_heap_with_rough_trees_bytes"
+      ],
+      "properties": {
+        "andrea_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "spathi_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "harness_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "peak_rss_bytes": {"type": "integer", "minimum": 1},
+        "rss_samples": {"type": "integer", "minimum": 1},
+        "cache_hit": {"const": false},
+        "inference_artifact_bytes": {"type": "integer", "minimum": 1},
+        "spathi_output_bytes": {"type": "integer", "minimum": 1},
+        "targets_requested": {"type": "integer", "minimum": 1},
+        "targets_eligible": {"type": "integer", "minimum": 0},
+        "targets_ineligible": {"type": "integer", "minimum": 0},
+        "models_requested": {"type": "integer", "minimum": 0},
+        "models_completed": {"type": "integer", "minimum": 0},
+        "models_trained": {"type": "integer", "minimum": 0},
+        "models_failed": {"type": "integer", "minimum": 0},
+        "trees_fitted": {"type": "integer", "minimum": 0},
+        "threads_requested": {"type": "integer", "minimum": 1},
+        "threads_effective": {"type": "integer", "minimum": 1},
+        "threads_available": {"type": "integer", "minimum": 1},
+        "estimated_peak_heap_with_rough_trees_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "seed_derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "stream", "coordinates"],
+      "properties": {
+        "namespace": {"type": "string", "pattern": "^(?:reduced|full)\\.scalability$"},
+        "stream": {"const": "inference"},
+        "coordinates": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "anyOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "integer"},
+              {"type": "boolean"}
+            ]
+          }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failure_kind",
+        "stage",
+        "message",
+        "orchestrator_exit_code",
+        "tool_exit_code"
+      ],
+      "properties": {
+        "failure_kind": {
+          "enum": ["oom", "timeout", "tool_error", "infrastructure_error"]
+        },
+        "stage": {"const": "inference"},
+        "message": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "orchestrator_exit_code": {"type": "integer"},
+        "tool_exit_code": {"type": "integer"}
+      }
+    },
+    "failure_observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness_wall_time_seconds",
+        "tool_wall_time_seconds",
+        "peak_rss_bytes",
+        "rss_samples"
+      ],
+      "properties": {
+        "harness_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "tool_wall_time_seconds": {"$ref": "#/$defs/nonnegative_number"},
+        "peak_rss_bytes": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        },
+        "rss_samples": {"type": "integer", "minimum": 0}
+      }
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["percent", "status", "phase", "message", "warnings"],
+      "properties": {
+        "percent": {"type": "integer", "minimum": 0, "maximum": 100},
+        "status": {"type": "string", "minLength": 1},
+        "phase": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "warnings": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command_log", "progress", "tool_log_tail"],
+      "properties": {
+        "command_log": {"$ref": "#/$defs/file_artifact"},
+        "progress": {
+          "oneOf": [
+            {"$ref": "#/$defs/progress"},
+            {"type": "null"}
+          ]
+        },
+        "tool_log_tail": {
+          "oneOf": [
+            {"type": "string", "minLength": 1, "maxLength": 65536},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "status",
+        "network_mode",
+        "policy_branch",
+        "generation_seed",
+        "algorithm_seed",
+        "seed_derivation",
+        "dimensions",
+        "execution_limits",
+        "generation",
+        "dataset_artifact"
+      ],
+      "properties": {
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "status": {"enum": ["completed", "failed"]},
+        "network_mode": {"enum": ["dynamic", "invariant"]},
+        "policy_branch": {"enum": ["single_group", "multi_group"]},
+        "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {"$ref": "#/$defs/seed_derivation"},
+        "dimensions": {"$ref": "#/$defs/dimensions"},
+        "execution_limits": {"$ref": "#/$defs/execution_limits"},
+        "generation": {"$ref": "#/$defs/generation"},
+        "inference": {"$ref": "#/$defs/inference"},
+        "failure": {"$ref": "#/$defs/failure"},
+        "observations": {"$ref": "#/$defs/failure_observations"},
+        "diagnostics": {"$ref": "#/$defs/diagnostics"},
+        "dataset_artifact": {"$ref": "#/$defs/content_artifact"},
+        "inference_artifact": {"$ref": "#/$defs/content_artifact"},
+        "run_metadata": {"$ref": "#/$defs/artifact"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "completed"}},
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["inference", "inference_artifact", "run_metadata"],
+            "not": {
+              "anyOf": [
+                {"required": ["failure"]},
+                {"required": ["observations"]},
+                {"required": ["diagnostics"]}
+              ]
+            }
+          },
+          "else": {
+            "required": ["failure", "observations", "diagnostics"],
+            "not": {
+              "anyOf": [
+                {"required": ["inference"]},
+                {"required": ["inference_artifact"]},
+                {"required": ["run_metadata"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "file_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "content_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "digest"],
+      "properties": {
+        "kind": {"enum": ["dataset", "inference"]},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

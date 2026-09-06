@@ -5,9 +5,17 @@
       "run_id": "genie3_smoke",
       "configuration_id": "genie3_smoke",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1163786403,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_baseline"
+      "family": "catalog_baseline",
+      "seed_derivation": {
+        "namespace": "smoke.smoke",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     }
   ]
 }

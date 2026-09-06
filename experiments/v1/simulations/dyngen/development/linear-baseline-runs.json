@@ -5,7 +5,7 @@
       "run_id": "dyngen_linear_baseline",
       "simulator_id": "dyngen",
       "replicates": 3,
-      "base_seed": 11001,
+      "base_seed": 1319366673,
       "native_outputs": [],
       "params": {
         "backbone_template": "linear",

@@ -1,0 +1,1022 @@
+{
+  "schema_version": "1.0",
+  "description": "Canonical v1 seed ledger. SHA-256 domain separation makes every budget, dataset role, stochastic stream, and registered simulator seed independent of manifest ordering. Generation allocations map the contiguous seed blocks consumed by ANDREA; non-generation allocations reserve only domains consumed by the frozen design, while concrete task seeds are derived directly from the master seed and recorded with their semantic coordinates.",
+  "master_seed": 20260905,
+  "derivation": {
+    "algorithm": "sha256-domain-separated-uint32-v1",
+    "domain_separator": "org.spathi.benchmarks.seed-plan.v1",
+    "encoding": "canonical-json-utf8",
+    "projection": "first-64-bits-big-endian-mod-2147483646-plus-1"
+  },
+  "streams": [
+    "generation",
+    "augmentation",
+    "inference",
+    "statistical",
+    "execution_order"
+  ],
+  "namespaces": [
+    {
+      "id": "smoke.smoke",
+      "budget": "smoke",
+      "dataset_role": "smoke"
+    },
+    {
+      "id": "reduced.development",
+      "budget": "reduced",
+      "dataset_role": "development"
+    },
+    {
+      "id": "full.development",
+      "budget": "full",
+      "dataset_role": "development"
+    },
+    {
+      "id": "reduced.validation",
+      "budget": "reduced",
+      "dataset_role": "validation"
+    },
+    {
+      "id": "full.validation",
+      "budget": "full",
+      "dataset_role": "validation"
+    },
+    {
+      "id": "reduced.efficiency_development",
+      "budget": "reduced",
+      "dataset_role": "efficiency_development"
+    },
+    {
+      "id": "full.efficiency_development",
+      "budget": "full",
+      "dataset_role": "efficiency_development"
+    },
+    {
+      "id": "reduced.efficiency_validation",
+      "budget": "reduced",
+      "dataset_role": "efficiency_validation"
+    },
+    {
+      "id": "full.efficiency_validation",
+      "budget": "full",
+      "dataset_role": "efficiency_validation"
+    },
+    {
+      "id": "full.efficiency_safety",
+      "budget": "full",
+      "dataset_role": "efficiency_safety"
+    },
+    {
+      "id": "reduced.dimensional_transfer",
+      "budget": "reduced",
+      "dataset_role": "dimensional_transfer"
+    },
+    {
+      "id": "full.dimensional_transfer",
+      "budget": "full",
+      "dataset_role": "dimensional_transfer"
+    },
+    {
+      "id": "reduced.scalability",
+      "budget": "reduced",
+      "dataset_role": "scalability"
+    },
+    {
+      "id": "reduced.test",
+      "budget": "reduced",
+      "dataset_role": "test"
+    },
+    {
+      "id": "full.scalability",
+      "budget": "full",
+      "dataset_role": "scalability"
+    },
+    {
+      "id": "full.test",
+      "budget": "full",
+      "dataset_role": "test"
+    }
+  ],
+  "allocations": [
+    {
+      "id": "seed.smoke.smoke.generation",
+      "namespace": "smoke.smoke",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 1,
+      "seed": 1033439737,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/smoke-runs.json",
+          "run_id": "dyngen_smoke",
+          "offset": 0,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.smoke.smoke.inference",
+      "namespace": "smoke.smoke",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 469974073
+    },
+    {
+      "id": "seed.reduced.development.generation",
+      "namespace": "reduced.development",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 9,
+      "seed": 111929138,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/development/linear-baseline-reduced-runs.json",
+          "run_id": "dyngen_linear_baseline_reduced",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/linear-noisy-reduced-runs.json",
+          "run_id": "dyngen_linear_noisy_reduced",
+          "offset": 1,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/bifurcating-baseline-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_baseline_reduced",
+          "offset": 2,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/bifurcating-noisy-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_noisy_reduced",
+          "offset": 3,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/dynamic-reduced-runs.json",
+          "run_id": "scmultisim_dynamic_custom_development_reduced",
+          "offset": 4,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/estimator_scale_transfer/dynamic-reduced-runs.json",
+          "run_id": "scmultisim_estimator_scale_transfer_reduced",
+          "offset": 5,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/imbalanced-reduced-runs.json",
+          "run_id": "scmultisim_imbalanced_development_reduced",
+          "offset": 6,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/single-group-reduced-runs.json",
+          "run_id": "scmultisim_single_group_development_reduced",
+          "offset": 7,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/medium-reduced-runs.json",
+          "run_id": "scmultisim_medium_development_reduced",
+          "offset": 8,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.development.inference",
+      "namespace": "reduced.development",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 440820831
+    },
+    {
+      "id": "seed.full.development.generation",
+      "namespace": "full.development",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 27,
+      "seed": 1319366673,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/development/linear-baseline-runs.json",
+          "run_id": "dyngen_linear_baseline",
+          "offset": 0,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/linear-noisy-runs.json",
+          "run_id": "dyngen_linear_noisy",
+          "offset": 3,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/bifurcating-baseline-runs.json",
+          "run_id": "dyngen_bifurcating_baseline",
+          "offset": 6,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/development/bifurcating-noisy-runs.json",
+          "run_id": "dyngen_bifurcating_noisy",
+          "offset": 9,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/dynamic-runs.json",
+          "run_id": "scmultisim_dynamic_custom_development",
+          "offset": 12,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/estimator_scale_transfer/dynamic-runs.json",
+          "run_id": "scmultisim_estimator_scale_transfer",
+          "offset": 15,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/imbalanced-runs.json",
+          "run_id": "scmultisim_imbalanced_development",
+          "offset": 18,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/single-group-runs.json",
+          "run_id": "scmultisim_single_group_development",
+          "offset": 21,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/development/medium-runs.json",
+          "run_id": "scmultisim_medium_development",
+          "offset": 24,
+          "span": 3
+        }
+      ]
+    },
+    {
+      "id": "seed.full.development.inference",
+      "namespace": "full.development",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1611421978
+    },
+    {
+      "id": "seed.reduced.validation.generation",
+      "namespace": "reduced.validation",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 8,
+      "seed": 1851271242,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/linear-baseline-reduced-runs.json",
+          "run_id": "dyngen_linear_baseline_validation_reduced",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/linear-noisy-reduced-runs.json",
+          "run_id": "dyngen_linear_noisy_validation_reduced",
+          "offset": 1,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/bifurcating-baseline-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_baseline_validation_reduced",
+          "offset": 2,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/bifurcating-noisy-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_noisy_validation_reduced",
+          "offset": 3,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/dynamic-reduced-runs.json",
+          "run_id": "scmultisim_dynamic_custom_validation_reduced",
+          "offset": 4,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/imbalanced-reduced-runs.json",
+          "run_id": "scmultisim_imbalanced_validation_reduced",
+          "offset": 5,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/single-group-reduced-runs.json",
+          "run_id": "scmultisim_single_group_validation_reduced",
+          "offset": 6,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/medium-reduced-runs.json",
+          "run_id": "scmultisim_medium_validation_reduced",
+          "offset": 7,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.validation.inference",
+      "namespace": "reduced.validation",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 314347885
+    },
+    {
+      "id": "seed.full.validation.generation",
+      "namespace": "full.validation",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 24,
+      "seed": 1854195449,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/linear-baseline-runs.json",
+          "run_id": "dyngen_linear_baseline",
+          "offset": 0,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/linear-noisy-runs.json",
+          "run_id": "dyngen_linear_noisy",
+          "offset": 3,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/bifurcating-baseline-runs.json",
+          "run_id": "dyngen_bifurcating_baseline",
+          "offset": 6,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/validation/bifurcating-noisy-runs.json",
+          "run_id": "dyngen_bifurcating_noisy",
+          "offset": 9,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/dynamic-runs.json",
+          "run_id": "scmultisim_dynamic_custom_validation",
+          "offset": 12,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/imbalanced-runs.json",
+          "run_id": "scmultisim_imbalanced_validation",
+          "offset": 15,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/single-group-runs.json",
+          "run_id": "scmultisim_single_group_validation",
+          "offset": 18,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/validation/medium-runs.json",
+          "run_id": "scmultisim_medium_validation",
+          "offset": 21,
+          "span": 3
+        }
+      ]
+    },
+    {
+      "id": "seed.full.validation.inference",
+      "namespace": "full.validation",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1310002229
+    },
+    {
+      "id": "seed.reduced.efficiency_development.generation",
+      "namespace": "reduced.efficiency_development",
+      "stream": "generation",
+      "coordinates": {"purpose": "simulator_runs"},
+      "span": 5,
+      "seed": 1210250625,
+      "consumers": [
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/linear-baseline-reduced-runs.json", "run_id": "dyngen_efficiency_development_linear_baseline_reduced", "offset": 0, "span": 1},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/linear-noisy-reduced-runs.json", "run_id": "dyngen_efficiency_development_linear_noisy_reduced", "offset": 1, "span": 1},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-baseline-reduced-runs.json", "run_id": "dyngen_efficiency_development_bifurcating_baseline_reduced", "offset": 2, "span": 1},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-noisy-reduced-runs.json", "run_id": "dyngen_efficiency_development_bifurcating_noisy_reduced", "offset": 3, "span": 1},
+        {"path": "experiments/v1/simulations/scmultisim/efficiency_development/dynamic-reduced-runs.json", "run_id": "scmultisim_dynamic_efficiency_development_reduced", "offset": 4, "span": 1}
+      ]
+    },
+    {
+      "id": "seed.reduced.efficiency_development.inference",
+      "namespace": "reduced.efficiency_development",
+      "stream": "inference",
+      "coordinates": {"purpose": "phase_root"},
+      "span": 1,
+      "seed": 2143621006
+    },
+    {
+      "id": "seed.reduced.efficiency_development.execution_order",
+      "namespace": "reduced.efficiency_development",
+      "stream": "execution_order",
+      "coordinates": {"purpose": "counterbalanced_execution_order"},
+      "span": 1,
+      "seed": 370771032
+    },
+    {
+      "id": "seed.full.efficiency_development.generation",
+      "namespace": "full.efficiency_development",
+      "stream": "generation",
+      "coordinates": {"purpose": "simulator_runs"},
+      "span": 15,
+      "seed": 978315677,
+      "consumers": [
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/linear-baseline-runs.json", "run_id": "dyngen_efficiency_development_linear_baseline", "offset": 0, "span": 3},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/linear-noisy-runs.json", "run_id": "dyngen_efficiency_development_linear_noisy", "offset": 3, "span": 3},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-baseline-runs.json", "run_id": "dyngen_efficiency_development_bifurcating_baseline", "offset": 6, "span": 3},
+        {"path": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-noisy-runs.json", "run_id": "dyngen_efficiency_development_bifurcating_noisy", "offset": 9, "span": 3},
+        {"path": "experiments/v1/simulations/scmultisim/efficiency_development/dynamic-runs.json", "run_id": "scmultisim_dynamic_efficiency_development", "offset": 12, "span": 3}
+      ]
+    },
+    {
+      "id": "seed.full.efficiency_development.inference",
+      "namespace": "full.efficiency_development",
+      "stream": "inference",
+      "coordinates": {"purpose": "phase_root"},
+      "span": 1,
+      "seed": 418405761
+    },
+    {
+      "id": "seed.full.efficiency_development.execution_order",
+      "namespace": "full.efficiency_development",
+      "stream": "execution_order",
+      "coordinates": {"purpose": "counterbalanced_execution_order"},
+      "span": 1,
+      "seed": 923164876
+    },
+    {
+      "id": "seed.reduced.efficiency_validation.generation",
+      "namespace": "reduced.efficiency_validation",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 5,
+      "seed": 1601045703,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/linear-baseline-reduced-runs.json",
+          "run_id": "dyngen_efficiency_linear_baseline_reduced",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/linear-noisy-reduced-runs.json",
+          "run_id": "dyngen_efficiency_linear_noisy_reduced",
+          "offset": 1,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/bifurcating-baseline-reduced-runs.json",
+          "run_id": "dyngen_efficiency_bifurcating_baseline_reduced",
+          "offset": 2,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/bifurcating-noisy-reduced-runs.json",
+          "run_id": "dyngen_efficiency_bifurcating_noisy_reduced",
+          "offset": 3,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_validation/dynamic-reduced-runs.json",
+          "run_id": "scmultisim_dynamic_efficiency_validation_reduced",
+          "offset": 4,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.efficiency_validation.inference",
+      "namespace": "reduced.efficiency_validation",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 2116380590
+    },
+    {
+      "id": "seed.reduced.efficiency_validation.execution_order",
+      "namespace": "reduced.efficiency_validation",
+      "stream": "execution_order",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 330569539
+    },
+    {
+      "id": "seed.full.efficiency_validation.generation",
+      "namespace": "full.efficiency_validation",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 25,
+      "seed": 1575148874,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/linear-baseline-runs.json",
+          "run_id": "dyngen_efficiency_linear_baseline",
+          "offset": 0,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/linear-noisy-runs.json",
+          "run_id": "dyngen_efficiency_linear_noisy",
+          "offset": 5,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/bifurcating-baseline-runs.json",
+          "run_id": "dyngen_efficiency_bifurcating_baseline",
+          "offset": 10,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/efficiency_validation/bifurcating-noisy-runs.json",
+          "run_id": "dyngen_efficiency_bifurcating_noisy",
+          "offset": 15,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_validation/dynamic-runs.json",
+          "run_id": "scmultisim_dynamic_efficiency_validation",
+          "offset": 20,
+          "span": 5
+        }
+      ]
+    },
+    {
+      "id": "seed.full.efficiency_validation.inference",
+      "namespace": "full.efficiency_validation",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1166548929
+    },
+    {
+      "id": "seed.full.efficiency_validation.statistical",
+      "namespace": "full.efficiency_validation",
+      "stream": "statistical",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1646541320
+    },
+    {
+      "id": "seed.full.efficiency_validation.execution_order",
+      "namespace": "full.efficiency_validation",
+      "stream": "execution_order",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1144182910
+    },
+    {
+      "id": "seed.full.efficiency_safety.generation",
+      "namespace": "full.efficiency_safety",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 18,
+      "seed": 1180385080,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf100-c300-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g3000_tf100_c300",
+          "offset": 0,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c500-single-group-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g100_tf10_c500_single_group",
+          "offset": 3,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c300-groups-10-40-250-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g100_tf10_c300_groups_10_40_250",
+          "offset": 6,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c10000-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g100_tf10_c10000",
+          "offset": 9,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf1500-c300-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g3000_tf1500_c300",
+          "offset": 12,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/efficiency_safety/g15000-tf100-c300-runs.json",
+          "run_id": "scmultisim_efficiency_safety_g15000_tf100_c300",
+          "offset": 15,
+          "span": 3
+        }
+      ]
+    },
+    {
+      "id": "seed.full.efficiency_safety.inference",
+      "namespace": "full.efficiency_safety",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 266347730
+    },
+    {
+      "id": "seed.full.efficiency_safety.execution_order",
+      "namespace": "full.efficiency_safety",
+      "stream": "execution_order",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1643174897
+    },
+    {
+      "id": "seed.reduced.dimensional_transfer.generation",
+      "namespace": "reduced.dimensional_transfer",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 4,
+      "seed": 2126924652,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf100-reduced-runs.json",
+          "run_id": "scmultisim_transfer_g3000_tf100_reduced",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-reduced-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c300_reduced",
+          "offset": 1,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c500-single-group-reduced-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c500_single_group_reduced",
+          "offset": 2,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-groups-10-40-250-reduced-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c300_groups_10_40_250_reduced",
+          "offset": 3,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.dimensional_transfer.inference",
+      "namespace": "reduced.dimensional_transfer",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1154579511
+    },
+    {
+      "id": "seed.full.dimensional_transfer.generation",
+      "namespace": "full.dimensional_transfer",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 9,
+      "seed": 2007344331,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf100-full-runs.json",
+          "run_id": "scmultisim_transfer_g3000_tf100_full",
+          "offset": 0,
+          "span": 3
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g15000-tf100-full-runs.json",
+          "run_id": "scmultisim_transfer_g15000_tf100_full",
+          "offset": 3,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf1500-full-runs.json",
+          "run_id": "scmultisim_transfer_g3000_tf1500_full",
+          "offset": 4,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-full-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c300_full",
+          "offset": 5,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c10000-full-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c10000_full",
+          "offset": 6,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c500-single-group-full-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c500_single_group_full",
+          "offset": 7,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-groups-10-40-250-full-runs.json",
+          "run_id": "scmultisim_transfer_g100_tf10_c300_groups_10_40_250_full",
+          "offset": 8,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.full.dimensional_transfer.inference",
+      "namespace": "full.dimensional_transfer",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1505240454
+    },
+    {
+      "id": "seed.reduced.test.generation",
+      "namespace": "reduced.test",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 10,
+      "seed": 1938669635,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/test/linear-baseline-reduced-runs.json",
+          "run_id": "dyngen_linear_baseline_test_reduced",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/linear-noisy-reduced-runs.json",
+          "run_id": "dyngen_linear_noisy_test_reduced",
+          "offset": 1,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/bifurcating-baseline-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_baseline_test_reduced",
+          "offset": 2,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/bifurcating-noisy-reduced-runs.json",
+          "run_id": "dyngen_bifurcating_noisy_test_reduced",
+          "offset": 3,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-low-balanced-reduced-runs.json",
+          "run_id": "scmultisim_dynamic_low_balanced_test_reduced",
+          "offset": 4,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-high-imbalanced-reduced-runs.json",
+          "run_id": "scmultisim_dynamic_high_imbalanced_test_reduced",
+          "offset": 5,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/sergio/test/invariant-reduced-runs.json",
+          "run_id": "sergio_invariant_steady_state_test_reduced",
+          "offset": 6,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/boolode/test/invariant-clean-reduced-runs.json",
+          "run_id": "boolode_invariant_gsd_clean_test_reduced",
+          "offset": 7,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/boolode/test/invariant-dropout-reduced-runs.json",
+          "run_id": "boolode_invariant_gsd_dropout_test_reduced",
+          "offset": 8,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/genespider2/test/invariant-reduced-runs.json",
+          "run_id": "genespider2_invariant_scalefree_test_reduced",
+          "offset": 9,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.test.inference",
+      "namespace": "reduced.test",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1168037567
+    },
+    {
+      "id": "seed.full.test.generation",
+      "namespace": "full.test",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 60,
+      "seed": 596607951,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/dyngen/test/linear-baseline-runs.json",
+          "run_id": "dyngen_linear_baseline",
+          "offset": 0,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/linear-noisy-runs.json",
+          "run_id": "dyngen_linear_noisy",
+          "offset": 5,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/bifurcating-baseline-runs.json",
+          "run_id": "dyngen_bifurcating_baseline",
+          "offset": 10,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/dyngen/test/bifurcating-noisy-runs.json",
+          "run_id": "dyngen_bifurcating_noisy",
+          "offset": 15,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-low-balanced-runs.json",
+          "run_id": "scmultisim_dynamic_low_balanced_test",
+          "offset": 20,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-high-imbalanced-runs.json",
+          "run_id": "scmultisim_dynamic_high_imbalanced_test",
+          "offset": 25,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/sergio/test/invariant-runs.json",
+          "run_id": "sergio_invariant_steady_state_test",
+          "offset": 30,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/boolode/test/invariant-clean-runs.json",
+          "run_id": "boolode_invariant_gsd_clean_test",
+          "offset": 35,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/boolode/test/invariant-dropout-runs.json",
+          "run_id": "boolode_invariant_gsd_dropout_test",
+          "offset": 40,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/genespider2/test/invariant-runs.json",
+          "run_id": "genespider2_invariant_scalefree_test",
+          "offset": 45,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-medium-balanced-runs.json",
+          "run_id": "scmultisim_dynamic_medium_balanced_test",
+          "offset": 50,
+          "span": 5
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/test/dynamic-medium-imbalanced-runs.json",
+          "run_id": "scmultisim_dynamic_medium_imbalanced_test",
+          "offset": 55,
+          "span": 5
+        }
+      ]
+    },
+    {
+      "id": "seed.full.test.inference",
+      "namespace": "full.test",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1638275919
+    },
+    {
+      "id": "seed.full.test.statistical",
+      "namespace": "full.test",
+      "stream": "statistical",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1698096914
+    },
+    {
+      "id": "seed.reduced.scalability.augmentation",
+      "namespace": "reduced.scalability",
+      "stream": "augmentation",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 216262267
+    },
+    {
+      "id": "seed.reduced.scalability.inference",
+      "namespace": "reduced.scalability",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1719222366
+    },
+    {
+      "id": "seed.full.scalability.augmentation",
+      "namespace": "full.scalability",
+      "stream": "augmentation",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1348585426
+    },
+    {
+      "id": "seed.full.scalability.inference",
+      "namespace": "full.scalability",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 2128034748
+    }
+  ]
+}

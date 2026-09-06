@@ -1,0 +1,408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/dimensional-transfer-results.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "budget",
+    "evidence_role",
+    "claim_scope",
+    "status",
+    "panel",
+    "profile",
+    "production_config",
+    "algorithm_seed",
+    "summary_inputs",
+    "summary",
+    "datasets",
+    "conditions",
+    "contrasts",
+    "exact_production_diagnostic",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_dimensional_transfer_results"},
+    "budget": {"enum": ["reduced", "full"]},
+    "evidence_role": {"enum": ["operational", "publication_descriptive"]},
+    "claim_scope": {"const": "truth_bearing_synthetic_dimensional_transfer"},
+    "status": {"const": "complete"},
+    "panel": {"$ref": "#/$defs/reference"},
+    "profile": {"$ref": "#/$defs/reference"},
+    "production_config": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {
+          "type": "object",
+          "required": ["policy_id", "policy_sha256"]
+        }
+      ]
+    },
+    "algorithm_seed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "derivation"],
+      "properties": {
+        "value": {"$ref": "#/$defs/seed"},
+        "derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "stream", "coordinates"],
+          "properties": {
+            "namespace": {"pattern": "^(?:reduced|full)\\.dimensional_transfer$"},
+            "stream": {"const": "inference"},
+            "coordinates": {
+              "const": {"purpose": "algorithm_replicate", "replicate_index": 1}
+            }
+          }
+        }
+      }
+    },
+    "summary_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metrics_csv", "summary_json", "pipeline_state"],
+      "properties": {
+        "metrics_csv": {"$ref": "#/$defs/reference"},
+        "summary_json": {"$ref": "#/$defs/reference"},
+        "pipeline_state": {"$ref": "#/$defs/reference"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasets_requested",
+        "datasets_completed",
+        "contexts_evaluated",
+        "all_completed"
+      ],
+      "properties": {
+        "datasets_requested": {"type": "integer", "minimum": 1},
+        "datasets_completed": {"type": "integer", "minimum": 1},
+        "contexts_evaluated": {"type": "integer", "minimum": 1},
+        "all_completed": {"const": true}
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 7,
+      "items": {"$ref": "#/$defs/condition_result"}
+    },
+    "datasets": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 9,
+      "items": {"$ref": "#/$defs/dataset_result"}
+    },
+    "contrasts": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/contrast"}
+    },
+    "exact_production_diagnostic": {
+      "$ref": "#/$defs/exact_production_diagnostic"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 4,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"budget": {"const": "reduced"}}, "required": ["budget"]},
+      "then": {
+        "properties": {
+          "conditions": {"minItems": 4, "maxItems": 4},
+          "datasets": {"minItems": 4, "maxItems": 4},
+          "contrasts": {"maxItems": 0}
+        }
+      },
+      "else": {
+        "properties": {
+          "conditions": {"minItems": 7, "maxItems": 7},
+          "datasets": {"minItems": 9, "maxItems": 9},
+          "contrasts": {"minItems": 3, "maxItems": 3}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "policy_id": {"type": "string", "minLength": 1},
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+    "nullable_metric": {
+      "type": ["number", "null"]
+    },
+    "condition_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "analysis_role",
+        "genes",
+        "transcription_factors",
+        "cells",
+        "replicates",
+        "contexts",
+        "directed_aupr",
+        "adjusted_aupr",
+        "directed_auroc",
+        "f1_at_truth_count",
+        "epr_at_truth_count",
+        "candidate_prevalence",
+        "median_wall_time_seconds"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "analysis_role": {
+          "enum": [
+            "scale_anchor",
+            "scale_endpoint",
+            "single_group_routing_control",
+            "extreme_group_imbalance_control"
+          ]
+        },
+        "genes": {"enum": [100, 3000, 15000]},
+        "transcription_factors": {"enum": [10, 100, 1500]},
+        "cells": {"enum": [300, 500, 10000]},
+        "replicates": {"type": "integer", "minimum": 1},
+        "contexts": {"type": "integer", "minimum": 1},
+        "directed_aupr": {"type": "number"},
+        "adjusted_aupr": {"type": "number"},
+        "directed_auroc": {"$ref": "#/$defs/nullable_metric"},
+        "f1_at_truth_count": {"type": "number"},
+        "epr_at_truth_count": {"type": "number"},
+        "candidate_prevalence": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "median_wall_time_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "dataset_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "condition_id",
+        "analysis_role",
+        "genes",
+        "transcription_factors",
+        "cells",
+        "generation_seed",
+        "contexts",
+        "directed_aupr",
+        "adjusted_aupr",
+        "directed_auroc",
+        "f1_at_truth_count",
+        "epr_at_truth_count",
+        "candidate_prevalence",
+        "wall_time_seconds"
+      ],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "condition_id": {"type": "string", "minLength": 1},
+        "analysis_role": {
+          "enum": [
+            "scale_anchor",
+            "scale_endpoint",
+            "single_group_routing_control",
+            "extreme_group_imbalance_control"
+          ]
+        },
+        "genes": {"enum": [100, 3000, 15000]},
+        "transcription_factors": {"enum": [10, 100, 1500]},
+        "cells": {"enum": [300, 500, 10000]},
+        "generation_seed": {"$ref": "#/$defs/seed"},
+        "contexts": {"enum": [1, 3]},
+        "directed_aupr": {"type": "number"},
+        "adjusted_aupr": {"type": "number"},
+        "directed_auroc": {"$ref": "#/$defs/nullable_metric"},
+        "f1_at_truth_count": {"type": "number"},
+        "epr_at_truth_count": {"type": "number"},
+        "candidate_prevalence": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "wall_time_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "contrast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "estimand", "estimate"],
+      "properties": {
+        "id": {
+          "enum": [
+            "gene_scale_contrast",
+            "tf_scale_contrast",
+            "cell_scale_contrast"
+          ]
+        },
+        "estimand": {"const": "difference_in_mean_adjusted_aupr"},
+        "estimate": {"type": "number"}
+      }
+    },
+    "policy_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "policy_sha256"],
+      "properties": {
+        "policy_id": {"type": "string", "minLength": 1},
+        "source_policy_id": {"type": "string", "minLength": 1},
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "diagnostic_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adjusted_aupr",
+        "target_coverage",
+        "truth_edge_coverage",
+        "wall_time_seconds",
+        "fitted_estimators"
+      ],
+      "properties": {
+        "adjusted_aupr": {"type": "number"},
+        "target_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "truth_edge_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "wall_time_seconds": {"type": "number", "minimum": 0},
+        "fitted_estimators": {"type": "integer", "minimum": 0}
+      }
+    },
+    "diagnostic_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adjusted_aupr",
+        "target_coverage",
+        "truth_edge_coverage",
+        "wall_time_seconds",
+        "fitted_estimators"
+      ],
+      "properties": {
+        "adjusted_aupr": {"type": "number"},
+        "target_coverage": {"type": "number"},
+        "truth_edge_coverage": {"type": "number"},
+        "wall_time_seconds": {"type": "number"},
+        "fitted_estimators": {"type": "number"}
+      }
+    },
+    "diagnostic_pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "condition_id",
+        "generation_seed",
+        "exact",
+        "production",
+        "delta_production_minus_exact"
+      ],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "condition_id": {
+          "enum": ["g3000_tf100_c300", "g100_tf10_c300"]
+        },
+        "generation_seed": {"$ref": "#/$defs/seed"},
+        "exact": {"$ref": "#/$defs/diagnostic_metrics"},
+        "production": {"$ref": "#/$defs/diagnostic_metrics"},
+        "delta_production_minus_exact": {"$ref": "#/$defs/diagnostic_delta"}
+      }
+    },
+    "diagnostic_condition_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition_id", "pairs", "mean_delta_production_minus_exact"],
+      "properties": {
+        "condition_id": {
+          "enum": ["g3000_tf100_c300", "g100_tf10_c300"]
+        },
+        "pairs": {"type": "integer", "minimum": 1},
+        "mean_delta_production_minus_exact": {"$ref": "#/$defs/diagnostic_delta"}
+      }
+    },
+    "exact_production_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analysis_role",
+        "selection_feedback",
+        "conditions",
+        "exact_policy",
+        "production_policy",
+        "paired_algorithm_seed",
+        "status",
+        "pairs",
+        "condition_summaries",
+        "identity_delta",
+        "interpretation"
+      ],
+      "properties": {
+        "analysis_role": {"const": "post_freeze_descriptive_diagnostic"},
+        "selection_feedback": {"const": false},
+        "conditions": {
+          "const": ["g3000_tf100_c300", "g100_tf10_c300"]
+        },
+        "exact_policy": {
+          "allOf": [
+            {"$ref": "#/$defs/policy_identity"},
+            {"required": ["source_policy_id"]}
+          ]
+        },
+        "production_policy": {"$ref": "#/$defs/policy_identity"},
+        "paired_algorithm_seed": {"$ref": "#/$defs/seed"},
+        "status": {
+          "enum": ["paired_descriptive", "not_applicable_production_is_exact"]
+        },
+        "pairs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/diagnostic_pair"}
+        },
+        "condition_summaries": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/diagnostic_condition_summary"}
+        },
+        "identity_delta": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/diagnostic_delta"}]
+        },
+        "interpretation": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "paired_descriptive"}}},
+          "then": {
+            "properties": {
+              "pairs": {"minItems": 2},
+              "condition_summaries": {"minItems": 2, "maxItems": 2},
+              "identity_delta": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "pairs": {"maxItems": 0},
+              "condition_summaries": {"maxItems": 0},
+              "identity_delta": {"$ref": "#/$defs/diagnostic_delta"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

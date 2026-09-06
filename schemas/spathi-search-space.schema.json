@@ -10,49 +10,46 @@
     "smoke_contract",
     "dataset_partition",
     "objective",
-    "reference_configuration",
+    "base_configuration",
+    "calibration_constraints",
+    "conditional_group_policy",
     "calibration_budgets",
     "stages",
     "selection_protocol"
   ],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "id": {"$ref": "#/$defs/id"},
+    "id": {"const": "spathi_calibration_v1"},
     "status": {"const": "planned"},
     "smoke_contract": {"$ref": "#/$defs/smoke_contract"},
     "dataset_partition": {"$ref": "#/$defs/dataset_partition"},
     "objective": {"$ref": "#/$defs/objective"},
-    "reference_configuration": {"$ref": "#/$defs/complete_parameters"},
+    "base_configuration": {"$ref": "#/$defs/complete_parameters"},
+    "calibration_constraints": {"$ref": "#/$defs/calibration_constraints"},
+    "conditional_group_policy": {"$ref": "#/$defs/policy_template"},
     "calibration_budgets": {"$ref": "#/$defs/calibration_budgets"},
     "stages": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 5,
+      "maxItems": 5,
       "prefixItems": [
-        {"$ref": "#/$defs/convergence_stage"},
-        {"$ref": "#/$defs/structure_stage"},
-        {"$ref": "#/$defs/estimator_stage"}
+        {"$ref": "#/$defs/geometry_stage"},
+        {"$ref": "#/$defs/estimator_stage"},
+        {"$ref": "#/$defs/interaction_stage"},
+        {"$ref": "#/$defs/estimator_scale_transfer_stage"},
+        {"$ref": "#/$defs/convergence_stage"}
       ],
       "items": false
     },
     "selection_protocol": {"$ref": "#/$defs/selection_protocol"}
   },
   "$defs": {
-    "id": {
-      "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]*$"
-    },
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
     "nonempty_string": {"type": "string", "minLength": 1},
     "smoke_contract": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "configuration_id",
-        "current_orchestration_run_id",
-        "role",
-        "eligible_for_scientific_selection",
-        "reason"
-      ],
+      "required": ["configuration_id", "current_orchestration_run_id", "role", "eligible_for_scientific_selection", "reason"],
       "properties": {
         "configuration_id": {"const": "spathi_smoke"},
         "current_orchestration_run_id": {"const": "spathi_smoke"},
@@ -69,11 +66,10 @@
         "assignment_unit": {"const": "dataset_instance"},
         "stratify_by": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 4,
           "uniqueItems": true,
-          "items": {
-            "enum": ["simulator", "topology_id", "generation_seed", "condition_id"]
-          }
+          "contains": {"const": "group_class"},
+          "items": {"enum": ["simulator", "topology_id", "generation_seed", "condition_id", "group_class"]}
         },
         "roles": {
           "type": "array",
@@ -89,17 +85,12 @@
         "constraints": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "mutually_exclusive",
-            "assign_before_inference",
-            "keep_related_datasets_together",
-            "test_access"
-          ],
+          "required": ["mutually_exclusive", "assign_before_inference", "keep_related_datasets_together", "test_access"],
           "properties": {
             "mutually_exclusive": {"const": true},
             "assign_before_inference": {"const": true},
             "keep_related_datasets_together": {"const": true},
-            "test_access": {"const": "only_after_configuration_freeze"}
+            "test_access": {"const": "only_after_policy_freeze"}
           }
         }
       }
@@ -111,9 +102,7 @@
       "properties": {
         "id": {"const": "development"},
         "purpose": {"$ref": "#/$defs/nonempty_string"},
-        "permitted_uses": {
-          "const": ["convergence", "structure_search", "estimator_search"]
-        }
+        "permitted_uses": {"const": ["geometry_search", "estimator_search", "interaction_search", "estimator_scale_transfer", "fixed_ceiling_convergence"]}
       }
     },
     "validation_role": {
@@ -139,119 +128,41 @@
     "objective": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "primary_metric",
-        "edge_semantics",
-        "direction",
-        "aggregation",
-        "tie_breakers",
-        "forbidden_shortcuts"
-      ],
+      "required": ["primary_metric", "edge_semantics", "direction", "aggregation", "tie_breakers", "forbidden_shortcuts"],
       "properties": {
         "primary_metric": {"const": "aupr_directed"},
         "edge_semantics": {"const": "directed_unsigned"},
         "direction": {"const": "maximize"},
         "aggregation": {
-          "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
-          "prefixItems": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["level", "operation", "scope"],
-              "properties": {
-                "level": {"const": "group"},
-                "operation": {"const": "equal_weight_mean"},
-                "scope": {"const": "within_dataset"}
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["level", "operation", "scope"],
-              "properties": {
-                "level": {"const": "dataset"},
-                "operation": {"const": "equal_weight_mean"},
-                "scope": {"const": "within_dataset_role"}
-              }
-            }
-          ],
-          "items": false
+          "const": [
+            {"level": "group", "operation": "equal_weight_mean", "scope": "within_dataset"},
+            {"level": "algorithm_seed", "operation": "equal_weight_mean", "scope": "within_dataset_and_configuration"},
+            {"level": "dataset", "operation": "equal_weight_mean", "scope": "within_dataset_role"}
+          ]
         },
         "tie_breakers": {
-          "type": "array",
-          "minItems": 3,
-          "maxItems": 3,
-          "prefixItems": [
-            {"$ref": "#/$defs/stability_tie_breaker"},
-            {"$ref": "#/$defs/cost_tie_breaker"},
-            {"$ref": "#/$defs/simplicity_tie_breaker"}
-          ],
-          "items": false
-        },
-        "forbidden_shortcuts": {
           "const": [
-            "pool_edges_across_groups",
-            "split_cells_from_one_dataset_across_roles",
-            "select_a_different_configuration_per_dataset",
-            "use_test_results_for_selection"
+            {"priority": 1, "id": "stability", "direction": "minimize", "measure": "aupr_dispersion_across_algorithmic_seeds"},
+            {"priority": 2, "id": "simplicity", "direction": "minimize", "measure": "parameter_changes_from_base_configuration"},
+            {"priority": 3, "id": "canonical_configuration_id", "direction": "ascending", "measure": "lexicographic_configuration_id"}
           ]
-        }
-      }
-    },
-    "stability_tie_breaker": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["priority", "id", "direction", "measure"],
-      "properties": {
-        "priority": {"const": 1},
-        "id": {"const": "stability"},
-        "direction": {"const": "minimize"},
-        "measure": {"const": "aupr_dispersion_across_algorithmic_seeds"}
-      }
-    },
-    "cost_tie_breaker": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["priority", "id", "direction", "measure"],
-      "properties": {
-        "priority": {"const": 2},
-        "id": {"const": "cost"},
-        "direction": {"const": "minimize"},
-        "measure": {"const": "median_wall_time_then_peak_memory"}
-      }
-    },
-    "simplicity_tie_breaker": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["priority", "id", "direction", "measure"],
-      "properties": {
-        "priority": {"const": 3},
-        "id": {"const": "simplicity"},
-        "direction": {"const": "minimize"},
-        "measure": {"const": "nonreference_parameter_changes"}
+        },
+        "forbidden_shortcuts": {"const": ["pool_edges_across_groups", "split_cells_from_one_dataset_across_roles", "select_a_different_policy_per_dataset", "use_test_results_for_selection"]}
       }
     },
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "weight_mode": {
-          "enum": ["cell-distance", "cell-distance-group-anchored", "group-distance"]
-        },
+        "weight_mode": {"enum": ["cell-distance", "cell-distance-group-anchored", "group-distance"]},
         "distance_space": {"enum": ["pca", "expression"]},
         "n_components": {"type": "integer", "minimum": 1},
         "distance_standardization": {"enum": ["none", "standard"]},
-        "pca_svd_solver": {"enum": ["auto", "randomized", "full"]},
+        "pca_svd_solver": {"const": "auto"},
         "distance_metric": {"enum": ["euclidean", "cosine"]},
         "kernel": {"enum": ["gaussian", "exponential"]},
-        "bandwidth": {
-          "anyOf": [
-            {"const": "auto"},
-            {"type": "number", "exclusiveMinimum": 0}
-          ]
-        },
+        "bandwidth": {"const": "auto"},
+        "bandwidth_scale": {"type": "number", "exclusiveMinimum": 0},
         "group_size_correction": {"enum": ["none", "cap-to-target"]},
         "tree_method": {"enum": ["extra-trees", "random-forest"]},
         "n_estimators": {"type": "integer", "minimum": 1},
@@ -263,35 +174,93 @@
           ]
         },
         "min_samples_leaf": {"type": "integer", "minimum": 1},
-        "max_depth": {
-          "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
-        },
-        "bootstrap": {"type": ["boolean", "null"]}
+        "max_depth": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+        "bootstrap": {"type": "boolean"},
+        "target_eligibility": {"const": "all"},
+        "min_target_detected_cells": {"type": "integer", "minimum": 1},
+        "min_target_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "min_target_weighted_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "min_target_weighted_detected_ess": {"type": "number", "exclusiveMinimum": 0},
+        "adaptive_trees": {"const": false},
+        "adaptive_min_estimators": {"type": "integer", "minimum": 1},
+        "adaptive_tree_step": {"type": "integer", "minimum": 1},
+        "adaptive_tolerance": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "adaptive_patience": {"type": "integer", "minimum": 1}
       }
     },
     "complete_parameters": {
       "allOf": [
         {"$ref": "#/$defs/parameters"},
-        {
-          "required": [
-            "weight_mode",
-            "distance_space",
-            "n_components",
-            "distance_standardization",
-            "pca_svd_solver",
-            "distance_metric",
-            "kernel",
-            "bandwidth",
-            "group_size_correction",
-            "tree_method",
-            "n_estimators",
-            "max_features",
-            "min_samples_leaf",
-            "max_depth",
-            "bootstrap"
-          ]
-        }
+        {"required": ["weight_mode", "distance_space", "n_components", "distance_standardization", "pca_svd_solver", "distance_metric", "kernel", "bandwidth", "bandwidth_scale", "group_size_correction", "tree_method", "n_estimators", "max_features", "min_samples_leaf", "max_depth", "bootstrap", "target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess", "adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"]}
       ]
+    },
+    "calibration_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fixed_parameters", "fixed_parameter_rationales", "excluded_inputs", "purpose"],
+      "properties": {
+        "fixed_parameters": {
+          "const": {"pca_svd_solver": "auto", "bandwidth": "auto", "target_eligibility": "all", "adaptive_trees": false}
+        },
+        "fixed_parameter_rationales": {
+          "const": {
+            "pca_svd_solver": "The solver is a numerical implementation choice. auto is frozen for production and separate equivalence tests compare it with full and randomized solvers where feasible; accuracy outcomes never select the solver.",
+            "bandwidth": "The automatic bandwidth adapts to each dataset's distance units. The transferable bandwidth_scale parameter varies smoothing intensity without fitting a non-portable absolute width.",
+            "target_eligibility": "All requested targets define the exact scientific reference. Automatic target eligibility is developed and independently validated only as an efficiency policy.",
+            "adaptive_trees": "Fixed forests define the exact scientific reference. Adaptive stopping is developed and independently validated only as an efficiency policy."
+          }
+        },
+        "excluded_inputs": {"const": ["target_list", "centroid_weights"]},
+        "purpose": {"$ref": "#/$defs/nonempty_string"}
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_group_count"],
+      "properties": {
+        "minimum_group_count": {"type": "integer", "minimum": 1},
+        "maximum_group_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "policy_template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routing_parameter", "shared_parameters", "branches"],
+      "properties": {
+        "routing_parameter": {"const": "group_count"},
+        "shared_parameters": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "branches": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["single_group", "multi_group"],
+          "properties": {
+            "single_group": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["condition", "parameter_overrides"],
+              "properties": {
+                "condition": {"const": {"minimum_group_count": 1, "maximum_group_count": 1}},
+                "parameter_overrides": {"const": {"weight_mode": "cell-distance", "distance_metric": "euclidean", "group_size_correction": "none"}}
+              }
+            },
+            "multi_group": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["condition", "parameter_overrides"],
+              "properties": {
+                "condition": {"const": {"minimum_group_count": 2}},
+                "parameter_overrides": {"const": {}}
+              }
+            }
+          }
+        }
+      }
     },
     "candidate": {
       "type": "object",
@@ -299,12 +268,7 @@
       "required": ["id", "parameter_overrides", "rationale"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
-        "parameter_overrides": {
-          "allOf": [
-            {"$ref": "#/$defs/parameters"},
-            {"minProperties": 1}
-          ]
-        },
+        "parameter_overrides": {"allOf": [{"$ref": "#/$defs/parameters"}, {"minProperties": 1}]},
         "rationale": {"$ref": "#/$defs/nonempty_string"}
       }
     },
@@ -318,20 +282,14 @@
     "budget_seed_map": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["convergence", "structure", "estimator", "validation"],
+      "required": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"],
       "properties": {
-        "convergence": {"$ref": "#/$defs/algorithmic_seeds"},
-        "structure": {"$ref": "#/$defs/algorithmic_seeds"},
+        "geometry": {"$ref": "#/$defs/algorithmic_seeds"},
         "estimator": {"$ref": "#/$defs/algorithmic_seeds"},
+        "interaction": {"$ref": "#/$defs/algorithmic_seeds"},
+        "estimator_scale_transfer": {"$ref": "#/$defs/algorithmic_seeds"},
+        "convergence": {"$ref": "#/$defs/algorithmic_seeds"},
         "validation": {"$ref": "#/$defs/algorithmic_seeds"}
-      }
-    },
-    "calibration_budget": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["algorithmic_seeds"],
-      "properties": {
-        "algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}
       }
     },
     "calibration_budgets": {
@@ -339,147 +297,76 @@
       "additionalProperties": false,
       "required": ["full", "reduced"],
       "properties": {
-        "full": {
-          "allOf": [
-            {"$ref": "#/$defs/calibration_budget"},
-            {
-              "properties": {
-                "algorithmic_seeds": {
-                  "const": {
-                    "convergence": [1729, 2718, 31415, 57721, 104729],
-                    "structure": [1729, 31415, 104729],
-                    "estimator": [1729, 31415, 104729],
-                    "validation": [1729, 31415, 104729]
-                  }
-                }
-              }
-            }
-          ]
-        },
-        "reduced": {
-          "allOf": [
-            {"$ref": "#/$defs/calibration_budget"},
-            {
-              "properties": {
-                "algorithmic_seeds": {
-                  "const": {
-                    "convergence": [1729, 31415],
-                    "structure": [1729, 31415],
-                    "estimator": [1729, 31415],
-                    "validation": [1729, 31415]
-                  }
-                }
-              }
-            }
-          ]
-        }
+        "full": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}}},
+        "reduced": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}}}
       }
     },
     "stage_common": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "order",
-        "dataset_role",
-        "purpose",
-        "inherits_from",
-        "strategy",
-        "include_inherited_configuration",
-        "maximum_parent_configurations",
-        "candidate_budget_per_parent",
-        "candidates",
-        "advance_limit"
-      ],
+      "required": ["id", "order", "dataset_role", "purpose", "inherits_from", "strategy", "dataset_selector", "include_inherited_configuration", "maximum_parent_configurations", "candidate_budget_per_parent", "candidates", "advance_limit"],
       "properties": {
-        "id": {"enum": ["convergence", "structure", "estimator"]},
-        "order": {"type": "integer", "minimum": 1, "maximum": 3},
+        "id": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"]},
+        "order": {"type": "integer", "minimum": 1, "maximum": 5},
         "dataset_role": {"const": "development"},
         "purpose": {"$ref": "#/$defs/nonempty_string"},
-        "inherits_from": {
-          "enum": [
-            "reference_configuration",
-            "selected:convergence",
-            "shortlist:structure"
-          ]
-        },
-        "strategy": {"enum": ["one_factor_at_a_time", "bounded_shortlist_expansion"]},
-        "include_inherited_configuration": {"const": true},
-        "maximum_parent_configurations": {"type": "integer", "minimum": 1, "maximum": 2},
-        "candidate_budget_per_parent": {"type": "integer", "minimum": 2, "maximum": 8},
-        "candidates": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 7,
-          "items": {"$ref": "#/$defs/candidate"}
-        },
+        "inherits_from": {"enum": ["base_configuration", "shortlist:geometry", "shortlist:estimator", "shortlist:estimator_scale_transfer", "shortlist:interaction"]},
+        "strategy": {"enum": ["bounded_constrained_design", "bounded_crossed_shortlist", "crossed_high_tf_feature_transfer", "bounded_interaction_design", "fixed_ceiling_sweep"]},
+        "dataset_selector": {"$ref": "#/$defs/dataset_selector"},
+        "include_inherited_configuration": {"type": "boolean"},
+        "maximum_parent_configurations": {"type": "integer", "minimum": 1, "maximum": 3},
+        "candidate_budget_per_parent": {"type": "integer", "minimum": 1, "maximum": 14},
+        "selection_rule": {"$ref": "#/$defs/convergence_selection_rule"},
+        "candidates": {"type": "array", "minItems": 0, "maxItems": 13, "items": {"$ref": "#/$defs/candidate"}},
         "advance_limit": {"type": "integer", "minimum": 1, "maximum": 3}
       }
     },
-    "convergence_stage": {
-      "allOf": [
-        {"$ref": "#/$defs/stage_common"},
-        {
-          "properties": {
-            "id": {"const": "convergence"},
-            "order": {"const": 1},
-            "inherits_from": {"const": "reference_configuration"},
-            "strategy": {"const": "one_factor_at_a_time"},
-            "maximum_parent_configurations": {"const": 1},
-            "advance_limit": {"const": 1}
-          }
-        }
-      ]
+    "dataset_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["split_id", "condition_ids"],
+      "properties": {
+        "split_id": {"$ref": "#/$defs/id"},
+        "condition_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+      }
     },
-    "structure_stage": {
-      "allOf": [
-        {"$ref": "#/$defs/stage_common"},
-        {
-          "properties": {
-            "id": {"const": "structure"},
-            "order": {"const": 2},
-            "inherits_from": {"const": "selected:convergence"},
-            "strategy": {"const": "one_factor_at_a_time"},
-            "maximum_parent_configurations": {"const": 1},
-            "advance_limit": {"const": 2}
-          }
-        }
-      ]
+    "geometry_stage": {
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "geometry"}, "order": {"const": 1}, "inherits_from": {"const": "base_configuration"}, "strategy": {"const": "bounded_constrained_design"}, "maximum_parent_configurations": {"const": 1}, "candidates": {"minItems": 1}, "advance_limit": {"const": 3}}}]
     },
     "estimator_stage": {
-      "allOf": [
-        {"$ref": "#/$defs/stage_common"},
-        {
-          "properties": {
-            "id": {"const": "estimator"},
-            "order": {"const": 3},
-            "inherits_from": {"const": "shortlist:structure"},
-            "strategy": {"const": "bounded_shortlist_expansion"},
-            "maximum_parent_configurations": {"const": 2},
-            "advance_limit": {"const": 3}
-          }
-        }
-      ]
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "estimator"}, "order": {"const": 2}, "inherits_from": {"const": "shortlist:geometry"}, "strategy": {"const": "bounded_crossed_shortlist"}, "maximum_parent_configurations": {"const": 3}, "candidates": {"minItems": 1}, "advance_limit": {"const": 3}}}]
+    },
+    "estimator_scale_transfer_stage": {
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "estimator_scale_transfer"}, "order": {"const": 4}, "inherits_from": {"const": "shortlist:interaction"}, "strategy": {"const": "crossed_high_tf_feature_transfer"}, "include_inherited_configuration": {"const": false}, "maximum_parent_configurations": {"const": 3}, "candidate_budget_per_parent": {"const": 6}, "candidates": {"minItems": 6, "maxItems": 6}, "advance_limit": {"const": 2}}}]
+    },
+    "interaction_stage": {
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "interaction"}, "order": {"const": 3}, "inherits_from": {"const": "shortlist:estimator"}, "strategy": {"const": "bounded_interaction_design"}, "maximum_parent_configurations": {"const": 3}, "candidates": {"minItems": 1}, "advance_limit": {"const": 3}}}]
+    },
+    "convergence_stage": {
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"required": ["selection_rule"], "properties": {"id": {"const": "convergence"}, "order": {"const": 5}, "inherits_from": {"const": "shortlist:estimator_scale_transfer"}, "strategy": {"const": "fixed_ceiling_sweep"}, "maximum_parent_configurations": {"const": 2}, "candidates": {"minItems": 1}, "advance_limit": {"const": 2}}}]
+    },
+    "convergence_selection_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "reference", "absolute_aupr_margin", "maximum_stability_increase"],
+      "properties": {
+        "method": {"const": "smallest_noninferior_stable_per_parent"},
+        "reference": {"const": "largest_n_estimators_within_parent"},
+        "absolute_aupr_margin": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximum_stability_increase": {"type": "number", "minimum": 0, "maximum": 1}
+      }
     },
     "selection_protocol": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "development_role",
-        "validation_role",
-        "test_role",
-        "maximum_validation_finalists",
-        "freeze_before_test",
-        "single_global_configuration",
-        "test_results_can_change_selection"
-      ],
+      "required": ["development_role", "validation_role", "test_role", "maximum_validation_finalists", "freeze_before_test", "selection_unit", "test_results_can_change_selection"],
       "properties": {
         "development_role": {"const": "search_and_shortlist"},
-        "validation_role": {"const": "select_one_finalist"},
-        "test_role": {"const": "compare_frozen_configuration"},
-        "maximum_validation_finalists": {"type": "integer", "minimum": 2, "maximum": 3},
+        "validation_role": {"const": "select_one_conditional_policy"},
+        "test_role": {"const": "compare_frozen_policy"},
+        "maximum_validation_finalists": {"const": 3},
         "freeze_before_test": {"const": true},
-        "single_global_configuration": {"const": true},
+        "selection_unit": {"const": "conditional_group_policy"},
         "test_results_can_change_selection": {"const": false}
       }
     }

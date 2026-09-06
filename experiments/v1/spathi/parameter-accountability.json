@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_parameter_accountability_v1",
+  "scope": "spathi_infer",
+  "principle": "Every public inference parameter is assigned prospectively to scientific calibration, a conditional branch, efficiency development and independent validation, numerical equivalence, algorithmic repetition, or an explicitly excluded input. Infinite numeric domains are represented by finite scientifically interpretable levels; no claim of exhaustive mathematical enumeration is made.",
+  "inference_parameters": [
+    {"id": "weight_mode", "domain": "cell-distance | cell-distance-group-anchored | group-distance", "disposition": "conditional", "levels": ["cell-distance", "cell-distance-group-anchored", "group-distance"], "rationale": "All semantically distinct weighting rules enter the multigroup design; the single-group branch necessarily uses cell-distance."},
+    {"id": "distance_space", "domain": "pca | expression", "disposition": "calibrated", "levels": ["pca", "expression"], "rationale": "Both supported representation spaces are compared."},
+    {"id": "n_components", "domain": "integer >= 1, capped by informative matrix rank", "disposition": "calibrated", "levels": [20, 50, 100], "rationale": "A preregistered compact, intermediate and broad PCA representation is transferable across eligible panels."},
+    {"id": "distance_standardization", "domain": "none | standard", "disposition": "calibrated", "levels": ["none", "standard"], "rationale": "Both supported scaling rules are represented."},
+    {"id": "pca_svd_solver", "domain": "auto | randomized | full", "disposition": "fixed_numerical", "levels": ["auto", "randomized", "full"], "rationale": "auto is frozen for production; randomized and full are used only to verify numerical and output equivalence where feasible, never selected by test accuracy."},
+    {"id": "distance_metric", "domain": "euclidean | cosine", "disposition": "conditional", "levels": ["euclidean", "cosine"], "rationale": "Both metrics enter the multigroup design; centered single-group geometry requires Euclidean distance."},
+    {"id": "kernel", "domain": "gaussian | exponential", "disposition": "calibrated", "levels": ["gaussian", "exponential"], "rationale": "Both supported decay families are compared."},
+    {"id": "bandwidth", "domain": "auto or any positive finite real", "disposition": "fixed_numerical", "levels": ["auto"], "rationale": "Absolute widths are dataset-unit dependent; the automatic positive-distance median is frozen and its transferable multiplier is calibrated separately."},
+    {"id": "bandwidth_scale", "domain": "positive finite real", "disposition": "calibrated", "levels": [0.5, 1.0, 2.0], "rationale": "The finite grid varies smoothing relative to each dataset's automatic distance scale without fitting an absolute unit-specific width."},
+    {"id": "group_size_correction", "domain": "none | cap-to-target", "disposition": "conditional", "levels": ["none", "cap-to-target"], "rationale": "Both choices enter multigroup balanced and imbalanced conditions; correction is necessarily disabled for a single group."},
+    {"id": "tree_method", "domain": "extra-trees | random-forest", "disposition": "calibrated", "levels": ["extra-trees", "random-forest"], "rationale": "Both supported estimator families are compared using their library semantics."},
+    {"id": "n_estimators", "domain": "integer >= 1", "disposition": "calibrated", "levels": [250, 500, 750, 1000], "rationale": "The smallest ceiling satisfying the frozen non-inferiority and stability rule is retained."},
+    {"id": "max_features", "domain": "sqrt | log2 | integer >= 1 | fraction in (0,1]", "disposition": "calibrated", "levels": ["sqrt", "log2", 1, 0.25, 0.5, 1.0], "rationale": "Named rules, strong randomization and portable fractions including the all-predictor endpoint enter the ordinary estimator screen; all six levels are then crossed over every retained estimator-interaction structure on the independent 1,000-TF transfer panel before any level can be excluded from convergence."},
+    {"id": "min_samples_leaf", "domain": "integer >= 1", "disposition": "calibrated", "levels": [1, 2, 5], "rationale": "The grid spans no, mild and stronger leaf regularization."},
+    {"id": "max_depth", "domain": "null or integer >= 1", "disposition": "calibrated", "levels": [null, 20], "rationale": "Unbounded and explicitly bounded trees are compared."},
+    {"id": "bootstrap", "domain": "null | false | true; null resolves to the estimator-family default", "disposition": "calibrated", "levels": [false, true], "rationale": "The two effective behaviours are compared; null adds no third behaviour and is excluded as a redundant alias."},
+    {"id": "adaptive_trees", "domain": "boolean", "disposition": "efficiency_development_then_validation", "levels": [false, true], "rationale": "Exact fixed forests define the scientific reference; adaptive stopping is selected on efficiency-development data and confirmed independently."},
+    {"id": "adaptive_min_estimators", "domain": "integer >= 1 subject to the convergence schedule", "disposition": "efficiency_development_then_validation", "levels": [100, 200], "rationale": "Two conservative minimum ensemble sizes are screened before confirmatory validation."},
+    {"id": "adaptive_tree_step", "domain": "integer >= 1 subject to the convergence schedule", "disposition": "efficiency_development_then_validation", "levels": [25, 50, 100], "rationale": "The grid spans fine, intermediate and coarse cumulative checks."},
+    {"id": "adaptive_tolerance", "domain": "real in (0,1]", "disposition": "efficiency_development_then_validation", "levels": [0.005, 0.01, 0.02], "rationale": "The grid spans conservative to permissive importance-change tolerances."},
+    {"id": "adaptive_patience", "domain": "integer >= 1", "disposition": "efficiency_development_then_validation", "levels": [2, 3], "rationale": "Two preregistered persistence requirements are screened."},
+    {"id": "target_eligibility", "domain": "all | automatic", "disposition": "efficiency_development_then_validation", "levels": ["all", "automatic"], "rationale": "All targets define the exact reference; automatic screening is an efficiency policy rather than part of model calibration."},
+    {"id": "min_target_detected_cells", "domain": "integer >= 1", "disposition": "efficiency_development_then_validation", "levels": [10, 20, 50], "rationale": "Lenient, default and stricter absolute detection requirements are screened."},
+    {"id": "min_target_detected_fraction", "domain": "real in (0,1]", "disposition": "efficiency_development_then_validation", "levels": [0.005, 0.01, 0.02], "rationale": "A bounded prevalence grid is screened."},
+    {"id": "min_target_weighted_detected_fraction", "domain": "real in (0,1]", "disposition": "efficiency_development_then_validation", "levels": [0.005, 0.01, 0.02], "rationale": "A matching bounded weighted-prevalence grid is screened."},
+    {"id": "min_target_weighted_detected_ess", "domain": "positive finite real", "disposition": "efficiency_development_then_validation", "levels": [5.0, 10.0, 20.0], "rationale": "Lenient, default and conservative effective-sample-size requirements are screened."},
+    {"id": "random_seed", "domain": "integer in [0, 2^32-1]", "disposition": "repetition", "levels": ["predeclared_seed_ensemble"], "rationale": "Seed is a source of algorithmic replication and is never optimized."}
+  ],
+  "optional_inputs": [
+    {"id": "target_list", "domain": "optional file containing a non-empty subset of expression genes", "disposition": "excluded_unavailable_input", "levels": [null], "rationale": "The intended application has no target list; deriving one from simulator truth would leak outcome information."},
+    {"id": "centroid_weights", "domain": "optional positive finite cell weights", "disposition": "excluded_annotation_assisted_input", "levels": [null], "rationale": "Annotation-confidence weighting is an application-specific adaptation considered only after the synthetic benchmark and is not part of any benchmarking claim."}
+  ],
+  "operational_parameters": [
+    {"id": "threads", "domain": "auto or integer >= 1", "disposition": "operational_equivalence", "levels": [1, "allocated_thread_budget"], "rationale": "Thread counts are checked for deterministic equivalence and measured for cost, not selected by accuracy."},
+    {"id": "report", "domain": "boolean", "disposition": "operational_equivalence", "levels": [false, true], "rationale": "Report generation must not change inferred networks."},
+    {"id": "checkpoint", "domain": "boolean", "disposition": "operational_equivalence", "levels": [false, true], "rationale": "Checkpointing must not change completed outputs."},
+    {"id": "resume", "domain": "boolean conditional on checkpointing", "disposition": "operational_equivalence", "levels": [false, true], "rationale": "A resumed run must equal an uninterrupted run."},
+    {"id": "progress", "domain": "boolean", "disposition": "operational_equivalence", "levels": [false, true], "rationale": "Progress rendering must not alter model results."},
+    {"id": "log_level", "domain": "DEBUG | INFO | WARNING | ERROR", "disposition": "operational_equivalence", "levels": ["DEBUG", "INFO", "WARNING", "ERROR"], "rationale": "Logging verbosity is operational only."}
+  ],
+  "preparation_parameters": {
+    "study_scope": "outside_synthetic_inference_calibration",
+    "parameters": [
+      {"id": "min_cells", "domain": "integer >= 1", "disposition": "fixed_preparation_contract", "levels": [300], "rationale": "Minimum analysis-unit size belongs to input eligibility, not inference tuning."},
+      {"id": "min_gene_cells", "domain": "integer >= 1", "disposition": "fixed_preparation_contract", "levels": [1], "rationale": "The benchmark starts from simulator-prepared matrices and does not tune H5 filtering."},
+      {"id": "normalization", "domain": "library-size-log1p", "disposition": "fixed_preparation_contract", "levels": ["library-size-log1p"], "rationale": "The only supported first-version normalization is fixed."},
+      {"id": "target_sum", "domain": "positive finite real", "disposition": "fixed_preparation_contract", "levels": [10000.0], "rationale": "A conventional fixed library-size scale is declared rather than outcome-tuned."},
+      {"id": "gene_identifier", "domain": "name | id", "disposition": "fixed_preparation_contract", "levels": ["name", "id"], "rationale": "Identifier choice is a data-identity operation and cannot change biological values."},
+      {"id": "duplicate_gene_policy", "domain": "sum | error", "disposition": "fixed_preparation_contract", "levels": ["sum", "error"], "rationale": "Duplicate handling is an explicit data contract, not an inference hyperparameter."}
+    ],
+    "rationale": "The synthetic article benchmark evaluates the inference method on already prepared expression matrices. Generic H5 preparation remains reproducible but is outside the accuracy-calibration estimand."
+  }
+}

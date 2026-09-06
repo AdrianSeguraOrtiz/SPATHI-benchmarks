@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "id": "efficiency-development-full",
+  "status": "planned",
+  "purpose": "efficiency_development",
+  "description": "Finite predeclared efficiency grid on fifteen development-only datasets; selects one eligibility, adaptive and combined finalist before independent validation.",
+  "generation_jobs": [
+    {"id": "dyngen_effdev_linear_baseline", "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json", "simulator_runs": "experiments/v1/simulations/dyngen/efficiency_development/linear-baseline-runs.json", "dataset_role": "efficiency_development", "split_id": "efficiency_development_full_v1", "condition_id": "linear_baseline"},
+    {"id": "dyngen_effdev_linear_noisy", "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json", "simulator_runs": "experiments/v1/simulations/dyngen/efficiency_development/linear-noisy-runs.json", "dataset_role": "efficiency_development", "split_id": "efficiency_development_full_v1", "condition_id": "linear_noisy"},
+    {"id": "dyngen_effdev_bifurcating_baseline", "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json", "simulator_runs": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-baseline-runs.json", "dataset_role": "efficiency_development", "split_id": "efficiency_development_full_v1", "condition_id": "bifurcating_baseline"},
+    {"id": "dyngen_effdev_bifurcating_noisy", "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json", "simulator_runs": "experiments/v1/simulations/dyngen/efficiency_development/bifurcating-noisy-runs.json", "dataset_role": "efficiency_development", "split_id": "efficiency_development_full_v1", "condition_id": "bifurcating_noisy"},
+    {"id": "scmultisim_effdev_dynamic", "scenario": "experiments/v1/simulations/scmultisim/efficiency_development/scenario.json", "simulator_runs": "experiments/v1/simulations/scmultisim/efficiency_development/dynamic-runs.json", "dataset_role": "efficiency_development", "split_id": "efficiency_development_full_v1", "condition_id": "scmultisim_dynamic"}
+  ],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {"max_parallel_tasks": 2, "max_cores": 8, "max_ram_gb": 32},
+    "infer_network": {"max_parallel_runs": 1, "max_cores": 8, "max_ram_gb": 32, "planner": "heuristic", "planner_time_limit_seconds": 100}
+  },
+  "planned_design": {
+    "simulators": ["dyngen", "scmultisim"],
+    "replicates_per_condition": 3,
+    "regimes": ["group_only"],
+    "factors": ["target_eligibility_grid", "adaptive_tree_grid", "component_interactions"],
+    "notes": [
+      "The complete finite grid is run on 15 independent datasets with three fixed algorithm seeds.",
+      "Selection is deterministic, outcome-bound and precedes the independent 25-dataset confirmatory validation.",
+      "No efficiency-development result enters the external-tool comparison."
+    ]
+  },
+  "statistics": {"status": "not_applicable", "comparisons": []}
+}

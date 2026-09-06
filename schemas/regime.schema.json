@@ -14,7 +14,7 @@
   ],
   "properties": {
     "schema_version": {"const": "1.0"},
-    "id": {"enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]},
+    "id": {"enum": ["group_only", "order_aware", "prior_assisted"]},
     "primary": {"type": "boolean"},
     "available_information": {
       "type": "array",
@@ -47,7 +47,7 @@
             "enum": ["group_native", "group_emulated", "group_aggregated"]
           },
           "variant": {"type": "string", "minLength": 1},
-          "role": {"enum": ["primary", "secondary", "assisted"]},
+          "role": {"enum": ["primary", "secondary", "implementation_sensitivity", "assisted"]},
           "status": {"enum": ["candidate", "blocked"]},
           "tf_list_handling": {
             "enum": ["candidate_restriction", "prior_information", "not_supported"]

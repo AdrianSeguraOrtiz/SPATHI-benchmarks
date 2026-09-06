@@ -32,8 +32,8 @@
         "taxonomic_group": "synthetic",
         "ncbi_taxon_id": null
       },
-      "description": "Independent development-only synthetic topology; it is not reused across dataset roles."
+      "description": "Development-only topology input constructed over the common synthetic TF-target universe; its complete graph is not reused across dataset roles."
     }
   },
-  "notes": "Development dynamic-GRN partition with a role-exclusive regulatory topology."
+  "notes": "Development dynamic-GRN partition with a role-exclusive complete topology input."
 }

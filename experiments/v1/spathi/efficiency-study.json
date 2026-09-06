@@ -1,0 +1,204 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_efficiency_noninferiority_v1",
+  "status": "planned",
+  "purpose": "Determine whether frozen target-eligibility and adaptive-tree policies reduce SPATHI production cost without an unacceptable loss of directed AUPR.",
+  "phases": {
+    "policy_predeclaration": {
+      "source": "committed_study_specification",
+      "timing": "before_efficiency_validation",
+      "uses_outcome_data": false,
+      "purpose": "Freeze the finite efficiency-development grid, deterministic selection rule and independent-validation gates before any efficiency outcomes are accessed."
+    },
+    "efficiency_development": {
+      "dataset_role": "efficiency_development",
+      "split_id_by_budget": {"reduced": "efficiency_development_reduced_v1", "full": "efficiency_development_full_v1"},
+      "purpose": "Select one finalist for each optimization component from the predeclared finite grid.",
+      "input": "experiments/v1/spathi/efficiency-development.json",
+      "study_phase": "efficiency_development"
+    },
+    "efficiency_validation": {
+      "dataset_role": "efficiency_validation",
+      "split_id": "efficiency_validation_v1",
+      "purpose": "Evaluate the predeclared policies on datasets disjoint from calibration and held-out external-tool comparison.",
+      "input": "content_addressed_efficiency_development_selection",
+      "study_phase": "efficiency_validation"
+    }
+  },
+  "reference": {
+    "source": "completed_calibration_selected_config",
+    "required_phase": "frozen",
+    "role": "fixed_exact_reference",
+    "required_execution_parameters": {
+      "target_eligibility": "all",
+      "adaptive_trees": false
+    }
+  },
+  "analysis": {
+    "study_phase": "efficiency_validation",
+    "validation_dataset_role": "efficiency_validation",
+    "metric": "aupr",
+    "level": "directed",
+    "direction": "higher_is_better",
+    "primary_target_universe": "full_requested_target_universe",
+    "omitted_target_prediction_policy": "minimum_score_zero",
+    "absolute_noninferiority_margin": 0.002,
+    "margin_rationale": "An absolute loss of 0.002 AUPR, or 0.2 percentage points, is the largest mean loss the authors accept for a purely computational optimization. This is a frozen engineering smallest effect of interest, not an empirically validated biological-equivalence margin.",
+    "margin_basis": {
+      "type": "author_defined_engineering_smallest_effect_of_interest",
+      "unit": "absolute_aupr",
+      "value": 0.002,
+      "frozen_before_efficiency_outcomes": true,
+      "evidence_strength": "judgement_not_empirically_validated"
+    },
+    "claim_scope": "conditional_to_predeclared_synthetic_panel_and_fixed_algorithm_seed_ensemble",
+    "familywise_alpha": 0.05,
+    "multiplicity": "bonferroni_across_confirmatory_candidates",
+    "multiplicity_rationale": "Each candidate is an intersection-union decision: every accuracy, coverage, completion and runtime gate must pass. Bonferroni allocation across the three candidate decisions controls the probability of any false production adoption without treating the mandatory gates as separate opportunities to claim success.",
+    "candidate_decision": "accuracy_coverage_completion_and_runtime_gates",
+    "confidence_interval_method": "one_sided_percentile_fixed_strata_hierarchical_bootstrap",
+    "bootstrap_strata": [
+      "simulator_id",
+      "condition_id"
+    ],
+    "independent_unit": "independently_simulated_dataset",
+    "algorithm_seed_treatment": "fixed_predeclared_ensemble_mean_within_independent_dataset",
+    "context_aggregation": "equal_weight_mean_within_dataset",
+    "bootstrap_resamples": 20000,
+    "aggregation": "equal_simulator_equal_condition_equal_dataset",
+    "operational_budget_policy": "descriptive_only_without_confidence_intervals_or_gate_decisions",
+    "design_sensitivity_contract": {
+      "path": "experiments/v1/spathi/efficiency-design-sensitivity.json",
+      "interpretation": "prospective_assumption_conditional_operating_characteristics_not_an_empirical_power_guarantee"
+    },
+    "runtime_gate": {
+      "estimand": "hierarchical_geometric_mean_candidate_over_reference_wall_time_ratio",
+      "maximum_one_sided_upper_confidence_bound": 1.0,
+      "rationale": "A policy is adoptable only when the one-sided upper bound for its paired hierarchical geometric-mean runtime ratio is below one; the log-ratio estimand avoids arithmetic-ratio distortion from right-skewed timings."
+    },
+    "completion_gate": {
+      "minimum_run_completion_fraction": 1.0,
+      "minimum_model_completion_fraction": 1.0,
+      "rationale": "A production policy must complete every scheduled run and every requested target-group model."
+    },
+    "reported_cost_endpoints": [
+      "wall_time_seconds",
+      "peak_memory_bytes",
+      "output_bytes",
+      "targets_processed",
+      "models_requested",
+      "trees_fitted"
+    ],
+    "adoption_rule": "lowest_geometric_mean_runtime_ratio_then_candidate_id_among_adoptable"
+  },
+  "budgets": {
+    "reduced": {
+      "analysis_role": "descriptive",
+      "algorithm_seeds": [
+        1311559529,
+        298657025
+      ],
+      "execution_order_seed": 2119660444,
+      "expected_independent_datasets": 5,
+      "replicates_per_stratum": 1
+    },
+    "full": {
+      "analysis_role": "confirmatory",
+      "algorithm_seeds": [
+        936480337,
+        1900853009,
+        1656768767,
+        377410921,
+        857148871
+      ],
+      "execution_order_seed": 2025182836,
+      "expected_independent_datasets": 25,
+      "replicates_per_stratum": 5,
+      "statistical_seed": 1126690383
+    }
+  },
+  "validation_components": [
+    {
+      "id": "target_eligibility_finalist",
+      "rationale": "Validate the development-selected automatic-eligibility policy while retaining every valid TF as a candidate predictor.",
+      "component": "target_eligibility",
+      "origin": "selected_from_efficiency_development",
+      "primary_evaluation_policy": "full_requested_universe",
+      "intersection_diagnostic": true,
+      "coverage_gates": {
+        "minimum_target_fraction": 0.5,
+        "minimum_truth_edge_fraction": 0.9,
+        "minimum_each_dataset_target_fraction": 0.5,
+        "minimum_each_dataset_truth_edge_fraction": 0.9,
+        "minimum_each_condition_mean_target_fraction": 0.5,
+        "minimum_each_condition_mean_truth_edge_fraction": 0.9,
+        "threshold_basis": "author_defined_engineering_guardrail_not_validated_for_unobserved_real_truth",
+        "rationale": "The frozen mean, per-dataset and per-condition guardrails prevent a speedup from being accepted by concentrating target or truth-edge loss in one synthetic unit. The values are author-defined engineering tolerances; truth-edge retention cannot be verified on real data without known ground truth."
+      },
+      "binding": {
+        "status": "bound",
+        "api": "spathi.SpathiConfig",
+        "parameters": [
+          "target_eligibility",
+          "min_target_detected_cells",
+          "min_target_detected_fraction",
+          "min_target_weighted_detected_fraction",
+          "min_target_weighted_detected_ess"
+        ]
+      }
+    },
+    {
+      "id": "adaptive_trees_finalist",
+      "rationale": "Validate the development-selected adaptive-tree policy while retaining the calibrated fixed tree count as a hard ceiling.",
+      "component": "adaptive_trees",
+      "origin": "selected_from_efficiency_development",
+      "primary_evaluation_policy": "full_requested_universe",
+      "intersection_diagnostic": false,
+      "binding": {
+        "status": "bound",
+        "api": "spathi.SpathiConfig",
+        "parameters": [
+          "adaptive_trees",
+          "adaptive_min_estimators",
+          "adaptive_tree_step",
+          "adaptive_tolerance",
+          "adaptive_patience"
+        ]
+      }
+    },
+    {
+      "id": "combined_finalist",
+      "rationale": "Validate the development-selected combination because target composition can change adaptive convergence behaviour.",
+      "component": "combined",
+      "origin": "selected_from_efficiency_development",
+      "primary_evaluation_policy": "full_requested_universe",
+      "intersection_diagnostic": true,
+      "coverage_gates": {
+        "minimum_target_fraction": 0.5,
+        "minimum_truth_edge_fraction": 0.9,
+        "minimum_each_dataset_target_fraction": 0.5,
+        "minimum_each_dataset_truth_edge_fraction": 0.9,
+        "minimum_each_condition_mean_target_fraction": 0.5,
+        "minimum_each_condition_mean_truth_edge_fraction": 0.9,
+        "threshold_basis": "author_defined_engineering_guardrail_not_validated_for_unobserved_real_truth",
+        "rationale": "The frozen mean, per-dataset and per-condition guardrails prevent a speedup from being accepted by concentrating target or truth-edge loss in one synthetic unit. The values are author-defined engineering tolerances; truth-edge retention cannot be verified on real data without known ground truth."
+      },
+      "binding": {
+        "status": "bound",
+        "api": "spathi.SpathiConfig",
+        "parameters": [
+          "target_eligibility",
+          "min_target_detected_cells",
+          "min_target_detected_fraction",
+          "min_target_weighted_detected_fraction",
+          "min_target_weighted_detected_ess",
+          "adaptive_trees",
+          "adaptive_min_estimators",
+          "adaptive_tree_step",
+          "adaptive_tolerance",
+          "adaptive_patience"
+        ]
+      }
+    }
+  ]
+}

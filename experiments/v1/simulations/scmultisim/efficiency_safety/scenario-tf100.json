@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_scmultisim_efficiency_safety_tf100_v1",
+  "data_axes": {
+    "measurement": "rna_expression",
+    "resolution": "single_cell",
+    "column_kind": "cells",
+    "experimental_design": "differentiation"
+  },
+  "truth_requirements": {
+    "contexts": ["global", "group"]
+  },
+  "organism": {
+    "taxonomic_group": "synthetic",
+    "ncbi_taxon_id": null
+  },
+  "requested_extras": ["groups", "tf_list", "cluster_identities"],
+  "inputs": {
+    "regulatory_network": {
+      "path": "regulatory-network-tf100.tsv",
+      "format": "tsv",
+      "organism": {
+        "taxonomic_group": "synthetic",
+        "ncbi_taxon_id": null
+      },
+      "description": "Independent 100-TF, 1,000-target topology reserved for the pre-freeze efficiency-safety panel; no directed edge is shared with another distinct safety topology or any dimensional-transfer topology."
+    },
+    "tree_newick": {
+      "path": "tree-three-groups.nwk",
+      "format": "newick",
+      "description": "Three-leaf differentiation tree reserved for efficiency safety."
+    }
+  },
+  "notes": "Truth-bearing pre-freeze efficiency-safety scenario; its regulatory topology and seeds are disjoint from calibration, formal efficiency validation, dimensional transfer, and comparison."
+}

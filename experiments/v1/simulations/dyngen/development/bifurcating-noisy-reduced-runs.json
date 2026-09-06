@@ -2,10 +2,10 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "dyngen_bifurcating_noisy",
+      "run_id": "dyngen_bifurcating_noisy_reduced",
       "simulator_id": "dyngen",
       "replicates": 1,
-      "base_seed": 11301,
+      "base_seed": 111929141,
       "native_outputs": [],
       "params": {
         "backbone_template": "bifurcating",

@@ -2,10 +2,10 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "dyngen_linear_baseline",
+      "run_id": "dyngen_linear_baseline_reduced",
       "simulator_id": "dyngen",
       "replicates": 1,
-      "base_seed": 11001,
+      "base_seed": 111929138,
       "native_outputs": [],
       "params": {
         "backbone_template": "linear",

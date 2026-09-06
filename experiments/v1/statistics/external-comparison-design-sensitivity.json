@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_external_comparison_design_sensitivity_v1",
+  "status": "predeclared",
+  "timing": "before_full_test_outcomes",
+  "plan_path": "experiments/v1/inference/plans/full-v1.json",
+  "profile": "full",
+  "comparison_id": "full-dynamic-directed-accuracy",
+  "purpose": "Expose assumption-conditional power and precision for the frozen primary external comparison before any full-test result is accessed.",
+  "interpretation": "prospective_assumption_conditional_planning_sensitivity_not_an_empirical_power_guarantee",
+  "method": {
+    "id": "paired_normal_location_holm_worst_case_sensitivity",
+    "random_sampling": false,
+    "familywise_alpha": 0.05,
+    "two_sided": true,
+    "holm_family_size": 4,
+    "planning_alpha": 0.0125,
+    "weighting": "equal_dataset",
+    "assumptions": [
+      "Independent generation seeds define independent dataset-level paired blocks.",
+      "The three fixed algorithm seeds are averaged within each dataset and configuration before inference.",
+      "A normal location approximation is used only to make prospective operating characteristics explicit.",
+      "The planning alpha is the conservative first Holm threshold; the actual analysis remains the predeclared Friedman plus paired Holm procedure.",
+      "Power depends on the unknown paired-score distribution and these values are scenario sensitivities, not guarantees."
+    ]
+  },
+  "target_design": {
+    "expected_independent_blocks": 40,
+    "simulator_blocks": {"dyngen": 20, "scmultisim": 20},
+    "primary_configuration_count": 5,
+    "implementation_sensitivities_excluded": ["pyscenic_default"]
+  },
+  "scenario_grid": {
+    "standardized_paired_effects": [0.2, 0.35, 0.5, 0.75, 1.0],
+    "paired_aupr_standard_deviations": [0.01, 0.02, 0.05, 0.1]
+  },
+  "reporting": {
+    "power": "approximate_two_sided_rejection_probability_at_the_first_holm_threshold",
+    "precision": "simultaneous_familywise_95_percent_normal_approximation_half_width_using_the_first_holm_threshold",
+    "required_caveat": "These prospective calculations are conditional on declared normal-location scenarios and do not replace the exact frozen nonparametric analysis."
+  }
+}

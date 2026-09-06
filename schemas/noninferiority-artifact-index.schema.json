@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/noninferiority-artifact-index.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "plan_sha256",
+    "panel_sha256",
+    "artifact_store",
+    "execution",
+    "runs"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {
+      "enum": [
+        "spathi_efficiency_artifact_index",
+        "spathi_efficiency_safety_artifact_index"
+      ]
+    },
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "panel_sha256": {"$ref": "#/$defs/sha256"},
+    "artifact_store": {"$ref": "#/$defs/relative_path"},
+    "execution": {"$ref": "#/$defs/execution"},
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/run"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "inference_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "digest"],
+      "properties": {
+        "kind": {"const": "inference"},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_cores",
+        "max_ram_gb",
+        "max_parallel_runs",
+        "planner",
+        "planner_time_limit_seconds"
+      ],
+      "properties": {
+        "max_parallel_runs": {"const": 1},
+        "max_cores": {"type": "integer", "minimum": 1},
+        "max_ram_gb": {"type": "number", "exclusiveMinimum": 0},
+        "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
+        "planner_time_limit_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "andrea_commit",
+        "andrea_environment",
+        "benchmark_environment",
+        "docker_runtime",
+        "spathi_commit",
+        "spathi_build_fingerprint",
+        "spathi_image_id",
+        "execution_order_seed",
+        "execution_order_seed_derivation",
+        "resources",
+        "measurement_protocol",
+        "runner_sha256"
+      ],
+      "properties": {
+        "andrea_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "andrea_environment": {"$ref": "#/$defs/sha256"},
+        "benchmark_environment": {"$ref": "#/$defs/sha256"},
+        "docker_runtime": {"$ref": "#/$defs/sha256"},
+        "spathi_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "spathi_build_fingerprint": {"$ref": "#/$defs/sha256"},
+        "spathi_image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "execution_order_seed": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483646
+        },
+        "execution_order_seed_derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "stream", "coordinates"],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "pattern": "^(?:(?:reduced|full)\\.efficiency_validation|full\\.efficiency_safety)$"
+            },
+            "stream": {"const": "execution_order"},
+            "coordinates": {
+              "const": {"purpose": "counterbalanced_execution_order"}
+            }
+          }
+        },
+        "resources": {"$ref": "#/$defs/resources"},
+        "measurement_protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["peak_memory", "sample_interval_milliseconds", "output_bytes", "model_counts", "tree_counts"],
+          "properties": {
+            "peak_memory": {"const": "docker_stats_sampled_container_memory"},
+            "sample_interval_milliseconds": {"type": "integer", "minimum": 10},
+            "output_bytes": {"const": "exact_spathi_output_tree"},
+            "model_counts": {"const": "validated_spathi_run_metadata"},
+            "tree_counts": {"const": "validated_spathi_model_diagnostics"}
+          }
+        },
+        "runner_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "inference_artifact"],
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "inference_artifact": {"$ref": "#/$defs/inference_artifact"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "algorithm_seed",
+        "seed_derivation",
+        "reference",
+        "candidates",
+        "execution_order"
+      ],
+      "properties": {
+        "dataset_id": {"$ref": "#/$defs/id"},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "stream", "coordinates"],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "pattern": "^(?:(?:reduced|full)\\.efficiency_validation|full\\.efficiency_safety)$"
+            },
+            "stream": {"const": "inference"},
+            "coordinates": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["purpose", "replicate_index"],
+                  "properties": {
+                    "purpose": {"const": "algorithm_replicate"},
+                    "replicate_index": {"type": "integer", "minimum": 1}
+                  }
+                },
+                {"const": {"purpose": "common_algorithm_seed"}}
+              ]
+            }
+          }
+        },
+        "reference": {"$ref": "#/$defs/inference_artifact"},
+        "execution_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "candidates": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/candidate"}
+        }
+      }
+    }
+  }
+}

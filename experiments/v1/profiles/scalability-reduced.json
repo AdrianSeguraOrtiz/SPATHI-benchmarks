@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "id": "scalability-reduced",
+  "status": "runnable",
+  "purpose": "scalability",
+  "description": "Operational resource stress on two rounded author-defined synthetic workloads. This profile makes no biological-realism or confirmatory-accuracy claim.",
+  "generation_jobs": [
+    {
+      "id": "scale_stress_scalability_reduced",
+      "generator_request": "experiments/v1/simulations/scale_stress/scale-reduced.json",
+      "dataset_role": "scalability",
+      "split_id": "scalability_reduced_v1",
+      "condition_id": "dimensional_scale_stress"
+    }
+  ],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {"max_parallel_tasks": 1, "max_cores": 8, "max_ram_gb": 32},
+    "infer_network": {
+      "max_parallel_runs": 1,
+      "max_cores": 8,
+      "max_ram_gb": 32,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 60
+    }
+  },
+  "planned_design": {
+    "simulators": ["spathi_scale_stress"],
+    "replicates_per_condition": 1,
+    "regimes": ["group_only"],
+    "factors": ["cells", "genes", "transcription_factors", "group_count", "network_mode"],
+    "notes": [
+      "The generator is a deterministic dimensional stressor on a public synthetic grid, not a calibrated biological simulator.",
+      "The workflow executes only the policy frozen by the same-budget efficiency phase.",
+      "Results provide completion-or-attributable-failure and resource-boundary evidence only."
+    ]
+  },
+  "statistics": {
+    "status": "not_applicable",
+    "comparisons": []
+  }
+}

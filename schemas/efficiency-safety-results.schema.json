@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/efficiency-safety-results.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "study_phase", "budget", "analysis_role", "dataset_role", "inputs", "analysis_implementation_sha256", "reference_policy_id", "provisional_candidate_id", "provisional_candidate_policy_sha256", "condition_scales", "thresholds", "execution_failures", "paired_datasets", "summary", "gates", "decision", "interpretation_limit"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_efficiency_safety_results"},
+    "study_phase": {"const": "efficiency_safety"},
+    "budget": {"const": "full"}, "analysis_role": {"const": "descriptive_safety_veto"}, "dataset_role": {"const": "efficiency_safety"},
+    "inputs": {"type": "object", "additionalProperties": false, "required": ["plan_sha256", "evidence_sha256"], "properties": {"plan_sha256": {"$ref": "#/$defs/sha256"}, "evidence_sha256": {"$ref": "#/$defs/sha256"}}},
+    "analysis_implementation_sha256": {"$ref": "#/$defs/sha256"},
+    "reference_policy_id": {"$ref": "#/$defs/id"}, "provisional_candidate_id": {"$ref": "#/$defs/id"}, "provisional_candidate_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "condition_scales": {"$ref": "#/$defs/condition_scales"},
+    "thresholds": {"type": "object", "minProperties": 1},
+    "execution_failures": {"type": "array", "items": {"$ref": "#/$defs/execution_failure"}},
+    "paired_datasets": {"type": "array", "maxItems": 18, "items": {"$ref": "#/$defs/paired_dataset"}},
+    "summary": {
+      "type": "object", "additionalProperties": false, "required": ["global", "by_condition"],
+      "properties": {
+        "global": {"$ref": "#/$defs/summary"},
+        "by_condition": {"type": "object", "additionalProperties": false, "required": ["g3000_tf100_c300", "g3000_tf1500_c300", "g15000_tf100_c300", "g100_tf10_c500_single_group", "g100_tf10_c300_groups_10_40_250", "g100_tf10_c10000"], "properties": {"g3000_tf100_c300": {"$ref": "#/$defs/summary"}, "g3000_tf1500_c300": {"$ref": "#/$defs/summary"}, "g15000_tf100_c300": {"$ref": "#/$defs/summary"}, "g100_tf10_c500_single_group": {"$ref": "#/$defs/summary"}, "g100_tf10_c300_groups_10_40_250": {"$ref": "#/$defs/summary"}, "g100_tf10_c10000": {"$ref": "#/$defs/summary"}}}
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["completion_18_of_18", "completion_each_condition_3_of_3", "target_coverage_each_dataset", "truth_edge_coverage_each_dataset", "global_mean_aupr_difference", "global_median_aupr_difference", "condition_mean_aupr_difference", "condition_median_aupr_difference", "each_dataset_aupr_difference", "global_median_wall_time_ratio"],
+      "properties": {"completion_18_of_18": {"type": "boolean"}, "completion_each_condition_3_of_3": {"type": "boolean"}, "target_coverage_each_dataset": {"type": "boolean"}, "truth_edge_coverage_each_dataset": {"type": "boolean"}, "global_mean_aupr_difference": {"type": "boolean"}, "global_median_aupr_difference": {"type": "boolean"}, "condition_mean_aupr_difference": {"type": "boolean"}, "condition_median_aupr_difference": {"type": "boolean"}, "each_dataset_aupr_difference": {"type": "boolean"}, "global_median_wall_time_ratio": {"type": "boolean"}}
+    },
+    "decision": {
+      "type": "object", "additionalProperties": false, "required": ["status", "selection_rule", "selected_policy_id", "selected_policy_sha256", "selected_group_policy", "reason"],
+      "properties": {"status": {"enum": ["candidate_authorized", "reference_retained_safety_veto"]}, "selection_rule": {"const": "single_provisional_candidate_no_fallback"}, "selected_policy_id": {"$ref": "#/$defs/id"}, "selected_policy_sha256": {"$ref": "#/$defs/sha256"}, "selected_group_policy": {"type": "object", "minProperties": 1}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "interpretation_limit": {"type": "string", "minLength": 1}
+  },
+  "allOf": [{"if": {"properties": {"decision": {"properties": {"status": {"const": "candidate_authorized"}}, "required": ["status"]}}, "required": ["decision"]}, "then": {"properties": {"execution_failures": {"maxItems": 0}, "paired_datasets": {"minItems": 18}, "gates": {"properties": {"completion_18_of_18": {"const": true}, "completion_each_condition_3_of_3": {"const": true}, "target_coverage_each_dataset": {"const": true}, "truth_edge_coverage_each_dataset": {"const": true}, "global_mean_aupr_difference": {"const": true}, "global_median_aupr_difference": {"const": true}, "condition_mean_aupr_difference": {"const": true}, "condition_median_aupr_difference": {"const": true}, "each_dataset_aupr_difference": {"const": true}, "global_median_wall_time_ratio": {"const": true}}}}}}],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "fraction": {"type": "number", "minimum": 0, "maximum": 1},
+    "relative_path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+    "file_reference": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"$ref": "#/$defs/relative_path"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "scenario_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["declared_path", "kind", "files"],
+      "properties": {
+        "declared_path": {"$ref": "#/$defs/relative_path"},
+        "kind": {"const": "file"},
+        "files": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/file_reference"}}
+      }
+    },
+    "scenario_inputs": {
+      "type": "object", "additionalProperties": false,
+      "required": ["regulatory_network", "tree_newick"],
+      "properties": {
+        "regulatory_network": {"$ref": "#/$defs/scenario_input"},
+        "tree_newick": {"$ref": "#/$defs/scenario_input"}
+      }
+    },
+    "scale": {
+      "type": "object", "additionalProperties": false,
+      "required": ["generation_job", "simulator", "genes", "transcription_factors", "cells", "group_sizes", "target_list", "scenario", "simulator_runs", "scenario_inputs"],
+      "properties": {
+        "generation_job": {"$ref": "#/$defs/id"}, "simulator": {"const": "scmultisim"},
+        "genes": {"type": "integer", "minimum": 2}, "transcription_factors": {"type": "integer", "minimum": 1}, "cells": {"type": "integer", "minimum": 1},
+        "group_sizes": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}}, "target_list": {"const": null},
+        "scenario": {"$ref": "#/$defs/file_reference"}, "simulator_runs": {"$ref": "#/$defs/file_reference"}, "scenario_inputs": {"$ref": "#/$defs/scenario_inputs"}
+      }
+    },
+    "condition_scales": {
+      "type": "object", "additionalProperties": false,
+      "required": ["g3000_tf100_c300", "g3000_tf1500_c300", "g15000_tf100_c300", "g100_tf10_c500_single_group", "g100_tf10_c300_groups_10_40_250", "g100_tf10_c10000"],
+      "properties": {
+        "g3000_tf100_c300": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 3000}, "transcription_factors": {"const": 100}, "cells": {"const": 300}, "group_sizes": {"const": [100, 100, 100]}}}]},
+        "g3000_tf1500_c300": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 3000}, "transcription_factors": {"const": 1500}, "cells": {"const": 300}, "group_sizes": {"const": [100, 100, 100]}}}]},
+        "g15000_tf100_c300": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 15000}, "transcription_factors": {"const": 100}, "cells": {"const": 300}, "group_sizes": {"const": [100, 100, 100]}}}]},
+        "g100_tf10_c500_single_group": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 100}, "transcription_factors": {"const": 10}, "cells": {"const": 500}, "group_sizes": {"const": [500]}}}]},
+        "g100_tf10_c300_groups_10_40_250": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 100}, "transcription_factors": {"const": 10}, "cells": {"const": 300}, "group_sizes": {"const": [10, 40, 250]}}}]},
+        "g100_tf10_c10000": {"allOf": [{"$ref": "#/$defs/scale"}, {"properties": {"genes": {"const": 100}, "transcription_factors": {"const": 10}, "cells": {"const": 10000}, "group_sizes": {"const": [3333, 3333, 3334]}}}]}
+      }
+    },
+    "nullable_difference": {"oneOf": [{"type": "null"}, {"type": "number", "minimum": -1, "maximum": 1}]},
+    "nullable_ratio": {"oneOf": [{"type": "null"}, {"type": "number", "exclusiveMinimum": 0}]},
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dataset_pairs", "completed_dataset_pairs", "mean_aupr_difference", "median_aupr_difference", "minimum_aupr_difference", "median_wall_time_ratio", "geometric_mean_wall_time_ratio"],
+      "properties": {"dataset_pairs": {"type": "integer", "minimum": 0, "maximum": 18}, "completed_dataset_pairs": {"type": "integer", "minimum": 0, "maximum": 18}, "mean_aupr_difference": {"$ref": "#/$defs/nullable_difference"}, "median_aupr_difference": {"$ref": "#/$defs/nullable_difference"}, "minimum_aupr_difference": {"$ref": "#/$defs/nullable_difference"}, "median_wall_time_ratio": {"$ref": "#/$defs/nullable_ratio"}, "geometric_mean_wall_time_ratio": {"$ref": "#/$defs/nullable_ratio"}}
+    },
+    "execution_failure": {
+      "type": "object", "additionalProperties": false, "required": ["dataset_id", "dataset_manifest_sha256", "generation_seed", "algorithm_seed", "configuration_id", "selection_role", "inference_artifact", "failure_marker_sha256", "run_report_sha256", "tool_status", "failure_message"],
+      "properties": {"dataset_id": {"$ref": "#/$defs/id"}, "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"}, "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646}, "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646}, "configuration_id": {"$ref": "#/$defs/id"}, "selection_role": {"const": "candidate"}, "inference_artifact": {"$ref": "#/$defs/sha256"}, "failure_marker_sha256": {"$ref": "#/$defs/sha256"}, "run_report_sha256": {"$ref": "#/$defs/sha256"}, "tool_status": {"type": "string", "minLength": 1}, "failure_message": {"type": "string", "minLength": 1}}
+    },
+    "paired_dataset": {
+      "type": "object", "additionalProperties": false, "required": ["dataset_id", "condition_id", "dataset_manifest_sha256", "generation_seed", "algorithm_seed", "reference_aupr", "candidate_aupr", "aupr_difference", "target_fraction", "truth_edge_fraction", "reference_complete", "candidate_complete", "wall_time_ratio"],
+      "properties": {"dataset_id": {"$ref": "#/$defs/id"}, "condition_id": {"enum": ["g3000_tf100_c300", "g3000_tf1500_c300", "g15000_tf100_c300", "g100_tf10_c500_single_group", "g100_tf10_c300_groups_10_40_250", "g100_tf10_c10000"]}, "dataset_manifest_sha256": {"$ref": "#/$defs/sha256"}, "generation_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646}, "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646}, "reference_aupr": {"$ref": "#/$defs/fraction"}, "candidate_aupr": {"$ref": "#/$defs/fraction"}, "aupr_difference": {"type": "number", "minimum": -1, "maximum": 1}, "target_fraction": {"$ref": "#/$defs/fraction"}, "truth_edge_fraction": {"$ref": "#/$defs/fraction"}, "reference_complete": {"type": "boolean"}, "candidate_complete": {"type": "boolean"}, "wall_time_ratio": {"type": "number", "exclusiveMinimum": 0}}
+    }
+  }
+}

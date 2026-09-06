@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_scmultisim_medium_test_v1",
+  "data_axes": {"measurement": "rna_expression", "resolution": "single_cell", "column_kind": "cells", "experimental_design": "differentiation"},
+  "truth_requirements": {"contexts": ["global", "group"]},
+  "organism": {"taxonomic_group": "synthetic", "ncbi_taxon_id": null},
+  "requested_extras": ["groups", "tf_list", "pseudotime", "column_phenotypes", "cluster_identities"],
+  "inputs": {
+    "regulatory_network": {
+      "path": "medium-regulatory-network.tsv",
+      "format": "tsv",
+      "organism": {"taxonomic_group": "synthetic", "ncbi_taxon_id": null},
+      "description": "Test-only 400-gene-scale topology with 100 candidate regulators; no edge is reused by development or validation."
+    }
+  },
+  "notes": "Held-out medium-scale scMultiSim block used only for external comparison after configuration freeze."
+}

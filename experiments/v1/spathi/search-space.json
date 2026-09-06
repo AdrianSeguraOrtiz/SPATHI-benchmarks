@@ -7,25 +7,31 @@
     "current_orchestration_run_id": "spathi_smoke",
     "role": "contract_only",
     "eligible_for_scientific_selection": false,
-    "reason": "The 25-tree smoke configuration verifies the execution contract only; it is not the scientific primary configuration."
+    "reason": "The smoke configuration verifies the execution contract only and cannot enter scientific selection."
   },
   "dataset_partition": {
     "assignment_unit": "dataset_instance",
-    "stratify_by": ["simulator", "topology_id", "condition_id"],
+    "stratify_by": ["simulator", "topology_id", "condition_id", "group_class"],
     "roles": [
       {
         "id": "development",
-        "purpose": "Run the bounded tree-count sweep and construct a shortlist without accessing validation or test datasets.",
-        "permitted_uses": ["convergence", "structure_search", "estimator_search"]
+        "purpose": "Search and shortlist the bounded predeclared configurations without accessing validation or test datasets.",
+        "permitted_uses": [
+          "geometry_search",
+          "estimator_search",
+          "interaction_search",
+          "estimator_scale_transfer",
+          "fixed_ceiling_convergence"
+        ]
       },
       {
         "id": "validation",
-        "purpose": "Choose one global configuration from the predeclared finalists.",
+        "purpose": "Choose one conditional group policy from the predeclared convergence finalists.",
         "permitted_uses": ["finalist_selection"]
       },
       {
         "id": "test",
-        "purpose": "Compare the frozen SPATHI configuration with external tools exactly once.",
+        "purpose": "Compare the frozen conditional SPATHI policy with external tools exactly once.",
         "permitted_uses": ["frozen_benchmark_only"]
       }
     ],
@@ -33,7 +39,7 @@
       "mutually_exclusive": true,
       "assign_before_inference": true,
       "keep_related_datasets_together": true,
-      "test_access": "only_after_configuration_freeze"
+      "test_access": "only_after_policy_freeze"
     }
   },
   "objective": {
@@ -41,198 +47,254 @@
     "edge_semantics": "directed_unsigned",
     "direction": "maximize",
     "aggregation": [
-      {
-        "level": "group",
-        "operation": "equal_weight_mean",
-        "scope": "within_dataset"
-      },
-      {
-        "level": "dataset",
-        "operation": "equal_weight_mean",
-        "scope": "within_dataset_role"
-      }
+      {"level": "group", "operation": "equal_weight_mean", "scope": "within_dataset"},
+      {"level": "algorithm_seed", "operation": "equal_weight_mean", "scope": "within_dataset_and_configuration"},
+      {"level": "dataset", "operation": "equal_weight_mean", "scope": "within_dataset_role"}
     ],
     "tie_breakers": [
-      {
-        "priority": 1,
-        "id": "stability",
-        "direction": "minimize",
-        "measure": "aupr_dispersion_across_algorithmic_seeds"
-      },
-      {
-        "priority": 2,
-        "id": "cost",
-        "direction": "minimize",
-        "measure": "median_wall_time_then_peak_memory"
-      },
-      {
-        "priority": 3,
-        "id": "simplicity",
-        "direction": "minimize",
-        "measure": "nonreference_parameter_changes"
-      }
+      {"priority": 1, "id": "stability", "direction": "minimize", "measure": "aupr_dispersion_across_algorithmic_seeds"},
+      {"priority": 2, "id": "simplicity", "direction": "minimize", "measure": "parameter_changes_from_base_configuration"},
+      {"priority": 3, "id": "canonical_configuration_id", "direction": "ascending", "measure": "lexicographic_configuration_id"}
     ],
     "forbidden_shortcuts": [
       "pool_edges_across_groups",
       "split_cells_from_one_dataset_across_roles",
-      "select_a_different_configuration_per_dataset",
+      "select_a_different_policy_per_dataset",
       "use_test_results_for_selection"
     ]
   },
-  "reference_configuration": {
+  "base_configuration": {
     "weight_mode": "cell-distance-group-anchored",
     "distance_space": "pca",
     "n_components": 50,
     "distance_standardization": "none",
     "pca_svd_solver": "auto",
-    "distance_metric": "euclidean",
+    "distance_metric": "cosine",
     "kernel": "gaussian",
     "bandwidth": "auto",
+    "bandwidth_scale": 1.0,
     "group_size_correction": "cap-to-target",
     "tree_method": "extra-trees",
-    "n_estimators": 500,
-    "max_features": 1.0,
+    "n_estimators": 250,
+    "max_features": "sqrt",
     "min_samples_leaf": 1,
     "max_depth": null,
-    "bootstrap": null
+    "bootstrap": false,
+    "target_eligibility": "all",
+    "min_target_detected_cells": 20,
+    "min_target_detected_fraction": 0.01,
+    "min_target_weighted_detected_fraction": 0.01,
+    "min_target_weighted_detected_ess": 10.0,
+    "adaptive_trees": false,
+    "adaptive_min_estimators": 100,
+    "adaptive_tree_step": 50,
+    "adaptive_tolerance": 0.01,
+    "adaptive_patience": 2
+  },
+  "calibration_constraints": {
+    "fixed_parameters": {
+      "pca_svd_solver": "auto",
+      "bandwidth": "auto",
+      "target_eligibility": "all",
+      "adaptive_trees": false
+    },
+    "fixed_parameter_rationales": {
+      "pca_svd_solver": "The solver is a numerical implementation choice. auto is frozen for production and separate equivalence tests compare it with full and randomized solvers where feasible; accuracy outcomes never select the solver.",
+      "bandwidth": "The automatic bandwidth adapts to each dataset's distance units. The transferable bandwidth_scale parameter varies smoothing intensity without fitting a non-portable absolute width.",
+      "target_eligibility": "All requested targets define the exact scientific reference. Automatic target eligibility is developed and independently validated only as an efficiency policy.",
+      "adaptive_trees": "Fixed forests define the exact scientific reference. Adaptive stopping is developed and independently validated only as an efficiency policy."
+    },
+    "excluded_inputs": ["target_list", "centroid_weights"],
+    "purpose": "Calibrate the exact scientific model. Target eligibility and adaptive stopping belong to the separate efficiency study. Target lists are unavailable in the intended application, and annotation-score centroid weights are an application adaptation considered only after the synthetic benchmark; neither enters benchmarking claims."
+  },
+  "conditional_group_policy": {
+    "routing_parameter": "group_count",
+    "shared_parameters": [
+      "distance_space",
+      "n_components",
+      "distance_standardization",
+      "pca_svd_solver",
+      "kernel",
+      "bandwidth",
+      "bandwidth_scale",
+      "tree_method",
+      "n_estimators",
+      "max_features",
+      "min_samples_leaf",
+      "max_depth",
+      "bootstrap",
+      "target_eligibility",
+      "min_target_detected_cells",
+      "min_target_detected_fraction",
+      "min_target_weighted_detected_fraction",
+      "min_target_weighted_detected_ess",
+      "adaptive_trees",
+      "adaptive_min_estimators",
+      "adaptive_tree_step",
+      "adaptive_tolerance",
+      "adaptive_patience"
+    ],
+    "branches": {
+      "single_group": {
+        "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
+        "parameter_overrides": {"weight_mode": "cell-distance", "distance_metric": "euclidean", "group_size_correction": "none"}
+      },
+      "multi_group": {
+        "condition": {"minimum_group_count": 2},
+        "parameter_overrides": {}
+      }
+    }
   },
   "calibration_budgets": {
     "full": {
       "algorithmic_seeds": {
-        "convergence": [1729, 2718, 31415, 57721, 104729],
-        "structure": [1729, 31415, 104729],
-        "estimator": [1729, 31415, 104729],
-        "validation": [1729, 31415, 104729]
+        "geometry": [661002162, 737908398, 361869425, 1687437019, 49611793],
+        "estimator": [1078468867, 1606970393, 1420105189, 112047603, 2066048289],
+        "interaction": [1068542066, 1674017269, 135662027, 489596501, 764796620],
+        "estimator_scale_transfer": [1564593931, 1494888927, 1246618629],
+        "convergence": [1699595498, 909275566, 1245131614, 1379909982, 1544350695],
+        "validation": [2114967450, 1335083472, 976486246, 330429731, 1228553048]
       }
     },
     "reduced": {
       "algorithmic_seeds": {
-        "convergence": [1729, 31415],
-        "structure": [1729, 31415],
-        "estimator": [1729, 31415],
-        "validation": [1729, 31415]
+        "geometry": [465212547, 966823479],
+        "estimator": [518138185, 1607047126],
+        "interaction": [1844980629, 1542315938],
+        "estimator_scale_transfer": [1405804663, 1713637447],
+        "convergence": [1865227637, 272793142],
+        "validation": [1153622556, 1342615056]
       }
     }
   },
   "stages": [
     {
-      "id": "convergence",
+      "id": "geometry",
       "order": 1,
       "dataset_role": "development",
-      "purpose": "Compare a bounded tree-count sweep using directed AUPR, seed dispersion and the predeclared cost and simplicity tie breakers.",
-      "inherits_from": "reference_configuration",
-      "strategy": "one_factor_at_a_time",
+      "purpose": "Compare a bounded set of biologically meaningful distance geometries, including joint choices that a one-factor search cannot identify.",
+      "inherits_from": "base_configuration",
+      "strategy": "bounded_constrained_design",
+      "dataset_selector": {"split_id": "development_v1", "condition_ids": ["linear_baseline", "linear_noisy", "bifurcating_baseline", "bifurcating_noisy", "scmultisim_dynamic", "scmultisim_imbalanced", "scmultisim_single_group"]},
       "include_inherited_configuration": true,
       "maximum_parent_configurations": 1,
-      "candidate_budget_per_parent": 4,
+      "candidate_budget_per_parent": 14,
       "candidates": [
-        {
-          "id": "trees_100",
-          "parameter_overrides": {"n_estimators": 100},
-          "rationale": "Low-cost tree-count boundary."
-        },
-        {
-          "id": "trees_250",
-          "parameter_overrides": {"n_estimators": 250},
-          "rationale": "Intermediate tree-count point below the reference."
-        },
-        {
-          "id": "trees_1000",
-          "parameter_overrides": {"n_estimators": 1000},
-          "rationale": "High-tree reference for measuring residual Monte Carlo variation."
-        }
+        {"id": "pca20_standard_euclidean_gaussian_anchored_cap", "parameter_overrides": {"n_components": 20, "distance_standardization": "standard", "distance_metric": "euclidean"}, "rationale": "Evaluate a compact standardized PCA geometry."},
+        {"id": "pca100_none_euclidean_gaussian_anchored_cap", "parameter_overrides": {"n_components": 100, "distance_metric": "euclidean"}, "rationale": "Retain more expression variation in an alternative Euclidean geometry when dataset rank permits it."},
+        {"id": "pca50_standard_cosine_gaussian_anchored_cap", "parameter_overrides": {"distance_standardization": "standard", "distance_metric": "cosine"}, "rationale": "Test the interaction between standardization and angular distance."},
+        {"id": "expression_none_cosine_exponential_anchored_cap", "parameter_overrides": {"distance_space": "expression", "distance_metric": "cosine", "kernel": "exponential"}, "rationale": "Test a joint expression-space angular geometry with the exponential kernel."},
+        {"id": "expression_standard_euclidean_gaussian_anchored_cap", "parameter_overrides": {"distance_space": "expression", "distance_standardization": "standard", "distance_metric": "euclidean"}, "rationale": "Compare standardized full-expression distances with PCA distances."},
+        {"id": "pca50_none_euclidean_exponential_anchored_cap", "parameter_overrides": {"distance_metric": "euclidean", "kernel": "exponential"}, "rationale": "Test the supported exponential kernel in an alternative Euclidean PCA geometry."},
+        {"id": "pca50_none_cosine_gaussian_anchored_cap_bandwidth_half", "parameter_overrides": {"bandwidth_scale": 0.5}, "rationale": "Test faster distance decay at one half of the dataset-adaptive bandwidth."},
+        {"id": "pca50_none_cosine_gaussian_anchored_cap_bandwidth_double", "parameter_overrides": {"bandwidth_scale": 2.0}, "rationale": "Test slower distance decay at twice the dataset-adaptive bandwidth."},
+        {"id": "pca50_none_cosine_gaussian_cell_none", "parameter_overrides": {"weight_mode": "cell-distance", "group_size_correction": "none"}, "rationale": "Test cell-to-centroid weights without group anchoring."},
+        {"id": "pca50_none_cosine_gaussian_cell_cap", "parameter_overrides": {"weight_mode": "cell-distance", "group_size_correction": "cap-to-target"}, "rationale": "Estimate the interaction between cell-level distances and target-group size correction."},
+        {"id": "pca50_none_cosine_gaussian_group_none", "parameter_overrides": {"weight_mode": "group-distance", "group_size_correction": "none"}, "rationale": "Test group-centroid rather than cell-level distances."},
+        {"id": "pca50_none_cosine_gaussian_group_cap", "parameter_overrides": {"weight_mode": "group-distance", "group_size_correction": "cap-to-target"}, "rationale": "Estimate the interaction between group-centroid distance and target-group size correction."},
+        {"id": "pca50_none_cosine_gaussian_anchored_none", "parameter_overrides": {"group_size_correction": "none"}, "rationale": "Measure the contribution of target-group size correction."}
       ],
-      "advance_limit": 1
+      "advance_limit": 3
     },
     {
-      "id": "structure",
+      "id": "estimator",
       "order": 2,
       "dataset_role": "development",
-      "purpose": "Test modelling assumptions individually around the converged tree count and retain at most two structures.",
-      "inherits_from": "selected:convergence",
-      "strategy": "one_factor_at_a_time",
+      "purpose": "Cross each retained geometry with a bounded estimator design covering feature subsampling, regularization, depth and valid bootstrap choices.",
+      "inherits_from": "shortlist:geometry",
+      "strategy": "bounded_crossed_shortlist",
+      "dataset_selector": {"split_id": "development_v1", "condition_ids": ["linear_baseline", "linear_noisy", "bifurcating_baseline", "bifurcating_noisy", "scmultisim_dynamic", "scmultisim_imbalanced", "scmultisim_single_group", "scmultisim_medium"]},
       "include_inherited_configuration": true,
-      "maximum_parent_configurations": 1,
-      "candidate_budget_per_parent": 7,
+      "maximum_parent_configurations": 3,
+      "candidate_budget_per_parent": 12,
       "candidates": [
-        {
-          "id": "cell_distance",
-          "parameter_overrides": {"weight_mode": "cell-distance"},
-          "rationale": "Remove the group anchor while preserving cell-level distances."
-        },
-        {
-          "id": "group_distance",
-          "parameter_overrides": {"weight_mode": "group-distance"},
-          "rationale": "Test group-centroid distances instead of cell-level distances."
-        },
-        {
-          "id": "no_group_size_correction",
-          "parameter_overrides": {"group_size_correction": "none"},
-          "rationale": "Measure the contribution of target-group size correction."
-        },
-        {
-          "id": "expression_space",
-          "parameter_overrides": {"distance_space": "expression"},
-          "rationale": "Test distances without PCA projection."
-        },
-        {
-          "id": "cosine_distance",
-          "parameter_overrides": {"distance_metric": "cosine"},
-          "rationale": "Test angular rather than Euclidean similarity."
-        },
-        {
-          "id": "exponential_kernel",
-          "parameter_overrides": {"kernel": "exponential"},
-          "rationale": "Test the alternative supported distance kernel."
-        }
+        {"id": "extra_trees_features_one", "parameter_overrides": {"tree_method": "extra-trees", "max_features": 1, "bootstrap": false}, "rationale": "Test the strongly randomized one-predictor-per-split Extra-Trees regime."},
+        {"id": "extra_trees_features_log2", "parameter_overrides": {"tree_method": "extra-trees", "max_features": "log2", "bootstrap": false}, "rationale": "Use logarithmic feature subsampling with Extra-Trees."},
+        {"id": "extra_trees_features_fraction_025", "parameter_overrides": {"tree_method": "extra-trees", "max_features": 0.25, "bootstrap": false}, "rationale": "Use a portable one-quarter feature fraction."},
+        {"id": "extra_trees_features_fraction_050", "parameter_overrides": {"tree_method": "extra-trees", "max_features": 0.5, "bootstrap": false}, "rationale": "Use a portable one-half feature fraction."},
+        {"id": "extra_trees_features_fraction_100", "parameter_overrides": {"tree_method": "extra-trees", "max_features": 1.0, "bootstrap": false}, "rationale": "Test the all-predictor endpoint, which is distinct from integer one."},
+        {"id": "extra_trees_leaf_2", "parameter_overrides": {"tree_method": "extra-trees", "min_samples_leaf": 2, "bootstrap": false}, "rationale": "Introduce mild leaf regularization."},
+        {"id": "extra_trees_leaf_5", "parameter_overrides": {"tree_method": "extra-trees", "min_samples_leaf": 5, "bootstrap": false}, "rationale": "Test stronger leaf regularization."},
+        {"id": "extra_trees_depth_20", "parameter_overrides": {"tree_method": "extra-trees", "max_depth": 20, "bootstrap": false}, "rationale": "Bound tree depth explicitly."},
+        {"id": "extra_trees_bootstrap", "parameter_overrides": {"tree_method": "extra-trees", "bootstrap": true}, "rationale": "Measure bootstrap sampling independently within Extra-Trees."},
+        {"id": "random_forest_bootstrap", "parameter_overrides": {"tree_method": "random-forest", "bootstrap": true}, "rationale": "Compare the supported Random Forest family under its explicit bootstrap regime."},
+        {"id": "random_forest_no_bootstrap", "parameter_overrides": {"tree_method": "random-forest", "bootstrap": false}, "rationale": "Compare Random Forest without resampling so both effective bootstrap behaviours are represented in each estimator family."}
+      ],
+      "advance_limit": 3
+    },
+    {
+      "id": "interaction",
+      "order": 3,
+      "dataset_role": "development",
+      "purpose": "Evaluate a small predeclared set of estimator interactions over the retained geometry-estimator parents without a full Cartesian grid.",
+      "inherits_from": "shortlist:estimator",
+      "strategy": "bounded_interaction_design",
+      "dataset_selector": {"split_id": "development_v1", "condition_ids": ["linear_baseline", "linear_noisy", "bifurcating_baseline", "bifurcating_noisy", "scmultisim_dynamic", "scmultisim_imbalanced", "scmultisim_single_group", "scmultisim_medium"]},
+      "include_inherited_configuration": true,
+      "maximum_parent_configurations": 3,
+      "candidate_budget_per_parent": 6,
+      "candidates": [
+        {"id": "extra_trees_sqrt_leaf_2", "parameter_overrides": {"tree_method": "extra-trees", "max_features": "sqrt", "min_samples_leaf": 2, "max_depth": null, "bootstrap": false}, "rationale": "Test feature subsampling with mild leaf regularization."},
+        {"id": "extra_trees_log2_leaf_2_depth_20", "parameter_overrides": {"tree_method": "extra-trees", "max_features": "log2", "min_samples_leaf": 2, "max_depth": 20, "bootstrap": false}, "rationale": "Test stronger joint feature, leaf and depth regularization."},
+        {"id": "extra_trees_fraction_050_leaf_2", "parameter_overrides": {"tree_method": "extra-trees", "max_features": 0.5, "min_samples_leaf": 2, "max_depth": null, "bootstrap": false}, "rationale": "Test fractional feature sampling with mild leaf regularization."},
+        {"id": "random_forest_sqrt_leaf_2_depth_20", "parameter_overrides": {"tree_method": "random-forest", "max_features": "sqrt", "min_samples_leaf": 2, "max_depth": 20, "bootstrap": true}, "rationale": "Test a bounded regularized Random Forest configuration."},
+        {"id": "random_forest_fraction_050_leaf_2", "parameter_overrides": {"tree_method": "random-forest", "max_features": 0.5, "min_samples_leaf": 2, "max_depth": null, "bootstrap": true}, "rationale": "Test fractional feature sampling in the Random Forest family."}
+      ],
+      "advance_limit": 3
+    },
+    {
+      "id": "estimator_scale_transfer",
+      "order": 4,
+      "dataset_role": "development",
+      "purpose": "Cross every max_features level over retained estimator-interaction structures on an independent 1,000-TF, 2,200-gene panel before choosing the tree-count ceiling.",
+      "inherits_from": "shortlist:interaction",
+      "strategy": "crossed_high_tf_feature_transfer",
+      "dataset_selector": {"split_id": "development_estimator_scale_transfer_v1", "condition_ids": ["scmultisim_estimator_scale_transfer"]},
+      "include_inherited_configuration": false,
+      "maximum_parent_configurations": 3,
+      "candidate_budget_per_parent": 6,
+      "candidates": [
+        {"id": "high_tf_features_sqrt", "parameter_overrides": {"max_features": "sqrt"}, "rationale": "Re-evaluate the square-root rule with 1,000 candidate regulators."},
+        {"id": "high_tf_features_log2", "parameter_overrides": {"max_features": "log2"}, "rationale": "Re-evaluate the logarithmic rule with 1,000 candidate regulators."},
+        {"id": "high_tf_features_one", "parameter_overrides": {"max_features": 1}, "rationale": "Re-evaluate one predictor per split with 1,000 candidate regulators."},
+        {"id": "high_tf_features_fraction_025", "parameter_overrides": {"max_features": 0.25}, "rationale": "Re-evaluate the one-quarter fraction with 1,000 candidate regulators."},
+        {"id": "high_tf_features_fraction_050", "parameter_overrides": {"max_features": 0.5}, "rationale": "Re-evaluate the one-half fraction with 1,000 candidate regulators."},
+        {"id": "high_tf_features_fraction_100", "parameter_overrides": {"max_features": 1.0}, "rationale": "Re-evaluate the all-predictor endpoint with 1,000 candidate regulators."}
       ],
       "advance_limit": 2
     },
     {
-      "id": "estimator",
-      "order": 3,
+      "id": "convergence",
+      "order": 5,
       "dataset_role": "development",
-      "purpose": "Apply a small explicit estimator shortlist to no more than two retained structures.",
-      "inherits_from": "shortlist:structure",
-      "strategy": "bounded_shortlist_expansion",
+      "purpose": "Choose a fixed exact tree-count ceiling after geometry and estimator choices have stabilized; adaptive stopping remains disabled.",
+      "inherits_from": "shortlist:estimator_scale_transfer",
+      "strategy": "fixed_ceiling_sweep",
+      "dataset_selector": {"split_id": "development_v1", "condition_ids": ["linear_baseline", "linear_noisy", "bifurcating_baseline", "bifurcating_noisy", "scmultisim_dynamic", "scmultisim_imbalanced", "scmultisim_single_group", "scmultisim_medium"]},
       "include_inherited_configuration": true,
       "maximum_parent_configurations": 2,
-      "candidate_budget_per_parent": 5,
+      "candidate_budget_per_parent": 4,
+      "selection_rule": {
+        "method": "smallest_noninferior_stable_per_parent",
+        "reference": "largest_n_estimators_within_parent",
+        "absolute_aupr_margin": 0.002,
+        "maximum_stability_increase": 0.002
+      },
       "candidates": [
-        {
-          "id": "random_forest",
-          "parameter_overrides": {"tree_method": "random-forest"},
-          "rationale": "Compare the two supported ensemble families."
-        },
-        {
-          "id": "sqrt_features",
-          "parameter_overrides": {"max_features": "sqrt"},
-          "rationale": "Reduce feature correlation and estimator cost."
-        },
-        {
-          "id": "leaf_2",
-          "parameter_overrides": {"min_samples_leaf": 2},
-          "rationale": "Introduce mild tree regularization."
-        },
-        {
-          "id": "random_forest_sqrt",
-          "parameter_overrides": {
-            "tree_method": "random-forest",
-            "max_features": "sqrt"
-          },
-          "rationale": "Retain one predeclared estimator-feature interaction without a factorial search."
-        }
+        {"id": "trees_500", "parameter_overrides": {"n_estimators": 500}, "rationale": "Intermediate fixed ceiling above the inherited 250-tree configuration."},
+        {"id": "trees_750", "parameter_overrides": {"n_estimators": 750}, "rationale": "Intermediate fixed-ceiling candidate above the base count."},
+        {"id": "trees_1000", "parameter_overrides": {"n_estimators": 1000}, "rationale": "High fixed ceiling for residual Monte Carlo variation."}
       ],
-      "advance_limit": 3
+      "advance_limit": 2
     }
   ],
   "selection_protocol": {
     "development_role": "search_and_shortlist",
-    "validation_role": "select_one_finalist",
-    "test_role": "compare_frozen_configuration",
+    "validation_role": "select_one_conditional_policy",
+    "test_role": "compare_frozen_policy",
     "maximum_validation_finalists": 3,
     "freeze_before_test": true,
-    "single_global_configuration": true,
+    "selection_unit": "conditional_group_policy",
     "test_results_can_change_selection": false
   }
 }

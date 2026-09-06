@@ -29,8 +29,8 @@
         "taxonomic_group": "synthetic",
         "ncbi_taxon_id": null
       },
-      "description": "Independent test-only synthetic topology; it is not reused by development or validation datasets."
+      "description": "Test-only topology input constructed over the common synthetic TF-target universe; its complete graph is not reused by any earlier dataset role."
     }
   },
-  "notes": "Held-out dynamic-GRN test scenario using an independently supplied topology."
+  "notes": "Held-out dynamic-GRN test scenario using a role-exclusive complete topology input."
 }

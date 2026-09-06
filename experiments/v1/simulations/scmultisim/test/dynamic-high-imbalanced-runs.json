@@ -5,7 +5,7 @@
       "run_id": "scmultisim_dynamic_high_imbalanced_test",
       "simulator_id": "scmultisim",
       "replicates": 5,
-      "base_seed": 41101,
+      "base_seed": 596607976,
       "params": {
         "grn_source": "input_tsv",
         "tree_preset": "phyla5",

@@ -5,7 +5,7 @@
       "run_id": "boolode_invariant_gsd_clean_test",
       "simulator_id": "boolode",
       "replicates": 5,
-      "base_seed": 43001,
+      "base_seed": 596607986,
       "params": {
         "model_preset": "GSD",
         "model_type": "hill",

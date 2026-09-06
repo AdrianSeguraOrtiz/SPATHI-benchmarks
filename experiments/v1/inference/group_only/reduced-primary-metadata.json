@@ -2,76 +2,148 @@
   "schema_version": "1.0",
   "runs": [
     {
-      "run_id": "genie3_default_seed_1729",
+      "run_id": "genie3_default_seed_1107144475",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1107144475,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "genie3_default_seed_31415",
+      "run_id": "genie3_default_seed_512584353",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 512584353,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "genie3_default_seed_104729",
+      "run_id": "genie3_default_seed_238683595",
       "configuration_id": "genie3_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 238683595,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_1729",
+      "run_id": "grnboost2_default_seed_1107144475",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1107144475,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_31415",
+      "run_id": "grnboost2_default_seed_512584353",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 512584353,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "grnboost2_default_seed_104729",
+      "run_id": "grnboost2_default_seed_238683595",
       "configuration_id": "grnboost2_default",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 238683595,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_1729",
+      "run_id": "infercsn_none_seed_1107144475",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 1729,
+      "algorithm_seed": 1107144475,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 1
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_31415",
+      "run_id": "infercsn_none_seed_512584353",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 31415,
+      "algorithm_seed": 512584353,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 2
+        }
+      }
     },
     {
-      "run_id": "infercsn_none_seed_104729",
+      "run_id": "infercsn_none_seed_238683595",
       "configuration_id": "infercsn_none",
       "selection_role": "baseline",
-      "algorithm_seed": 104729,
+      "algorithm_seed": 238683595,
       "algorithm_seed_parameter": "seed",
-      "family": "catalog_tf_restricted"
+      "family": "catalog_tf_restricted",
+      "seed_derivation": {
+        "namespace": "reduced.test",
+        "stream": "inference",
+        "coordinates": {
+          "purpose": "algorithm_replicate",
+          "replicate_index": 3
+        }
+      }
     }
   ]
 }

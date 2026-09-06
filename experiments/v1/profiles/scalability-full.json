@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "id": "scalability-full",
+  "status": "runnable",
+  "purpose": "scalability",
+  "description": "Publication-grade completion-or-attributable-failure and resource-boundary evidence on a rounded public synthetic grid with dynamic cases and an invariant-network control.",
+  "generation_jobs": [
+    {
+      "id": "scale_stress_scalability_full",
+      "generator_request": "experiments/v1/simulations/scale_stress/scale-full.json",
+      "dataset_role": "scalability",
+      "split_id": "scalability_full_v1",
+      "condition_id": "author_defined_scale_grid"
+    }
+  ],
+  "inference_batches": [],
+  "resources": {
+    "generate_data": {"max_parallel_tasks": 1, "max_cores": 8, "max_ram_gb": 48},
+    "infer_network": {
+      "max_parallel_runs": 1,
+      "max_cores": 8,
+      "max_ram_gb": 48,
+      "planner": "heuristic",
+      "planner_time_limit_seconds": 120
+    }
+  },
+  "planned_design": {
+    "simulators": ["spathi_scale_stress"],
+    "replicates_per_condition": 1,
+    "regimes": ["group_only"],
+    "factors": ["cells", "genes", "transcription_factors", "group_count", "network_mode"],
+    "notes": [
+      "Every shape belongs to a rounded author-defined public synthetic grid and is not projected from application data.",
+      "The workflow executes only the policy frozen by the same-budget efficiency phase.",
+      "Results are publication-grade completion-or-attributable-failure and measured resource-boundary evidence, not a biological-accuracy endpoint."
+    ]
+  },
+  "statistics": {
+    "status": "not_applicable",
+    "comparisons": []
+  }
+}

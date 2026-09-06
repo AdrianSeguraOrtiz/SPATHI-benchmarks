@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "runs": [
+    {
+      "run_id": "scmultisim_efficiency_safety_g100_tf10_c300_groups_10_40_250",
+      "simulator_id": "scmultisim",
+      "replicates": 3,
+      "base_seed": 1180385086,
+      "params": {
+        "grn_source": "input_tsv",
+        "tree_preset": "input_newick",
+        "population_mode": "discrete",
+        "discrete_population": {"pop_size": [10, 40, 250]},
+        "num_cells": 300,
+        "num_genes": 100,
+        "num_cifs": 10,
+        "speed_up": true,
+        "velocity": {"enabled": false},
+        "dynamic_grn": {
+          "enabled": true,
+          "num_steps": 5,
+          "cell_per_step": 1,
+          "num_changing_edges": 10,
+          "create_tf_edges": false,
+          "weight_mean": 0,
+          "weight_sd": 0.8
+        },
+        "technical_noise": {
+          "enabled": true,
+          "protocol": "UMI",
+          "alpha_mean": 0.1,
+          "alpha_sd": 0.02,
+          "depth_mean": 100000,
+          "depth_sd": 3000,
+          "n_pcr1": 16,
+          "n_pcr2": 10,
+          "atac_obs_prob": 0.3,
+          "atac_sd_frac": 0.5
+        },
+        "batch_effect": {"enabled": false}
+      },
+      "notes": "Three independent controls for exact-versus-candidate safety under a declared strong group-size imbalance."
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "runs": [
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_1201401544",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 1201401544
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_1474962550",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 1474962550
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "cespgrn_expression_no_prior_seed_1019643605",
+      "tool_id": "cespgrn",
+      "params": {
+        "kernel_source": "expression",
+        "prior_mode": "none",
+        "random_seed": 1019643605
+      },
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "clr_default",
+      "tool_id": "clr",
+      "params": {},
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "kscreni_default_fixed_seed_100",
+      "tool_id": "kscreni",
+      "params": {},
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "lioness_default",
+      "tool_id": "lioness",
+      "params": {},
+      "execution": {"mode": "group_aggregated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_1201401544",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 1201401544
+      },
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_1474962550",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 1474962550
+      },
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "metasem_unlabeled_all_genes_seed_1019643605",
+      "tool_id": "metasem",
+      "params": {
+        "pseudo_grn_mode": "unlabeled_all_genes",
+        "random_seed": 1019643605
+      },
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "pidc_default",
+      "tool_id": "pidc",
+      "params": {},
+      "execution": {"mode": "group_emulated"}
+    },
+    {
+      "run_id": "ppcor_default",
+      "tool_id": "ppcor",
+      "params": {},
+      "execution": {"mode": "group_emulated"}
+    }
+  ]
+}

@@ -3,14 +3,14 @@
   "id": "full",
   "status": "planned",
   "purpose": "benchmark",
-  "description": "Held-out multi-simulator benchmark spanning topology, scale, noise, population imbalance, dynamic rewiring and invariant-network controls.",
+  "description": "Frozen publication benchmark. Its confirmatory family contains only held-out datasets with group-specific dynamic truth; invariant-network controls and information-advantaged regimes remain separate exploratory families.",
   "generation_jobs": [
     {
       "id": "dyngen_test_linear_baseline",
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/dyngen/test/linear-baseline-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "linear_baseline"
     },
     {
@@ -18,7 +18,7 @@
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/dyngen/test/linear-noisy-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "linear_noisy"
     },
     {
@@ -26,7 +26,7 @@
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/dyngen/test/bifurcating-baseline-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "bifurcating_baseline"
     },
     {
@@ -34,7 +34,7 @@
       "scenario": "experiments/v1/simulations/dyngen/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/dyngen/test/bifurcating-noisy-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "bifurcating_noisy"
     },
     {
@@ -42,7 +42,7 @@
       "scenario": "experiments/v1/simulations/scmultisim/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-low-balanced-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "scmultisim_dynamic_low_balanced"
     },
     {
@@ -50,15 +50,31 @@
       "scenario": "experiments/v1/simulations/scmultisim/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-high-imbalanced-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "scmultisim_dynamic_high_imbalanced"
+    },
+    {
+      "id": "scmultisim_test_dynamic_medium_balanced",
+      "scenario": "experiments/v1/simulations/scmultisim/test/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-medium-balanced-runs.json",
+      "dataset_role": "test",
+      "split_id": "full_test_v1",
+      "condition_id": "scmultisim_dynamic_medium_balanced"
+    },
+    {
+      "id": "scmultisim_test_dynamic_medium_imbalanced",
+      "scenario": "experiments/v1/simulations/scmultisim/test/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/test/dynamic-medium-imbalanced-runs.json",
+      "dataset_role": "test",
+      "split_id": "full_test_v1",
+      "condition_id": "scmultisim_dynamic_medium_imbalanced"
     },
     {
       "id": "sergio_test_invariant",
       "scenario": "experiments/v1/simulations/sergio/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/sergio/test/invariant-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "sergio_invariant"
     },
     {
@@ -66,7 +82,7 @@
       "scenario": "experiments/v1/simulations/boolode/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/boolode/test/invariant-clean-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "boolode_invariant_clean"
     },
     {
@@ -74,7 +90,7 @@
       "scenario": "experiments/v1/simulations/boolode/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/boolode/test/invariant-dropout-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "boolode_invariant_dropout"
     },
     {
@@ -82,21 +98,21 @@
       "scenario": "experiments/v1/simulations/genespider2/panel-scenario.json",
       "simulator_runs": "experiments/v1/simulations/genespider2/test/invariant-runs.json",
       "dataset_role": "test",
-      "split_id": "test_v1",
+      "split_id": "full_test_v1",
       "condition_id": "genespider2_invariant"
     }
   ],
   "inference_batches": [],
   "resources": {
     "generate_data": {
-      "max_parallel_tasks": 4,
-      "max_cores": 32,
-      "max_ram_gb": 128
+      "max_parallel_tasks": 2,
+      "max_cores": 8,
+      "max_ram_gb": 48
     },
     "infer_network": {
-      "max_parallel_runs": 4,
-      "max_cores": 32,
-      "max_ram_gb": 128,
+      "max_parallel_runs": 2,
+      "max_cores": 4,
+      "max_ram_gb": 24,
       "planner": "auto",
       "planner_time_limit_seconds": 300
     }
@@ -104,10 +120,10 @@
   "planned_design": {
     "simulators": ["dyngen", "scmultisim", "sergio", "boolode", "genespider2"],
     "replicates_per_condition": 5,
-    "regimes": ["group_only", "order_aware", "pseudotime_aware"],
+    "regimes": ["group_only", "order_aware"],
     "factors": [
       "topology",
-      "cell_and_gene_scale",
+      "core_panel_size_variation",
       "kinetics_noise",
       "technical_noise",
       "dropout",
@@ -116,22 +132,20 @@
       "invariant_network_control"
     ],
     "notes": [
-      "Contains 50 held-out datasets: 20 dyngen, ten scMultiSim, five SERGIO, ten BoolODE and five GeneSPIDER2 instances.",
-      "Dyngen conditions span 200 to 500 cells and 70 to 130 genes; other simulators add distinct 80- and 100-gene geometries.",
-      "scMultiSim crosses low balanced rewiring with high rewiring, UMI noise and a 12-cell minority population.",
-      "BoolODE crosses clean and explicit dropout-processed invariant-network controls.",
-      "Test seeds are never used for calibration or finalist selection.",
-      "Prior-assisted routes stay excluded until a non-leaky, separately fingerprinted prior dataset is defined.",
-      "SERGIO, BoolODE and GeneSPIDER2 provide invariant group truth for ordinary accuracy metrics; v1 does not claim an explicit rewiring-distance endpoint.",
-      "The scMultiSim test topology is independent of development and validation and is shared only across the two predeclared test stress conditions."
+      "Full is the frozen publication budget and contains 60 held-out datasets: 40 with dynamic group-specific truth and 20 invariant-network controls.",
+      "The confirmatory family uses four dyngen and four scMultiSim conditions, giving each simulator 20 independent blocks; AUPR on directed edges is primary and AUROC is secondary.",
+      "The medium scMultiSim block reaches 400 genes, 100 candidate regulators and 600-800 cells so external accuracy is not inferred only from 70-80-gene systems.",
+      "Invariant controls quantify spurious group-to-group reconfiguration in a dedicated exploratory endpoint and never enter the confirmatory accuracy ranking.",
+      "Simulator-derived group order is evaluated only as an explicitly labelled oracle-information sensitivity because it provides information unavailable to SPATHI; this upper-bound stratum never enters the primary ranking.",
+      "No run receives a truth-derived regulatory prior or target list.",
+      "Each independently simulated dataset contributes one equally weighted paired block. Conclusions therefore target this explicitly declared condition panel rather than a hypothetical equally weighted population of simulators.",
+      "All full-test generation seeds come from the full.test namespace in experiments/v1/seeds/seed-plan.json and are disjoint from reduced, development, validation and efficiency namespaces.",
+      "The statistical stream root for this profile is seed.full.test.statistical (1698096914)."
+      ,"Predeclared failure policy: a configuration is excluded from a paired comparison if any required block fails; failures, timeouts and resource-limit events remain reported and no failed block is silently imputed."
     ]
   },
   "statistics": {
-    "status": "planned",
-    "alpha": 0.05,
-    "random_seed": 1729,
-    "permutations": 99999,
-    "bootstrap_resamples": 20000,
+    "status": "not_applicable",
     "comparisons": []
   }
 }

@@ -45,6 +45,30 @@
       "dataset_role": "validation",
       "split_id": "validation_v1",
       "condition_id": "scmultisim_dynamic"
+    },
+    {
+      "id": "scmultisim_validation_imbalanced",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/imbalanced-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_imbalanced"
+    },
+    {
+      "id": "scmultisim_validation_single_group",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/single-group-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/single-group-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_single_group"
+    },
+    {
+      "id": "scmultisim_validation_medium",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/validation/medium-runs.json",
+      "dataset_role": "validation",
+      "split_id": "validation_v1",
+      "condition_id": "scmultisim_medium"
     }
   ],
   "inference_batches": [],
@@ -68,18 +92,15 @@
     "regimes": ["group_only"],
     "factors": ["topology", "kinetics_noise", "bounded finalist selection"],
     "notes": [
-      "Contains 15 validation datasets: twelve dyngen and three scMultiSim instances.",
+      "Contains 24 validation datasets: twelve dyngen and twelve scMultiSim instances spanning balanced, imbalanced, single-group, small and medium-scale conditions.",
+      "Single-group and multigroup outcomes are summarized independently before the predeclared conditional policy is frozen.",
       "Its seeds are disjoint from both development and test partitions.",
-      "Its winner must be frozen before any full-calibration test profile becomes runnable.",
+      "Its winner is the exact reference for the full efficiency-validation study and cannot enter comparison directly.",
       "The scMultiSim validation topology is independent of development and test."
     ]
   },
   "statistics": {
-    "status": "planned",
-    "alpha": 0.05,
-    "random_seed": 1729,
-    "permutations": 99999,
-    "bootstrap_resamples": 20000,
+    "status": "not_applicable",
     "comparisons": []
   }
 }

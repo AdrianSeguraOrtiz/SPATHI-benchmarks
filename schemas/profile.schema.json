@@ -19,12 +19,14 @@
     "schema_version": {"const": "1.0"},
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
-    "purpose": {"enum": ["smoke", "calibration", "selection", "regression", "benchmark"]},
+    "purpose": {
+      "enum": ["smoke", "calibration", "selection", "regression", "benchmark", "efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer"]
+    },
     "calibration_budget": {"enum": ["full", "reduced"]},
     "calibration_stage": {
-      "enum": ["convergence", "structure", "estimator", "validation"]
+      "enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"]
     },
-    "selected_config": {"$ref": "#/$defs/relative_path"},
+    "production_config": {"$ref": "#/$defs/relative_path"},
     "materialization_manifest": {"$ref": "#/$defs/relative_path"},
     "description": {"type": "string", "minLength": 1},
     "generation_jobs": {
@@ -41,7 +43,13 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"status": {"const": "runnable"}}},
+      "if": {
+        "properties": {
+          "status": {"const": "runnable"},
+          "purpose": {"not": {"enum": ["efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer"]}}
+        },
+        "required": ["status", "purpose"]
+      },
       "then": {
         "properties": {
           "generation_jobs": {"minItems": 1},
@@ -78,7 +86,7 @@
       },
       "then": {
         "properties": {
-          "calibration_stage": {"enum": ["convergence", "structure", "estimator"]}
+          "calibration_stage": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"]}
         }
       }
     },
@@ -90,7 +98,7 @@
         },
         "required": ["status", "purpose"]
       },
-      "then": {"required": ["selected_config", "materialization_manifest"]}
+      "then": {"required": ["production_config", "materialization_manifest"]}
     }
   ],
   "$defs": {
@@ -105,8 +113,6 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "scenario",
-        "simulator_runs",
         "dataset_role",
         "split_id",
         "condition_id"
@@ -115,10 +121,23 @@
         "id": {"$ref": "#/$defs/id"},
         "scenario": {"$ref": "#/$defs/relative_path"},
         "simulator_runs": {"$ref": "#/$defs/relative_path"},
-        "dataset_role": {"enum": ["smoke", "development", "validation", "test"]},
+        "generator_request": {"$ref": "#/$defs/relative_path"},
+        "dataset_role": {
+          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+        },
         "split_id": {"$ref": "#/$defs/id"},
         "condition_id": {"$ref": "#/$defs/id"}
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["scenario", "simulator_runs"],
+          "not": {"required": ["generator_request"]}
+        },
+        {
+          "required": ["generator_request"],
+          "not": {"anyOf": [{"required": ["scenario"]}, {"required": ["simulator_runs"]}]}
+        }
+      ]
     },
     "inference_batch": {
       "type": "object",
@@ -134,7 +153,9 @@
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "kind": {"enum": ["baseline", "spathi"]},
-        "dataset_role": {"enum": ["smoke", "development", "validation", "test"]},
+        "dataset_role": {
+          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+        },
         "generation_jobs": {
           "type": "array",
           "minItems": 1,
@@ -142,7 +163,7 @@
           "items": {"$ref": "#/$defs/id"}
         },
         "regime": {
-          "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+          "enum": ["group_only", "order_aware", "prior_assisted"]
         },
         "tools_params": {"$ref": "#/$defs/relative_path"},
         "custom_tools": {"$ref": "#/$defs/relative_path"},
@@ -203,10 +224,15 @@
           "uniqueItems": true
         },
         "replicates_per_condition": {"type": "integer", "minimum": 1},
+        "replicate_exceptions": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        },
         "regimes": {
           "type": "array",
           "items": {
-            "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+            "enum": ["group_only", "order_aware", "prior_assisted"]
           },
           "uniqueItems": true
         },
@@ -219,16 +245,25 @@
       "additionalProperties": false,
       "required": [
         "status",
-        "alpha",
-        "random_seed",
-        "permutations",
-        "bootstrap_resamples",
         "comparisons"
       ],
       "properties": {
-        "status": {"enum": ["enabled", "planned", "not_applicable"]},
+        "status": {"enum": ["inferential", "descriptive", "not_applicable"]},
         "alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
-        "random_seed": {"type": "integer", "minimum": 0},
+        "random_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "seed_derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "stream", "coordinates"],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "const": "full.test"
+            },
+            "stream": {"const": "statistical"},
+            "coordinates": {"const": {"purpose": "phase_root"}}
+          }
+        },
         "permutations": {"type": "integer", "minimum": 9999, "maximum": 9999999},
         "bootstrap_resamples": {"type": "integer", "minimum": 1000, "maximum": 1000000},
         "comparisons": {
@@ -238,9 +273,66 @@
       },
       "allOf": [
         {
-          "if": {"properties": {"status": {"const": "enabled"}}},
-          "then": {"properties": {"comparisons": {"minItems": 1}}},
-          "else": {"properties": {"comparisons": {"maxItems": 0}}}
+          "if": {"properties": {"status": {"const": "inferential"}}, "required": ["status"]},
+          "then": {
+            "required": ["alpha", "random_seed", "seed_derivation", "permutations", "bootstrap_resamples"],
+            "properties": {
+              "comparisons": {
+                "minItems": 1,
+                "items": {
+                  "allOf": [
+                    {"$ref": "#/$defs/statistical_comparison"},
+                    {"required": ["posthoc_scope", "correction"]}
+                  ]
+                }
+              }
+            }
+          },
+          "else": {
+            "if": {"properties": {"status": {"const": "descriptive"}}, "required": ["status"]},
+            "then": {
+              "properties": {
+                "comparisons": {
+                  "minItems": 1,
+                  "items": {
+                    "allOf": [
+                      {"$ref": "#/$defs/statistical_comparison"},
+                      {"properties": {"comparison_role": {"const": "exploratory"}}},
+                      {
+                        "not": {
+                          "anyOf": [
+                            {"required": ["posthoc_scope"]},
+                            {"required": ["correction"]}
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {"required": ["alpha"]},
+                  {"required": ["random_seed"]},
+                  {"required": ["seed_derivation"]},
+                  {"required": ["permutations"]},
+                  {"required": ["bootstrap_resamples"]}
+                ]
+              }
+            },
+            "else": {
+              "properties": {"comparisons": {"maxItems": 0}},
+              "not": {
+                "anyOf": [
+                  {"required": ["alpha"]},
+                  {"required": ["random_seed"]},
+                  {"required": ["seed_derivation"]},
+                  {"required": ["permutations"]},
+                  {"required": ["bootstrap_resamples"]}
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -250,7 +342,11 @@
       "required": [
         "id",
         "comparison_role",
+        "analysis_kind",
+        "truth_scope",
+        "aggregation",
         "candidate_space",
+        "inference_regulator_scope_by_configuration",
         "dataset_roles",
         "regime",
         "levels",
@@ -258,21 +354,46 @@
         "primary_level",
         "primary_metric",
         "configuration_ids",
+        "algorithm_seeds_by_configuration",
         "control_configuration_id",
         "stratify_by",
-        "min_blocks",
-        "posthoc_scope",
-        "correction"
+        "expected_blocks"
       ],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "comparison_role": {"enum": ["confirmatory", "exploratory"]},
-        "candidate_space": {"enum": ["tf_restricted", "all_gene"]},
+        "analysis_kind": {"enum": ["network_accuracy", "invariant_network_stability"]},
+        "truth_scope": {"enum": ["group_specific", "invariant"]},
+        "aggregation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["block_unit", "hierarchy", "weighting"],
+          "properties": {
+            "block_unit": {"const": "dataset_id"},
+            "hierarchy": {
+              "const": ["simulator_id", "condition_id", "dataset_id"]
+            },
+            "weighting": {"const": "equal_dataset"}
+          }
+        },
+        "candidate_space": {
+          "description": "Candidate edge universe used by ANDREA evaluation after projecting every inferred network to the ground-truth contract.",
+          "enum": ["tf_restricted", "all_gene"]
+        },
+        "inference_regulator_scope_by_configuration": {
+          "description": "Regulator search space exposed to each inference configuration before the common ANDREA evaluation projection.",
+          "type": "object",
+          "minProperties": 2,
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {"enum": ["tf_restricted", "all_gene"]}
+        },
         "dataset_roles": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"enum": ["smoke", "development", "validation", "test"]}
+          "items": {
+            "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+          }
         },
         "generation_jobs": {
           "type": "array",
@@ -281,7 +402,7 @@
           "items": {"$ref": "#/$defs/id"}
         },
         "regime": {
-          "enum": ["group_only", "order_aware", "pseudotime_aware", "prior_assisted"]
+          "enum": ["group_only", "order_aware", "prior_assisted"]
         },
         "levels": {
           "type": "array",
@@ -294,18 +415,46 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count"]
+            "enum": [
+              "auroc",
+              "aupr",
+              "f1_at_truth_count",
+              "epr_at_truth_count",
+              "invariant_edge_stability"
+            ]
           }
         },
         "primary_level": {"enum": ["directed", "topology", "signed"]},
         "primary_metric": {
-          "enum": ["auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count"]
+          "enum": [
+            "auroc",
+            "aupr",
+            "f1_at_truth_count",
+            "epr_at_truth_count",
+            "invariant_edge_stability"
+          ]
         },
         "configuration_ids": {
           "type": "array",
           "minItems": 2,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/id"}
+        },
+        "algorithm_seeds_by_configuration": {
+          "type": "object",
+          "minProperties": 2,
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "integer", "minimum": 1, "maximum": 2147483646}
+              },
+              {"const": [null]}
+            ]
+          }
         },
         "control_configuration_id": {"$ref": "#/$defs/id"},
         "stratify_by": {
@@ -329,10 +478,55 @@
             {"contains": {"const": "level"}}
           ]
         },
-        "min_blocks": {"type": "integer", "minimum": 2},
+        "expected_blocks": {"type": "integer", "minimum": 1},
         "posthoc_scope": {"const": "control_vs_rest"},
         "correction": {"const": "holm"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"analysis_kind": {"const": "network_accuracy"}},
+            "required": ["analysis_kind"]
+          },
+          "then": {
+            "properties": {
+              "primary_metric": {
+                "enum": ["auroc", "aupr", "f1_at_truth_count", "epr_at_truth_count"]
+              },
+              "metrics": {
+                "not": {"contains": {"const": "invariant_edge_stability"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"analysis_kind": {"const": "invariant_network_stability"}},
+            "required": ["analysis_kind"]
+          },
+          "then": {
+            "properties": {
+              "comparison_role": {"const": "exploratory"},
+              "truth_scope": {"const": "invariant"},
+              "primary_level": {"const": "directed"},
+              "primary_metric": {"const": "invariant_edge_stability"},
+              "metrics": {"contains": {"const": "invariant_edge_stability"}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"comparison_role": {"const": "confirmatory"}},
+            "required": ["comparison_role"]
+          },
+          "then": {
+            "properties": {
+              "analysis_kind": {"const": "network_accuracy"},
+              "truth_scope": {"const": "group_specific"}
+            }
+          }
+        }
+      ]
     }
   }
 }

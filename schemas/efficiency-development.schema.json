@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/efficiency-development.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "id", "status", "timing", "purpose", "selection_rule", "budgets", "candidates"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "spathi_efficiency_development_v1"},
+    "status": {"const": "predeclared"},
+    "timing": {"const": "after_calibration_before_efficiency_validation"},
+    "purpose": {"type": "string", "minLength": 1},
+    "selection_rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primary_accuracy_metric", "level", "aggregation", "maximum_mean_absolute_aupr_loss", "required_completion_fraction", "requires_observed_speedup", "cost_estimand", "decision", "failure_policy"],
+      "properties": {
+        "primary_accuracy_metric": {"const": "aupr"},
+        "level": {"const": "directed"},
+        "aggregation": {"const": "equal_simulator_equal_condition_equal_dataset"},
+        "maximum_mean_absolute_aupr_loss": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.05},
+        "required_completion_fraction": {"const": 1.0},
+        "requires_observed_speedup": {"const": true},
+        "cost_estimand": {"const": "hierarchical_geometric_mean_candidate_over_reference_wall_time_ratio"},
+        "decision": {"const": "minimum_cost_ratio_then_candidate_id_among_accuracy_eligible_per_component"},
+        "failure_policy": {"type": "string", "minLength": 1}
+      }
+    },
+    "budgets": {
+      "type": "object", "additionalProperties": false, "required": ["reduced", "full"],
+      "properties": {
+        "reduced": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "descriptive"}, "profile": {"const": "efficiency-development-reduced"}, "replicates_per_stratum": {"const": 1}, "authorizes_validation": {"const": "descriptive_only"}}}]},
+        "full": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "selection"}, "profile": {"const": "efficiency-development-full"}, "replicates_per_stratum": {"const": 3}, "authorizes_validation": {"const": "confirmatory"}}}]}
+      }
+    },
+    "candidates": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"$ref": "#/$defs/candidate"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "budget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["analysis_role", "profile", "dataset_role", "split_id", "algorithm_seeds", "execution_order_seed", "expected_independent_datasets", "replicates_per_stratum", "authorizes_validation"],
+      "properties": {
+        "analysis_role": {"enum": ["descriptive", "selection"]},
+        "profile": {"$ref": "#/$defs/id"},
+        "dataset_role": {"const": "efficiency_development"},
+        "split_id": {"$ref": "#/$defs/id"},
+        "algorithm_seeds": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 2147483646}},
+        "execution_order_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "expected_independent_datasets": {"type": "integer", "minimum": 5},
+        "replicates_per_stratum": {"type": "integer", "minimum": 1},
+        "authorizes_validation": {"enum": ["descriptive_only", "confirmatory"]}
+      }
+    },
+    "eligibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess"],
+      "properties": {
+        "target_eligibility": {"const": "automatic"},
+        "min_target_detected_cells": {"enum": [10, 20, 50]},
+        "min_target_detected_fraction": {"enum": [0.005, 0.01, 0.02]},
+        "min_target_weighted_detected_fraction": {"enum": [0.005, 0.01, 0.02]},
+        "min_target_weighted_detected_ess": {"enum": [5, 10, 20]}
+      }
+    },
+    "adaptive": {
+      "type": "object", "additionalProperties": false,
+      "required": ["adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"],
+      "properties": {
+        "adaptive_trees": {"const": true},
+        "adaptive_min_estimators": {"enum": [100, 200]},
+        "adaptive_tree_step": {"enum": [25, 50, 100]},
+        "adaptive_tolerance": {"enum": [0.005, 0.01, 0.02]},
+        "adaptive_patience": {"enum": [2, 3]}
+      }
+    },
+    "combined": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess", "adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"],
+      "properties": {
+        "target_eligibility": {"const": "automatic"}, "min_target_detected_cells": {"enum": [10, 20, 50]}, "min_target_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_ess": {"enum": [5, 10, 20]},
+        "adaptive_trees": {"const": true}, "adaptive_min_estimators": {"enum": [100, 200]}, "adaptive_tree_step": {"enum": [25, 50, 100]}, "adaptive_tolerance": {"enum": [0.005, 0.01, 0.02]}, "adaptive_patience": {"enum": [2, 3]}
+      }
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false, "required": ["id", "component", "execution_overrides"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "component": {"enum": ["target_eligibility", "adaptive_trees", "combined"]}, "execution_overrides": {"type": "object"}},
+      "allOf": [
+        {"if": {"properties": {"component": {"const": "target_eligibility"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/eligibility"}}}},
+        {"if": {"properties": {"component": {"const": "adaptive_trees"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/adaptive"}}}},
+        {"if": {"properties": {"component": {"const": "combined"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/combined"}}}}
+      ]
+    }
+  }
+}

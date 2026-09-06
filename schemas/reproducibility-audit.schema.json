@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/reproducibility-audit.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "seed_contract",
+    "coverage",
+    "artifacts",
+    "audit_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "status": {"const": "passed"},
+    "seed_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "domain_separator", "seed_plan_sha256"],
+      "properties": {
+        "algorithm": {"const": "sha256-domain-separated-uint32-v1"},
+        "domain_separator": {"const": "org.spathi.benchmarks.seed-plan.v1"},
+        "seed_plan_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "simulator_manifests",
+        "simulator_runs",
+        "simulator_replicates",
+        "inference_metadata_documents",
+        "stochastic_inference_runs",
+        "deterministic_inference_runs",
+        "scale_stress_generator_requests",
+        "scale_stress_generator_datasets",
+        "scale_stress_component_seeds",
+        "calibration_algorithm_seeds",
+        "statistical_contract_documents",
+        "statistical_root_seeds",
+        "comparison_algorithm_seeds",
+        "efficiency_algorithm_seeds",
+        "efficiency_statistical_root_seeds",
+        "efficiency_execution_order_seeds",
+        "efficiency_design_sensitivity_contracts",
+        "efficiency_safety_generation_seeds",
+        "efficiency_safety_algorithm_seeds",
+        "efficiency_safety_execution_order_seeds",
+        "scalability_algorithm_seeds",
+        "dimensional_transfer_algorithm_seeds"
+      ],
+      "properties": {
+        "simulator_manifests": {"type": "integer", "minimum": 0},
+        "simulator_runs": {"type": "integer", "minimum": 0},
+        "simulator_replicates": {"type": "integer", "minimum": 0},
+        "inference_metadata_documents": {"type": "integer", "minimum": 0},
+        "stochastic_inference_runs": {"type": "integer", "minimum": 0},
+        "deterministic_inference_runs": {"type": "integer", "minimum": 0},
+        "scale_stress_generator_requests": {"type": "integer", "minimum": 0},
+        "scale_stress_generator_datasets": {"type": "integer", "minimum": 0},
+        "scale_stress_component_seeds": {"type": "integer", "minimum": 0},
+        "calibration_algorithm_seeds": {"type": "integer", "minimum": 1},
+        "statistical_contract_documents": {"type": "integer", "minimum": 1},
+        "statistical_root_seeds": {"type": "integer", "minimum": 1},
+        "comparison_algorithm_seeds": {"type": "integer", "minimum": 1},
+        "efficiency_algorithm_seeds": {"type": "integer", "minimum": 1},
+        "efficiency_statistical_root_seeds": {"type": "integer", "minimum": 1},
+        "efficiency_execution_order_seeds": {"type": "integer", "minimum": 1},
+        "efficiency_design_sensitivity_contracts": {"const": 1},
+        "efficiency_safety_generation_seeds": {"const": 18},
+        "efficiency_safety_algorithm_seeds": {"const": 1},
+        "efficiency_safety_execution_order_seeds": {"const": 1},
+        "scalability_algorithm_seeds": {"type": "integer", "minimum": 1},
+        "dimensional_transfer_algorithm_seeds": {"const": 2}
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "audit_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "kind",
+        "content_sha256",
+        "seed_assignment_sha256",
+        "stochastic_units"
+      ],
+      "properties": {
+        "artifact_id": {"type": "string", "minLength": 1},
+        "kind": {
+          "enum": [
+            "scale_stress_generator_request",
+            "calibration_seed_contract",
+            "comparison_seed_contract",
+            "efficiency_study",
+            "efficiency_design_sensitivity_contract",
+            "efficiency_safety_seed_contract",
+            "dimensional_transfer_seed_contract",
+            "inference_run_metadata",
+            "scalability_inference_seed_contract",
+            "statistical_seed_contract",
+            "simulator_run_manifest"
+          ]
+        },
+        "content_sha256": {"$ref": "#/$defs/sha256"},
+        "seed_assignment_sha256": {"$ref": "#/$defs/sha256"},
+        "stochastic_units": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

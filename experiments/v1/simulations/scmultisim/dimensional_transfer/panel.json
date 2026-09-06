@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "id": "scmultisim_dimensional_transfer_v1",
+  "description": "Post-freeze synthetic accuracy transfer along one dimensional axis at a time, using dynamic group-specific truth and prospectively admitted endpoints under the frozen resource ceiling.",
+  "seed_plan": "experiments/v1/seeds/seed-plan.json",
+  "claim_scope": "truth_bearing_synthetic_dimensional_transfer",
+  "design": {
+    "design_shape": "two_anchors_three_one_axis_scale_contrasts_and_two_routing_controls",
+    "cell_levels": [300, 500, 10000],
+    "gene_levels": [100, 3000, 15000],
+    "tf_levels": [10, 100, 1500],
+    "edges_per_target": 2,
+    "technical_noise": "umi",
+    "dynamic_group_truth": true,
+    "target_list_supplied_to_inference": false,
+    "policy_stage": "post_efficiency_freeze",
+    "selection_feedback": false,
+    "confirmatory_ranking_eligible": false,
+    "external_comparison_use": "forbidden"
+  },
+  "conditions": [
+    {
+      "id": "g3000_tf100_c300",
+      "analysis_role": "scale_anchor",
+      "expected_group_contexts": 3,
+      "genes": 3000,
+      "transcription_factors": 100,
+      "cells": 300,
+      "group_sizes": [100, 100, 100],
+      "targets_in_regulatory_core": 1000,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf100.json",
+      "runs": {
+        "reduced": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf100-reduced-runs.json",
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf100-full-runs.json"
+      },
+      "replicates": {"reduced": 1, "full": 3}
+    },
+    {
+      "id": "g15000_tf100_c300",
+      "analysis_role": "scale_endpoint",
+      "expected_group_contexts": 3,
+      "genes": 15000,
+      "transcription_factors": 100,
+      "cells": 300,
+      "group_sizes": [100, 100, 100],
+      "targets_in_regulatory_core": 1000,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf100.json",
+      "runs": {
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g15000-tf100-full-runs.json"
+      },
+      "replicates": {"full": 1}
+    },
+    {
+      "id": "g3000_tf1500_c300",
+      "analysis_role": "scale_endpoint",
+      "expected_group_contexts": 3,
+      "genes": 3000,
+      "transcription_factors": 1500,
+      "cells": 300,
+      "group_sizes": [100, 100, 100],
+      "targets_in_regulatory_core": 1000,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf1500.json",
+      "runs": {
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g3000-tf1500-full-runs.json"
+      },
+      "replicates": {"full": 1}
+    },
+    {
+      "id": "g100_tf10_c300",
+      "analysis_role": "scale_anchor",
+      "expected_group_contexts": 3,
+      "genes": 100,
+      "transcription_factors": 10,
+      "cells": 300,
+      "group_sizes": [100, 100, 100],
+      "targets_in_regulatory_core": 50,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10.json",
+      "runs": {
+        "reduced": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-reduced-runs.json",
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-full-runs.json"
+      },
+      "replicates": {"reduced": 1, "full": 1}
+    },
+    {
+      "id": "g100_tf10_c10000",
+      "analysis_role": "scale_endpoint",
+      "expected_group_contexts": 3,
+      "genes": 100,
+      "transcription_factors": 10,
+      "cells": 10000,
+      "group_sizes": [3333, 3333, 3334],
+      "targets_in_regulatory_core": 50,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10.json",
+      "runs": {
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c10000-full-runs.json"
+      },
+      "replicates": {"full": 1}
+    },
+    {
+      "id": "g100_tf10_c500_single_group",
+      "analysis_role": "single_group_routing_control",
+      "expected_group_contexts": 1,
+      "genes": 100,
+      "transcription_factors": 10,
+      "cells": 500,
+      "group_sizes": [500],
+      "targets_in_regulatory_core": 50,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10-single-group.json",
+      "runs": {
+        "reduced": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c500-single-group-reduced-runs.json",
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c500-single-group-full-runs.json"
+      },
+      "replicates": {"reduced": 1, "full": 1}
+    },
+    {
+      "id": "g100_tf10_c300_groups_10_40_250",
+      "analysis_role": "extreme_group_imbalance_control",
+      "expected_group_contexts": 3,
+      "genes": 100,
+      "transcription_factors": 10,
+      "cells": 300,
+      "group_sizes": [10, 40, 250],
+      "targets_in_regulatory_core": 50,
+      "scenario": "experiments/v1/simulations/scmultisim/dimensional_transfer/scenario-tf10.json",
+      "runs": {
+        "reduced": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-groups-10-40-250-reduced-runs.json",
+        "full": "experiments/v1/simulations/scmultisim/dimensional_transfer/g100-tf10-c300-groups-10-40-250-full-runs.json"
+      },
+      "replicates": {"reduced": 1, "full": 1}
+    }
+  ],
+  "feasibility_basis": {
+    "resource_ceiling": {
+      "max_cores": 8,
+      "max_ram_gb": 48,
+      "serial_execution": true
+    },
+    "endpoint_admission": "The one-axis endpoints are prospectively declared, rounded engineering stress levels that change only one axis from its paired anchor. Their scheduled execution is the sole evidence: completion and attributable failure are both retained.",
+    "joint_condition_rule": "No condition combines the three scale maxima because this phase estimates separate one-axis contrasts only. The single-group and declared imbalance controls test frozen routing decisions. The scale-stress phase is the only conjunctive dimensional envelope and remains computational-only."
+  }
+}

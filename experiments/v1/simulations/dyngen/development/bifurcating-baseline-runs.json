@@ -5,7 +5,7 @@
       "run_id": "dyngen_bifurcating_baseline",
       "simulator_id": "dyngen",
       "replicates": 3,
-      "base_seed": 11201,
+      "base_seed": 1319366679,
       "native_outputs": [],
       "params": {
         "backbone_template": "bifurcating",

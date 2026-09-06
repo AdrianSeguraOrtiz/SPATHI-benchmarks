@@ -1,32 +1,42 @@
 {
   "schema_version": "1.0",
-  "andrea_commit": "d835d20b20b32f427ce682711c2f1da23a3e8ed0",
+  "andrea_commit": "2f3a5e69cb240a58a22142cc9196321e8d866c44",
+  "external_parameter_policy": {
+    "selection": "upstream_library_defaults",
+    "tuning": "none_on_benchmark_outcomes",
+    "permitted_overrides": ["caller_seed_for_reproducibility", "execution_mode_for_common_group_contract", "common_tf_candidate_input"],
+    "failure_policy": "No competitor is tuned against benchmark outcomes. Every scientific parameter equals the locked ANDREA ToolSpec default; only caller seeds and non-parameter input/execution contracts may differ. A method whose defaults cannot run on the declared panel is blocked rather than retuned."
+  },
   "entries": [
     {
       "tool_id": "aracne3",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the wrapper passes it to ARACNe3 as --seed."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "configuration_id": "aracne3_default"}],
       "reason": "Uses the common TF list and no order or regulatory prior, but its undirected output is eligible only for the exploratory topology family."
     },
     {
       "tool_id": "cespgrn",
       "disposition": "candidate",
       "tf_list_handling": "prior_information",
-      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "kernel_source=expression,prior_mode=none", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed and the wrapper passes it to G_admm_minibatch(seed=...)."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "kernel_source=expression,prior_mode=none", "role": "secondary", "status": "candidate", "configuration_id": "cespgrn_expression_no_prior", "evaluation_levels": ["topology"]}],
       "reason": "Expression-only cell networks can be aggregated by group, but the TF list is a penalty prior rather than a candidate restriction; the no-prior run belongs to the all-gene stratum."
     },
     {
       "tool_id": "clr",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "deterministic", "seed_parameter": null, "evidence": "The locked minet build.mim plus clr path exposes no seed and performs no stochastic sampling."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "configuration_id": "clr_default", "evaluation_levels": ["topology"]}],
       "reason": "Group partitioning is the only group-specific information, but CLR cannot restrict candidate regulators to tf_list."
     },
     {
       "tool_id": "dignet",
       "disposition": "blocked",
       "tf_list_handling": "not_supported",
+      "reproducibility": {"class": "uncontrolled_stochastic", "seed_parameter": null, "evidence": "Diffusion test_step is invoked without a seed; the ToolSpec exposes no seed and the integration record states that exact edges vary between runs."},
       "routes": [],
       "reason": "The catalog limits DIGNET to animal datasets; v1 simulator datasets are synthetic."
     },
@@ -34,30 +44,33 @@
       "tool_id": "genie3",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the wrapper passes it to arboreto genie3."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "configuration_id": "genie3_default"}],
       "reason": "Uses the same expression partitions and TF candidate set as SPATHI."
     },
     {
       "tool_id": "grnboost2",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the wrapper passes it to arboreto grnboost2."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "configuration_id": "grnboost2_default"}],
       "reason": "Uses the same expression partitions and TF candidate set as SPATHI."
     },
     {
       "tool_id": "infercsn",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the R wrapper passes it to inferCSN/L0Learn."},
       "routes": [
-        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "sift_method=none,tf_list", "role": "primary", "status": "candidate"},
-        {"regime": "pseudotime_aware", "execution_mode": "group_emulated", "variant": "sift_method=entropy", "role": "secondary", "status": "candidate"}
+        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "upstream default (sift_method=none),tf_list", "role": "primary", "status": "candidate", "configuration_id": "infercsn_none"}
       ],
-      "reason": "Provides a clean no-pseudotime control paired with a pseudotime-aware variant."
+      "reason": "The integrated CRAN core accepts the common TF candidate list and runs once per ANDREA-managed group. Its default sift_method=none route is reproducible and consumes no pseudotime."
     },
     {
       "tool_id": "inferelator3",
       "disposition": "assisted_only",
       "tf_list_handling": "candidate_restriction",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed and the wrapper passes it to the Inferelator workflow."},
       "routes": [{"regime": "prior_assisted", "execution_mode": "group_native", "variant": "required prior_grn", "role": "assisted", "status": "candidate"}],
       "reason": "The catalog contract always requires a regulatory prior."
     },
@@ -65,22 +78,25 @@
       "tool_id": "kscreni",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "fixed_internal_seed", "seed_parameter": null, "evidence": "The wrapper executes set.seed(100) immediately before every per-cell GENIE3 call and exposes no caller seed."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "configuration_id": "kscreni_default_fixed_seed_100", "evaluation_levels": ["directed", "topology"]}],
       "reason": "Cell-level results are aggregated using only group labels, but kSReCNI cannot restrict candidate regulators to tf_list."
     },
     {
       "tool_id": "lioness",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "deterministic", "seed_parameter": null, "evidence": "The locked Pearson-correlation LIONESS path exposes no seed and performs no stochastic sampling."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate", "configuration_id": "lioness_default", "evaluation_levels": ["topology"]}],
       "reason": "Cell-level results are aggregated using only group labels, but LIONESS cannot restrict candidate regulators to tf_list."
     },
     {
       "tool_id": "metasem",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed; the wrapper seeds Python, NumPy and PyTorch before training."},
       "routes": [
-        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=unlabeled_all_genes", "role": "secondary", "status": "candidate"},
+        {"regime": "group_only", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=unlabeled_all_genes", "role": "secondary", "status": "candidate", "configuration_id": "metasem_unlabeled_all_genes", "evaluation_levels": ["directed", "topology"]},
         {"regime": "prior_assisted", "execution_mode": "group_emulated", "variant": "pseudo_grn_mode=provided_prior", "role": "assisted", "status": "candidate"}
       ],
       "reason": "Its expression-only and provided-prior modes must be reported separately."
@@ -89,6 +105,7 @@
       "tool_id": "miniex3",
       "disposition": "blocked",
       "tf_list_handling": "candidate_restriction",
+      "reproducibility": {"class": "fixed_internal_seed", "seed_parameter": null, "evidence": "The locked MINI-EX GRNBoost worker fixes seed=777 for every infer_partial_network call and exposes no caller seed."},
       "routes": [],
       "reason": "The catalog limits MINI-EX to plants and it requires marker/identity inputs outside the primary information set."
     },
@@ -96,13 +113,15 @@
       "tool_id": "pidc",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "deterministic", "seed_parameter": null, "evidence": "The locked NetworkInference.jl PIDC path exposes no seed and its discretization and information calculations do not sample."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "configuration_id": "pidc_default", "evaluation_levels": ["topology"]}],
       "reason": "Group partitioning is the only group-specific information, but PIDC cannot restrict candidate regulators to tf_list."
     },
     {
       "tool_id": "planet",
       "disposition": "blocked",
       "tf_list_handling": "not_supported",
+      "reproducibility": {"class": "uncontrolled_stochastic", "seed_parameter": null, "evidence": "The diffusion test path is invoked without its internal seed argument and the ToolSpec exposes no caller seed."},
       "routes": [],
       "reason": "The catalog limits PlaNet to animal datasets; v1 simulator datasets are synthetic."
     },
@@ -110,48 +129,55 @@
       "tool_id": "ppcor",
       "disposition": "candidate",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
+      "reproducibility": {"class": "deterministic", "seed_parameter": null, "evidence": "The locked ppcor matrix calculation exposes no seed and performs no stochastic sampling."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate", "configuration_id": "ppcor_default", "evaluation_levels": ["topology"]}],
       "reason": "Group partitioning is the only group-specific information, but PPCOR cannot restrict candidate regulators to tf_list."
     },
     {
       "tool_id": "pyscenic",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
-      "reason": "Consumes the common TF list without lineage or regulatory priors."
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the wrapper passes it to pyscenic grn --seed."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "grn_only,tf_list", "role": "implementation_sensitivity", "status": "candidate", "configuration_id": "pyscenic_default"}],
+      "reason": "The executed pySCENIC GRN step delegates to GRNBoost2. It remains runnable only as a dedicated implementation sensitivity and is excluded from the main Friedman family to avoid double-counting one algorithm."
     },
     {
       "tool_id": "scgenerai",
-      "disposition": "candidate",
+      "disposition": "blocked",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_aggregated", "variant": "default", "role": "secondary", "status": "candidate"}],
-      "reason": "Cell-level results are aggregated using only group labels, but scGeneRAI cannot restrict candidate regulators to tf_list."
+      "reproducibility": {"class": "uncontrolled_stochastic", "seed_parameter": null, "evidence": "The locked source fixes only torch.manual_seed(0), while DatasetSimple draws masks with unseeded numpy.random and the ToolSpec exposes no seed."},
+      "routes": [],
+      "reason": "The locked source draws training masks with unseeded NumPy randomness; its ToolSpec exposes no seed, so exact inference cannot be reproduced in v1."
     },
     {
       "tool_id": "scing",
-      "disposition": "candidate",
+      "disposition": "blocked",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
-      "reason": "Group partitioning is the only group-specific information, but SCING cannot restrict candidate regulators to tf_list."
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed and each SCING subsampled network receives random_seed plus its index."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "upstream defaults", "role": "secondary", "status": "blocked"}],
+      "reason": "SCING cannot restrict candidate regulators to tf_list, and its locked upstream defaults are dimensionally invalid for part of the declared v1 panel. The method is blocked rather than retuned."
     },
     {
       "tool_id": "scminer",
-      "disposition": "candidate",
-      "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "driver_source=custom_tf_list", "role": "primary", "status": "candidate"}],
-      "reason": "The custom TF-list variant avoids a species-specific built-in regulator set."
+      "disposition": "blocked",
+      "tf_list_handling": "not_supported",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed and the R wrapper calls set.seed before inference."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "upstream default driver_source=built_in_tf_sig", "role": "secondary", "status": "blocked"}],
+      "reason": "Synthetic gene identifiers do not overlap scMINER's human/mouse built-in driver resources. Selecting custom_tf_list would change a scientific ToolSpec parameter, so scMINER is blocked rather than retuned."
     },
     {
       "tool_id": "scmtni",
       "disposition": "blocked",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "order_aware", "execution_mode": "group_native", "variant": "indep=false,q=0 with non-truth lineage rates", "role": "secondary", "status": "blocked"}],
-      "reason": "Native simulator lineage gain/loss rates are derived from true GRNs; a neutral non-leaky lineage encoding must be designed and fingerprinted first."
+      "reproducibility": {"class": "deterministic", "seed_parameter": null, "evidence": "The locked wrapper and public executable expose no RNG or sampling path."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_native", "variant": "indep=true,q=0 on multigroup datasets", "role": "secondary", "status": "blocked"}, {"regime": "order_aware", "execution_mode": "group_native", "variant": "indep=false,q=0 with non-truth lineage rates", "role": "secondary", "status": "blocked"}],
+      "reason": "indep=true group_native passes preflight but the wrapper rejects more than one cluster, while group_emulated is not a supported execution mode. The lineage-aware route additionally needs a neutral non-leaky lineage encoding."
     },
     {
       "tool_id": "scregulate",
       "disposition": "assisted_only",
       "tf_list_handling": "not_supported",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_state", "evidence": "ToolSpec exposes random_state; the wrapper seeds Python, NumPy and PyTorch before inference."},
       "routes": [
         {"regime": "prior_assisted", "execution_mode": "group_native", "variant": "prior_source=provided_prior", "role": "assisted", "status": "candidate"}
       ],
@@ -159,26 +185,29 @@
     },
     {
       "tool_id": "scsgl",
-      "disposition": "candidate",
+      "disposition": "blocked",
       "tf_list_handling": "not_supported",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "default", "role": "secondary", "status": "candidate"}],
-      "reason": "Group partitioning is the only group-specific information, but scSGL cannot restrict candidate regulators to tf_list."
+      "reproducibility": {"class": "uncontrolled_stochastic", "seed_parameter": null, "evidence": "The density search calls unsigned.learn_ladmm, which initializes from numpy.random.default_rng() without a seed; ToolSpec exposes no seed."},
+      "routes": [],
+      "reason": "The required density search uses an unseeded NumPy generator and the ToolSpec exposes no seed, so exact inference cannot be reproduced in v1."
     },
     {
       "tool_id": "simic",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "random_seed", "evidence": "ToolSpec exposes random_seed; the wrapper seeds Python and NumPy before the split and random coordinate descent."},
       "routes": [
-        {"regime": "order_aware", "execution_mode": "group_native", "variant": "similarity=false", "role": "secondary", "status": "candidate"},
-        {"regime": "order_aware", "execution_mode": "group_native", "variant": "similarity=true", "role": "secondary", "status": "candidate"}
+        {"regime": "order_aware", "execution_mode": "group_native", "variant": "upstream default (similarity=true)", "role": "secondary", "status": "candidate", "configuration_id": "simic_default"},
+        {"regime": "order_aware", "execution_mode": "group_native", "variant": "similarity=true with a fingerprinted permuted-order dataset view", "role": "secondary", "status": "blocked"}
       ],
-      "reason": "Both variants consume ordered column phenotypes."
+      "reason": "The upstream-default observed-order route is executable. The non-default similarity=false variant is not run. The negative-control permutation is blocked because SimiC reads order from column_phenotypes.tsv; mutating that dataset extra changes the ANDREA dataset fingerprint and requires first-class derived-view support."
     },
     {
       "tool_id": "tigress",
       "disposition": "candidate",
       "tf_list_handling": "candidate_restriction",
-      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate"}],
+      "reproducibility": {"class": "caller_seeded", "seed_parameter": "seed", "evidence": "ToolSpec exposes seed and the R wrapper calls set.seed before TIGRESS."},
+      "routes": [{"regime": "group_only", "execution_mode": "group_emulated", "variant": "tf_list", "role": "primary", "status": "candidate", "configuration_id": "tigress_default"}],
       "reason": "Group partitioning is the only group-specific information."
     }
   ]
