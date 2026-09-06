@@ -5,6 +5,14 @@
       "tag": "adriansegura99/inference-tools_aracne3:1.0.0",
       "repo_digest": "adriansegura99/inference-tools_aracne3@sha256:3532b6dee5b4da7efb960c65a7c658f15d4071845b55cdc8229c011522a23640"
     },
+    "tool:cespgrn": {
+      "tag": "adriansegura99/inference-tools_cespgrn:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_cespgrn@sha256:ea78e096511d1134dd50076b97054da2ebf83f12e935d798d5decbd89d8a5687"
+    },
+    "tool:clr": {
+      "tag": "adriansegura99/inference-tools_clr:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_clr@sha256:6a9e729a843c69d341123c48252909bb4973cd2e6462c060ca668a9af561de6f"
+    },
     "simulator:boolode": {
       "tag": "adriansegura99/simulator_boolode:1.0.0",
       "repo_digest": "adriansegura99/simulator_boolode@sha256:4b9aaae29460e3e0805f34f3cff1ba363188679347b10346abb48425826a4d1f"
@@ -37,6 +45,26 @@
       "tag": "adriansegura99/inference-tools_infercsn:1.0.0",
       "repo_digest": "adriansegura99/inference-tools_infercsn@sha256:2f3b5c864fd876205d3812e38917349ceb32554f3c2ea198bad3e4833b1d6552"
     },
+    "tool:kscreni": {
+      "tag": "adriansegura99/inference-tools_kscreni:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_kscreni@sha256:bcab1a3e31c6fc87ca7b4879615ff92cf519f6346aab30d6fc9700478c181b9e"
+    },
+    "tool:lioness": {
+      "tag": "adriansegura99/inference-tools_lioness:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_lioness@sha256:ee548edf9da21857d8be0fa3619a528d71dbbc4a290af49cd64795961ba4315c"
+    },
+    "tool:metasem": {
+      "tag": "adriansegura99/inference-tools_metasem:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_metasem@sha256:535c00c87a035df0ff1dc03e82162ad443b02ced00a77a7250673690ce31d4f0"
+    },
+    "tool:pidc": {
+      "tag": "adriansegura99/inference-tools_pidc:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_pidc@sha256:62c6647be5670454a0e28e6943620e0529181f88b90b582d1687b10480861d2a"
+    },
+    "tool:ppcor": {
+      "tag": "adriansegura99/inference-tools_ppcor:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_ppcor@sha256:79eabbdf0f81974df5aec846676e60b374c9e01e0d6cd0f287bbbe6f0282a469"
+    },
     "tool:pyscenic": {
       "tag": "adriansegura99/inference-tools_pyscenic:1.0.0",
       "repo_digest": "adriansegura99/inference-tools_pyscenic@sha256:6dbae891a11d78f057fe17b7eb45e456ac1249bdac2964d78bcc528d52aaa3a4"
@@ -44,6 +72,10 @@
     "tool:scminer": {
       "tag": "adriansegura99/inference-tools_scminer:1.0.0",
       "repo_digest": "adriansegura99/inference-tools_scminer@sha256:37abb550697aabe8dc7b3196df7adade35c92554c408036696e61a9d205c04f8"
+    },
+    "tool:scing": {
+      "tag": "adriansegura99/inference-tools_scing:1.0.0",
+      "repo_digest": "adriansegura99/inference-tools_scing@sha256:b568a8fb8dbff0e255ff74ee2366624c80f654a5b0a757ee9d29c3ad446b468e"
     },
     "tool:simic": {
       "tag": "adriansegura99/inference-tools_simic:1.0.0",
@@ -56,14 +88,14 @@
   },
   "images": {
     "spathi": {
-      "tag": "spathi-benchmarks/spathi:043a65d2",
+      "tag": "spathi-benchmarks/spathi:aae7d580",
       "base_image": "python:3.13-slim@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f",
       "source_repository": "spathi",
-      "source_commit": "043a65d20192436ad81065f9e9e04c9b209d456b",
+      "source_commit": "aae7d580aba3c05c1e2b41d7661043380b9360e7",
       "build_inputs": {
-        "containers/spathi/Dockerfile": "1b56b8c00925bf9ddbb4cd78a7f9def30c894620b2f9e6a3ddf3b45bfc93c1dc",
+        "containers/spathi/Dockerfile": "f6cc00195f66a62399363308f6a55762c5f524bda40a121169c2bcfabde00f19",
         "containers/spathi/constraints.txt": "126c6303c0e86c1d4ebee6c96dfbaf9d0d154181e447e779ece7c9779d4581da",
-        "containers/spathi/run_tool.py": "42f399058550f9a95c6f6257ef027f0ed349ccb15189d04f564528a75829ed07"
+        "containers/spathi/run_tool.py": "1c72b7f440d91eb5e2868da55f3276e313ee1770fc04b948b61156ec581f06bb"
       },
       "python_dependencies": {
         "joblib": "1.5.3",

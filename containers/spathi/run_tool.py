@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import os
 import shutil
@@ -14,6 +15,11 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Any
 
 EXPECTED_NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
+AUDIT_SIDECARS = (
+    "target_eligibility.tsv.gz",
+    "model_diagnostics.tsv.gz",
+    "run_metadata.json",
+)
 _PHASE_PERCENT = {
     "validating_inputs": 10,
     "building_representation": 15,
@@ -26,26 +32,14 @@ _PHASE_PERCENT = {
     "publishing": 96,
     "complete": 98,
 }
-ALLOWED_PARAMS = {
-    "bandwidth",
-    "bootstrap",
-    "distance_metric",
-    "distance_space",
-    "distance_standardization",
-    "group_size_correction",
-    "kernel",
-    "max_depth",
-    "max_features",
-    "min_samples_leaf",
-    "n_components",
-    "n_estimators",
-    "pca_svd_solver",
-    "random_seed",
-    "tree_method",
-    "weight_mode",
-}
 REQUIRED_PARAMS = {
+    "adaptive_min_estimators",
+    "adaptive_patience",
+    "adaptive_tolerance",
+    "adaptive_tree_step",
+    "adaptive_trees",
     "bandwidth",
+    "bandwidth_scale",
     "distance_metric",
     "distance_space",
     "distance_standardization",
@@ -53,15 +47,21 @@ REQUIRED_PARAMS = {
     "kernel",
     "max_depth",
     "max_features",
+    "min_target_detected_cells",
+    "min_target_detected_fraction",
+    "min_target_weighted_detected_fraction",
+    "min_target_weighted_detected_ess",
     "min_samples_leaf",
     "n_components",
     "n_estimators",
     "pca_svd_solver",
     "bootstrap",
     "random_seed",
+    "target_eligibility",
     "tree_method",
     "weight_mode",
 }
+MODEL_PARAMS = REQUIRED_PARAMS - {"random_seed"}
 
 
 def _positive_int(raw: str) -> int:
@@ -102,8 +102,7 @@ def _write_progress(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     target = output_dir / "progress.json"
-    temporary = output_dir / ".progress.json.tmp"
-    temporary.write_text(
+    content = (
         json.dumps(
             {
                 "percent": percent,
@@ -115,10 +114,27 @@ def _write_progress(
             indent=2,
             sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
-    os.replace(temporary, target)
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            prefix=".progress.json.",
+            suffix=".tmp",
+            dir=output_dir,
+            encoding="utf-8",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _progress_callback(output_dir: Path) -> Callable[[Any], None]:
@@ -131,8 +147,9 @@ def _progress_callback(output_dir: Path) -> Callable[[Any], None]:
         nonlocal last_percent, last_signature
         phase = str(event.phase)
         candidate = _PHASE_PERCENT.get(phase, last_percent)
-        if phase == "model_inference" and event.model_fraction is not None:
-            candidate = 35 + int(55 * float(event.model_fraction))
+        if phase == "model_inference" and event.total_models:
+            model_fraction = float(event.completed_models) / float(event.total_models)
+            candidate = 35 + int(55 * model_fraction)
         percent = max(last_percent, min(98, candidate))
         signature = (percent, phase)
         if signature == last_signature:
@@ -170,15 +187,86 @@ def _validate_files(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     return tf_list, groups, execution
 
 
-def _validated_params(path: Path) -> dict[str, Any]:
-    params = _load_json_object(path, "params")
-    unknown = sorted(set(params) - ALLOWED_PARAMS)
+def _group_count(path: Path) -> int:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if reader.fieldnames is None or "cluster" not in reader.fieldnames:
+            raise ValueError("groups.tsv must contain a cluster column")
+        groups = {str(row.get("cluster", "")).strip() for row in reader}
+    groups.discard("")
+    if not groups:
+        raise ValueError("groups.tsv contains no non-empty group labels")
+    return len(groups)
+
+
+def _validated_scalar_params(params: dict[str, Any]) -> dict[str, Any]:
+    unknown = sorted(set(params) - REQUIRED_PARAMS)
     if unknown:
         raise ValueError(f"unsupported SPATHI parameters: {', '.join(unknown)}")
     missing = sorted(REQUIRED_PARAMS - set(params))
     if missing:
         raise ValueError(f"missing frozen SPATHI parameters: {', '.join(missing)}")
     return params
+
+
+def _resolve_group_policy(params: dict[str, Any], *, group_count: int) -> dict[str, Any]:
+    if set(params) != {"group_policy", "random_seed"}:
+        raise ValueError(
+            "a conditional SPATHI request must contain exactly group_policy and random_seed"
+        )
+    policy = params["group_policy"]
+    if not isinstance(policy, dict) or set(policy) != {
+        "routing_parameter",
+        "shared_parameters",
+        "branches",
+    }:
+        raise ValueError("group_policy has missing or unsupported fields")
+    if policy["routing_parameter"] != "group_count":
+        raise ValueError("group_policy.routing_parameter must be 'group_count'")
+    branches = policy["branches"]
+    if not isinstance(branches, dict) or set(branches) != {"single_group", "multi_group"}:
+        raise ValueError("group_policy must define exactly single_group and multi_group branches")
+    for candidate_id, expected_condition in (
+        ("single_group", {"minimum_group_count": 1, "maximum_group_count": 1}),
+        ("multi_group", {"minimum_group_count": 2}),
+    ):
+        candidate = branches[candidate_id]
+        if not isinstance(candidate, dict) or set(candidate) != {"condition", "parameters"}:
+            raise ValueError(f"group_policy.{candidate_id} has an invalid contract")
+        if candidate["condition"] != expected_condition:
+            raise ValueError(f"group_policy.{candidate_id}.condition is not canonical")
+        if (
+            not isinstance(candidate["parameters"], dict)
+            or set(candidate["parameters"]) != MODEL_PARAMS
+        ):
+            raise ValueError(
+                f"group_policy.{candidate_id}.parameters is not a complete SPATHI model"
+            )
+    branch_id = "single_group" if group_count == 1 else "multi_group"
+    branch = branches[branch_id]
+    branch_params = branch["parameters"]
+    other_branch = branches["multi_group" if branch_id == "single_group" else "single_group"]
+    shared = policy["shared_parameters"]
+    if (
+        not isinstance(shared, list)
+        or len(shared) != len(set(shared))
+        or set(shared) != MODEL_PARAMS - {"weight_mode", "distance_metric", "group_size_correction"}
+    ):
+        raise ValueError("group_policy.shared_parameters does not match the conditional contract")
+    other_params = other_branch["parameters"]
+    if any(other_params.get(name) != branch_params[name] for name in shared):
+        raise ValueError("group_policy branches differ in a declared shared parameter")
+    resolved = {**branch_params, "random_seed": params["random_seed"]}
+    return _validated_scalar_params(resolved)
+
+
+def _validated_params(path: Path, *, group_count: int | None = None) -> dict[str, Any]:
+    params = _load_json_object(path, "params")
+    if "group_policy" in params:
+        if group_count is None:
+            raise ValueError("group_count is required to resolve a conditional SPATHI policy")
+        return _resolve_group_policy(params, group_count=group_count)
+    return _validated_scalar_params(params)
 
 
 def _validate_execution(path: Path) -> None:
@@ -199,14 +287,61 @@ def _validate_network_header(path: Path) -> None:
         )
 
 
+def _validate_audit_sidecars(output_dir: Path) -> dict[str, Path]:
+    paths = {name: output_dir / name for name in AUDIT_SIDECARS}
+    missing = sorted(name for name, path in paths.items() if not path.is_file())
+    if missing:
+        raise RuntimeError(
+            "SPATHI completed without required audit sidecars: " + ", ".join(missing)
+        )
+    for name in ("target_eligibility.tsv.gz", "model_diagnostics.tsv.gz"):
+        try:
+            with gzip.open(paths[name], "rt", encoding="utf-8", newline="") as handle:
+                if next(csv.reader(handle), None) is None:
+                    raise RuntimeError(f"SPATHI audit sidecar is empty: {name}")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RuntimeError(f"Cannot read SPATHI audit sidecar {name}: {exc}") from exc
+    metadata = _load_json_object(paths["run_metadata.json"], "SPATHI run metadata")
+    if metadata.get("status") != "complete":
+        raise RuntimeError("SPATHI run_metadata.json does not describe a complete run")
+    return paths
+
+
+def _stage_outputs(
+    output_dir: Path,
+    sources: dict[str, Path],
+) -> dict[str, Path]:
+    staged: dict[str, Path] = {}
+    try:
+        for name, source in sources.items():
+            with NamedTemporaryFile(
+                prefix=f".{name}.",
+                suffix=".tmp",
+                dir=output_dir,
+                delete=False,
+            ) as temporary_handle:
+                temporary = Path(temporary_handle.name)
+            staged[name] = temporary
+            shutil.copyfile(source, temporary)
+            temporary.chmod(0o644)
+    except BaseException:
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
+        raise
+    return staged
+
+
 def run(args: argparse.Namespace) -> None:
     tf_list, groups, execution_path = _validate_files(args)
-    params = _validated_params(args.params)
+    params = _validated_params(args.params, group_count=_group_count(groups))
     _validate_execution(execution_path)
 
-    published_network = args.output_dir / "network.csv"
-    if published_network.exists():
-        raise FileExistsError("SPATHI adapter refuses to overwrite prior outputs")
+    published = {name: args.output_dir / name for name in ("network.csv", *AUDIT_SIDECARS)}
+    existing = sorted(name for name, path in published.items() if path.exists())
+    if existing:
+        raise FileExistsError(
+            "SPATHI adapter refuses to overwrite prior outputs: " + ", ".join(existing)
+        )
 
     _write_progress(
         args.output_dir,
@@ -218,7 +353,7 @@ def run(args: argparse.Namespace) -> None:
 
     from spathi import SpathiConfig, infer
 
-    temporary_network: Path | None = None
+    staged: dict[str, Path] = {}
     try:
         with TemporaryDirectory(prefix="spathi-adapter-") as scratch_name:
             config = SpathiConfig(
@@ -236,25 +371,25 @@ def run(args: argparse.Namespace) -> None:
                 checkpoint=False,
             )
             _validate_network_header(result.network_path)
-            with NamedTemporaryFile(
-                prefix=".network.",
-                suffix=".tmp",
-                dir=args.output_dir,
-                delete=False,
-            ) as temporary_handle:
-                temporary_network = Path(temporary_handle.name)
-            shutil.copyfile(result.network_path, temporary_network)
-            temporary_network.chmod(0o644)
-        os.replace(temporary_network, published_network)
+            sidecars = _validate_audit_sidecars(config.output_dir)
+            staged = _stage_outputs(
+                args.output_dir,
+                {"network.csv": result.network_path, **sidecars},
+            )
+        # Sidecars become visible first and network.csv is the commit marker used by
+        # ANDREA. A failed publication can therefore never expose a successful
+        # inference result without all of its audit evidence.
+        for name in (*AUDIT_SIDECARS, "network.csv"):
+            os.replace(staged.pop(name), published[name])
     finally:
-        if temporary_network is not None:
-            temporary_network.unlink(missing_ok=True)
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
     _write_progress(
         args.output_dir,
         percent=100,
         status="completed",
         phase="done",
-        message="Published ANDREA-compatible network.csv",
+        message="Published ANDREA-compatible network.csv and SPATHI audit sidecars",
         warnings=result.warnings,
     )
 
