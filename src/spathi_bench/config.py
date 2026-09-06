@@ -614,6 +614,15 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         if batch["kind"] == "spathi" and custom_ids != requested_ids:
             raise BenchmarkConfigError(f"SPATHI batch {batch['id']} must contain only custom tools")
         metadata_roles = {str(item["selection_role"]) for item in metadata["runs"]}
+        is_calibration_batch = (
+            profile["purpose"] in {"calibration", "selection"} and batch["kind"] == "spathi"
+        )
+        if not is_calibration_batch and any(
+            item.get("configuration_sha256") is not None for item in metadata["runs"]
+        ):
+            raise BenchmarkConfigError(
+                f"Only calibration batches may declare logical configuration digests: {batch['id']}"
+            )
         if batch["kind"] == "baseline" and metadata_roles != {"baseline"}:
             raise BenchmarkConfigError(
                 f"Baseline batch {batch['id']} must use selection_role=baseline"
@@ -700,7 +709,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                     raise BenchmarkConfigError(
                         f"Dimensional diagnostic batch {batch['id']} differs from the exact policy"
                     )
-        if profile["purpose"] in {"calibration", "selection"} and batch["kind"] == "spathi":
+        if is_calibration_batch:
             raw_manifest = batch.get("calibration_manifest")
             if not isinstance(raw_manifest, str):
                 raise BenchmarkConfigError(
@@ -725,7 +734,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 repo_root / "experiments/v1/spathi/search-space.json",
                 "SPATHI search space",
             )
-            candidates, manifest_runs = validate_calibration_manifest(
+            _, manifest_runs = validate_calibration_manifest(
                 repo_root,
                 search,
                 manifest,
@@ -752,20 +761,19 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest run IDs differ from its request"
                 )
-            candidate_digests = {
-                candidate.configuration_id: candidate.configuration_sha256
-                for candidate in candidates
-            }
+            canonical_runs = {run.run_id: run for run in manifest_runs}
             for item in metadata["runs"]:
                 run_id = str(item["run_id"])
                 configuration_id = str(item["configuration_id"])
-                params = dict(params_by_run[run_id])
-                seed_parameter = item["algorithm_seed_parameter"]
-                if seed_parameter is not None:
-                    params.pop(seed_parameter)
-                if candidate_digests.get(configuration_id) != canonical_json_sha256(params):
+                canonical_run = canonical_runs[run_id]
+                if (
+                    configuration_id != canonical_run.configuration_id
+                    or item.get("configuration_sha256") != canonical_run.configuration_sha256
+                    or item["algorithm_seed"] != canonical_run.algorithm_seed
+                    or params_by_run[run_id] != dict(canonical_run.parameters)
+                ):
                     raise BenchmarkConfigError(
-                        f"{batch['id']} run {run_id!r} differs from its calibration candidate"
+                        f"{batch['id']} run {run_id!r} differs from its canonical calibration run"
                     )
 
     from .algorithm_seed_contract import algorithm_seeds_by_configuration

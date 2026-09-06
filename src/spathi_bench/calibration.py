@@ -1096,6 +1096,7 @@ def build_andrea_requests(
             {
                 "run_id": run.run_id,
                 "configuration_id": run.configuration_id,
+                "configuration_sha256": run.configuration_sha256,
                 "selection_role": "base"
                 if run.configuration_id.endswith("__base")
                 else "candidate",
@@ -1446,6 +1447,30 @@ def validate_ranking_artifact(
     return recomputed_scores
 
 
+def _validate_canonical_parent_expansion(
+    search_space: Mapping[str, Any],
+    stage_id: str,
+    selected_parents: Sequence[CandidateConfiguration],
+    current_candidates: Sequence[CandidateConfiguration],
+) -> None:
+    expected_candidates = expand_stage_candidates(
+        search_space,
+        stage_id,
+        parents=selected_parents,
+    )
+    expected_by_id = {
+        candidate.configuration_id: candidate_to_dict(candidate)
+        for candidate in expected_candidates
+    }
+    observed_by_id = {
+        candidate.configuration_id: candidate_to_dict(candidate) for candidate in current_candidates
+    }
+    if observed_by_id != expected_by_id:
+        raise CalibrationError(
+            f"{stage_id.capitalize()} ranking candidates differ from the canonical parent expansion"
+        )
+
+
 def validate_ranking_chain(
     repo_root: Path,
     search_space: Mapping[str, Any],
@@ -1523,14 +1548,12 @@ def validate_ranking_chain(
                 "Validation ranking finalists differ from the convergence shortlist"
             )
     else:
-        expected_parent_ids = {candidate.configuration_id for candidate in selected_parents}
-        observed_parent_ids = {
-            candidate.parent_configuration_id for candidate in current_candidates
-        }
-        if observed_parent_ids != expected_parent_ids:
-            raise CalibrationError(
-                f"{stage_id.capitalize()} ranking parents differ from the preceding shortlist"
-            )
+        _validate_canonical_parent_expansion(
+            search_space,
+            stage_id,
+            selected_parents,
+            current_candidates,
+        )
     return scores
 
 

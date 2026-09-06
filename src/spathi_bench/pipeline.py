@@ -1361,7 +1361,18 @@ def _parameter_hashes(run: dict[str, Any], metadata: dict[str, Any]) -> tuple[st
                 f"Inference run {run.get('run_id')!r} does not match its declared algorithm seed"
             )
         del configuration[seed_parameter]
-    return canonical_json_sha256(configuration), canonical_json_sha256(params)
+    configuration_sha256 = canonical_json_sha256(configuration)
+    declared_configuration_sha256 = metadata.get("configuration_sha256")
+    if declared_configuration_sha256 is not None:
+        if (
+            not isinstance(declared_configuration_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", declared_configuration_sha256) is None
+        ):
+            raise BenchmarkConfigError(
+                f"Inference run {run.get('run_id')!r} has an invalid logical configuration digest"
+            )
+        configuration_sha256 = declared_configuration_sha256
+    return configuration_sha256, canonical_json_sha256(params)
 
 
 def _log_token(value: Any) -> str:

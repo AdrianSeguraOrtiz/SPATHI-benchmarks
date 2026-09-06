@@ -373,9 +373,9 @@ Reduced datasets are not prefixes or reused subsets of full datasets.
 
 | Phase | `reduced` | `full` |
 | --- | --- | --- |
-| Ordinary calibration development stages | 5 datasets, 2 algorithmic seeds per stage | 15 datasets, 5 algorithmic seeds per stage |
+| Ordinary calibration development panel | 8 datasets, 2 algorithmic seeds per stage (geometry uses 7) | 24 datasets, 5 algorithmic seeds per stage (geometry uses 21) |
 | Calibration estimator scale-transfer | 1 dataset, 2 algorithmic seeds | 3 datasets, 3 algorithmic seeds |
-| Calibration validation | 5 datasets, 2 algorithmic seeds | 15 datasets, 5 algorithmic seeds |
+| Calibration validation | 8 datasets, 2 algorithmic seeds | 24 datasets, 5 algorithmic seeds |
 | Efficiency validation | 5 datasets, 2 algorithmic seeds | 25 datasets (5 per stratum), 5 algorithmic seeds |
 | Pre-freeze efficiency safety | not run | 18 datasets (3 in each of 6 conditions), 1 common paired algorithm seed |
 | Dimensional transfer | 4 moderate/routing conditions, 1 dataset each; 1 algorithmic seed; no scale contrasts | 7 conditions; 3 datasets for the 3,000-gene anchor and 1 for each other condition; 1 algorithmic seed |

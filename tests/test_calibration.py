@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 from spathi_bench.calibration import (
     CalibrationError,
     CandidateConfiguration,
+    _validate_canonical_parent_expansion,
     build_andrea_requests,
     build_stage_profile,
     expand_stage_candidates,
@@ -23,6 +25,13 @@ from spathi_bench.calibration import (
     stage_profile_id,
     validate_calibration_panel,
 )
+from spathi_bench.calibration_materialization import materialize_calibration_stage
+from spathi_bench.config import (
+    BenchmarkConfigError,
+    load_json_object,
+    validate_profile_references,
+)
+from spathi_bench.pipeline import _parameter_hashes
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +44,15 @@ def _candidate_by_variant(
 
 def _seeds(search: dict[str, Any], budget: str, stage: str) -> tuple[int, ...]:
     return tuple(search["calibration_budgets"][budget]["algorithmic_seeds"][stage])
+
+
+def _copy_calibration_repository(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    for directory in ("schemas", "experiments"):
+        shutil.copytree(REPO_ROOT / directory, repo / directory)
+    for filename in ("images.lock.json", "repos.lock.json"):
+        shutil.copyfile(REPO_ROOT / filename, repo / filename)
+    return repo
 
 
 def _summary_rows(
@@ -242,7 +260,60 @@ def test_geometry_expansion_and_requests_are_deterministic_and_policy_aware() ->
     )
     assert len(tools["runs"]) == len(custom["tools"]) == len(metadata["runs"]) == len(runs)
     assert tools["runs"][0]["params"] == runs[0].parameters
+    assert metadata["runs"][0]["configuration_sha256"] == runs[0].configuration_sha256
     assert metadata["runs"][0]["selection_role"] == "base"
+
+
+def test_materialized_geometry_profile_validates_the_complete_canonical_run(
+    tmp_path: Path,
+) -> None:
+    repo = _copy_calibration_repository(tmp_path)
+    bundle = repo / "work/calibration/reduced/geometry/requests"
+    profile_path = repo / "work/calibration/reduced/geometry/profile.json"
+    materialize_calibration_stage(
+        repo_root=repo,
+        stage_id="geometry",
+        calibration_budget="reduced",
+        parent_ranking_path=None,
+        output_dir=bundle,
+        profile_output=profile_path,
+    )
+    profile = load_json_object(profile_path, "materialized geometry profile")
+
+    validate_profile_references(repo, profile)
+
+    tools_path = bundle / "tools-params.json"
+    tools = load_json_object(tools_path, "materialized geometry requests")
+    metadata_path = bundle / "run-metadata.json"
+    metadata = load_json_object(metadata_path, "materialized run metadata")
+    manifest = load_json_object(bundle / "calibration-manifest.json", "calibration manifest")
+    assert _parameter_hashes(tools["runs"][0], metadata["runs"][0]) == (
+        manifest["runs"][0]["configuration_sha256"],
+        manifest["runs"][0]["execution_sha256"],
+    )
+
+    metadata["runs"][0]["configuration_sha256"] = "f" * 64
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(BenchmarkConfigError, match="canonical calibration run"):
+        validate_profile_references(repo, profile)
+    metadata["runs"][0]["configuration_sha256"] = manifest["runs"][0]["configuration_sha256"]
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    tools["runs"][0]["params"]["group_policy"]["branches"]["single_group"]["parameters"][
+        "n_components"
+    ] += 1
+    tools_path.write_text(
+        json.dumps(tools, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(BenchmarkConfigError, match="differs from its canonical calibration run"):
+        validate_profile_references(repo, profile)
 
 
 def test_reduced_and_full_algorithmic_seed_domains_are_disjoint() -> None:
@@ -335,6 +406,45 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
         750,
         1000,
     }
+
+
+def test_scale_transfer_deduplicates_equivalent_parent_expansions() -> None:
+    search = load_search_space(REPO_ROOT)
+    geometry = expand_stage_candidates(search, "geometry")[0]
+    estimator = next(
+        candidate
+        for candidate in expand_stage_candidates(search, "estimator", parents=(geometry,))
+        if candidate.variant_id == "inherited"
+    )
+    interactions = expand_stage_candidates(search, "interaction", parents=(estimator,))
+    parents = tuple(
+        candidate
+        for candidate in interactions
+        if candidate.variant_id in {"extra_trees_sqrt_leaf_2", "extra_trees_fraction_050_leaf_2"}
+    )
+
+    candidates = expand_stage_candidates(
+        search,
+        "estimator_scale_transfer",
+        parents=parents,
+    )
+
+    assert len(parents) == 2
+    assert len(candidates) == 6
+    assert len({candidate.parent_configuration_id for candidate in candidates}) == 1
+    _validate_canonical_parent_expansion(
+        search,
+        "estimator_scale_transfer",
+        parents,
+        candidates,
+    )
+    with pytest.raises(CalibrationError, match="canonical parent expansion"):
+        _validate_canonical_parent_expansion(
+            search,
+            "estimator_scale_transfer",
+            parents,
+            candidates[:-1],
+        )
 
 
 def test_expansion_rejects_missing_wrong_or_excess_parents() -> None:

@@ -22,6 +22,7 @@
         "properties": {
           "run_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
           "configuration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+          "configuration_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "selection_role": {
             "enum": ["baseline", "smoke", "base", "candidate", "selected", "ablation"]
           },

@@ -228,6 +228,23 @@ def test_inference_batch_generation_jobs_filter_datasets_within_role() -> None:
     )
 
 
+def test_parameter_hashes_preserve_declared_logical_calibration_identity() -> None:
+    run = {
+        "run_id": "geometry__base__seed_17",
+        "params": {"group_policy": {"branches": {}}, "random_seed": 17},
+    }
+    metadata = {
+        "algorithm_seed": 17,
+        "algorithm_seed_parameter": "random_seed",
+        "configuration_sha256": "a" * 64,
+    }
+
+    configuration_sha256, execution_sha256 = pipeline._parameter_hashes(run, metadata)
+
+    assert configuration_sha256 == "a" * 64
+    assert execution_sha256 == pipeline.canonical_json_sha256(run["params"])
+
+
 def _inference_attribution_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[dict[str, Any], Path]:
