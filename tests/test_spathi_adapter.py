@@ -473,6 +473,126 @@ def test_main_records_adapter_failures(
     assert progress["percent"] == 100
     assert "required tf_list input does not exist" in progress["message"]
     assert "SPATHI adapter failed" in capsys.readouterr().err
+    failure_root = external_tool_inputs["output_dir"] / adapter.FAILURE_DIAGNOSTICS_DIR
+    failure = json.loads((failure_root / adapter.FAILURE_MANIFEST).read_text(encoding="utf-8"))
+    assert failure == {
+        "artifact_type": "spathi_adapter_failure_diagnostics",
+        "error": {
+            "message": (
+                "required tf_list input does not exist: "
+                f"{external_tool_inputs['extra'] / 'tf_list.txt'}"
+            ),
+            "type": "ValueError",
+        },
+        "files": [],
+        "model_diagnostics": None,
+        "schema_version": "1.0",
+        "status": "failed",
+    }
+    assert not (external_tool_inputs["output_dir"] / "network.csv").exists()
+    assert all(
+        not (external_tool_inputs["output_dir"] / name).exists() for name in adapter.AUDIT_SIDECARS
+    )
+
+
+def test_failed_spathi_run_preserves_diagnostics_without_publishing_success(
+    adapter: types.ModuleType,
+    external_tool_inputs: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, Path] = {}
+
+    class FakeConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.output_dir = kwargs["output_dir"]
+            captured["scratch_output"] = self.output_dir
+
+    def fake_infer(config: FakeConfig, **_: Any) -> Any:
+        config.output_dir.mkdir()
+        with gzip.open(
+            config.output_dir / "target_eligibility.tsv.gz",
+            "wt",
+            encoding="utf-8",
+            newline="",
+        ) as handle:
+            handle.write("target\tmode\teligible\nG1\tall\ttrue\n")
+        with gzip.open(
+            config.output_dir / "model_diagnostics.tsv.gz",
+            "wt",
+            encoding="utf-8",
+            newline="",
+        ) as handle:
+            handle.write("target_group\ttarget\tstatus\tmessage\n")
+            handle.write("group_a\tG1\tinvalid_feature_importances\tnon-finite values\n")
+            handle.write("group_a\tG2\tinvalid_feature_importances\tnon-finite values\n")
+            handle.write("group_a\tG3\ttrained\t\n")
+        (config.output_dir / "run_metadata.json").write_text(
+            json.dumps({"status": "failed", "models": {"failed": 2}}),
+            encoding="utf-8",
+        )
+        raise RuntimeError(
+            f"2 models failed; inspect {config.output_dir / 'model_diagnostics.tsv.gz'}"
+        )
+
+    spathi_package = types.ModuleType("spathi")
+    spathi_package.__path__ = []
+    spathi_package.SpathiConfig = FakeConfig
+    spathi_package.infer = fake_infer
+    monkeypatch.setitem(sys.modules, "spathi", spathi_package)
+    args = _namespace(external_tool_inputs)
+    argv = [
+        "--input",
+        str(args.input),
+        "--params",
+        str(args.params),
+        "--extra",
+        str(args.extra),
+        "--output-dir",
+        str(args.output_dir),
+        "--threads",
+        str(args.threads),
+    ]
+
+    assert adapter.main(argv) == 2
+
+    scratch_output = captured["scratch_output"]
+    assert not scratch_output.exists()
+    failure_root = args.output_dir / adapter.FAILURE_DIAGNOSTICS_DIR
+    manifest = json.loads((failure_root / adapter.FAILURE_MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["error"] == {
+        "type": "RuntimeError",
+        "message": ("2 models failed; inspect failure_diagnostics/model_diagnostics.tsv.gz"),
+    }
+    assert manifest["model_diagnostics"] == {
+        "records": 3,
+        "status_counts": {"invalid_feature_importances": 2, "trained": 1},
+        "messages": [
+            {
+                "status": "invalid_feature_importances",
+                "message": "non-finite values",
+                "count": 2,
+            }
+        ],
+    }
+    assert {item["path"] for item in manifest["files"]} == set(adapter.AUDIT_SIDECARS)
+    for record in manifest["files"]:
+        path = failure_root / record["path"]
+        assert path.is_file()
+        assert record["size"] == path.stat().st_size
+        assert record["sha256"] == adapter._sha256_file(path)
+    assert not (args.output_dir / "network.csv").exists()
+    assert all(not (args.output_dir / name).exists() for name in adapter.AUDIT_SIDECARS)
+    progress = json.loads((args.output_dir / "progress.json").read_text(encoding="utf-8"))
+    assert progress["status"] == "failed"
+    assert progress["phase"] == "failed"
+    assert progress["percent"] == 100
+    assert progress["message"].endswith("durable diagnostics: failure_diagnostics/failure.json")
+    stderr = capsys.readouterr().err
+    assert "failure_diagnostics/failure.json" in stderr
+    assert "invalid_feature_importances=2, trained=1" in stderr
+    assert "spathi-adapter-" not in stderr
 
 
 def test_run_refuses_to_overwrite_prior_network(

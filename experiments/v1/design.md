@@ -580,6 +580,12 @@ dependent joint artifacts while leaving unchanged simulator and catalog artifact
 workflow identities bind all frozen upstream evidence, preventing a result from consuming a policy
 selected for another implementation or budget.
 
+A failed inference attempt is never published under the `inference` artifact kind. Before its
+private staging directory is removed, the harness instead binds the validated ANDREA failure report,
+command and container logs, last progress snapshot, and available SPATHI diagnostic sidecars into a
+content-addressed `inference-failure` evidence artifact. That operational evidence remains explicitly
+failed and is ineligible for integration, evaluation, ranking, or successful-inference cache reuse.
+
 Efficiency and scalability use a two-phase report publication contract. `workflow.json` is first
 written with status `publishing`; the deterministic HTML and provenance manifest are then published
 as immutable files; only after both have been verified are their canonical paths and SHA-256 hashes

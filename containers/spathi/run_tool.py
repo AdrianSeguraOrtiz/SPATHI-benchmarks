@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import hashlib
 import json
 import os
 import shutil
 import sys
+from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkdtemp
 from typing import Any
 
 EXPECTED_NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
@@ -20,6 +22,8 @@ AUDIT_SIDECARS = (
     "model_diagnostics.tsv.gz",
     "run_metadata.json",
 )
+FAILURE_DIAGNOSTICS_DIR = "failure_diagnostics"
+FAILURE_MANIFEST = "failure.json"
 _PHASE_PERCENT = {
     "validating_inputs": 10,
     "building_representation": 15,
@@ -331,6 +335,152 @@ def _stage_outputs(
     return staged
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _model_failure_summary(path: Path) -> dict[str, Any]:
+    status_counts: Counter[str] = Counter()
+    failure_messages: Counter[tuple[str, str]] = Counter()
+    records = 0
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"status", "message"}
+        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+            raise ValueError("model_diagnostics.tsv.gz must contain status and message columns")
+        for row in reader:
+            records += 1
+            status = str(row.get("status", "")).strip()
+            message = str(row.get("message", "")).strip()
+            if not status:
+                raise ValueError("model_diagnostics.tsv.gz contains an empty status")
+            status_counts[status] += 1
+            if message:
+                failure_messages[(status, message)] += 1
+    return {
+        "records": records,
+        "status_counts": dict(sorted(status_counts.items())),
+        "messages": [
+            {"status": status, "message": message, "count": count}
+            for (status, message), count in sorted(
+                failure_messages.items(),
+                key=lambda item: (-item[1], item[0][0], item[0][1]),
+            )[:20]
+        ],
+    }
+
+
+def _portable_failure_message(error: Exception, scratch_output: Path | None) -> str:
+    message = str(error).strip() or type(error).__name__
+    if scratch_output is not None:
+        message = message.replace(
+            str(scratch_output),
+            f"{FAILURE_DIAGNOSTICS_DIR}",
+        )
+    return message
+
+
+def _write_failure_manifest(path: Path, payload: dict[str, Any]) -> None:
+    content = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    path.chmod(0o644)
+
+
+def _publish_failure_diagnostics(
+    output_dir: Path,
+    *,
+    scratch_output: Path | None,
+    error: Exception,
+) -> Path:
+    """Atomically preserve failed-run evidence outside SPATHI's scratch directory."""
+
+    destination = output_dir / FAILURE_DIAGNOSTICS_DIR
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"failure diagnostics already exist: {destination}")
+    staging = Path(mkdtemp(prefix=f".{FAILURE_DIAGNOSTICS_DIR}-", dir=output_dir))
+    try:
+        files: list[dict[str, Any]] = []
+        if scratch_output is not None and scratch_output.is_dir():
+            for name in AUDIT_SIDECARS:
+                source = scratch_output / name
+                if not source.is_file() or source.is_symlink():
+                    continue
+                target = staging / name
+                shutil.copyfile(source, target)
+                target.chmod(0o644)
+                files.append(
+                    {
+                        "path": name,
+                        "sha256": _sha256_file(target),
+                        "size": target.stat().st_size,
+                    }
+                )
+
+        summary: dict[str, Any] | None = None
+        diagnostics = staging / "model_diagnostics.tsv.gz"
+        if diagnostics.is_file():
+            try:
+                summary = _model_failure_summary(diagnostics)
+            except (OSError, UnicodeDecodeError, ValueError) as inspection_error:
+                summary = {
+                    "inspection_error": (f"{type(inspection_error).__name__}: {inspection_error}")
+                }
+        manifest = {
+            "schema_version": "1.0",
+            "artifact_type": "spathi_adapter_failure_diagnostics",
+            "status": "failed",
+            "error": {
+                "type": type(error).__name__,
+                "message": _portable_failure_message(error, scratch_output),
+            },
+            "files": sorted(files, key=lambda item: item["path"]),
+            "model_diagnostics": summary,
+        }
+        _write_failure_manifest(staging / FAILURE_MANIFEST, manifest)
+        os.rename(staging, destination)
+        return destination
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def _failure_manifest(output_dir: Path) -> dict[str, Any] | None:
+    path = output_dir / FAILURE_DIAGNOSTICS_DIR / FAILURE_MANIFEST
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _can_publish_failure_diagnostics(output_dir: Path) -> bool:
+    if not output_dir.is_dir() or output_dir.is_symlink():
+        return False
+    occupied = ("network.csv", *AUDIT_SIDECARS, FAILURE_DIAGNOSTICS_DIR)
+    return not any((output_dir / name).exists() for name in occupied)
+
+
+def _failure_message(error: Exception, output_dir: Path) -> tuple[str, dict[str, Any] | None]:
+    manifest = _failure_manifest(output_dir)
+    if manifest is None:
+        return str(error).strip() or type(error).__name__, None
+    raw_error = manifest.get("error")
+    message = raw_error.get("message") if isinstance(raw_error, dict) else None
+    if not isinstance(message, str) or not message:
+        message = str(error).strip() or type(error).__name__
+    relative = f"{FAILURE_DIAGNOSTICS_DIR}/{FAILURE_MANIFEST}"
+    return f"{message}; durable diagnostics: {relative}", manifest
+
+
 def run(args: argparse.Namespace) -> None:
     tf_list, groups, execution_path = _validate_files(args)
     params = _validated_params(args.params, group_count=_group_count(groups))
@@ -338,6 +488,8 @@ def run(args: argparse.Namespace) -> None:
 
     published = {name: args.output_dir / name for name in ("network.csv", *AUDIT_SIDECARS)}
     existing = sorted(name for name, path in published.items() if path.exists())
+    if (args.output_dir / FAILURE_DIAGNOSTICS_DIR).exists():
+        existing.append(FAILURE_DIAGNOSTICS_DIR)
     if existing:
         raise FileExistsError(
             "SPATHI adapter refuses to overwrite prior outputs: " + ", ".join(existing)
@@ -365,17 +517,32 @@ def run(args: argparse.Namespace) -> None:
                 report=False,
                 **params,
             )
-            result = infer(
-                config,
-                progress_callback=_progress_callback(args.output_dir),
-                checkpoint=False,
-            )
-            _validate_network_header(result.network_path)
-            sidecars = _validate_audit_sidecars(config.output_dir)
-            staged = _stage_outputs(
-                args.output_dir,
-                {"network.csv": result.network_path, **sidecars},
-            )
+            try:
+                result = infer(
+                    config,
+                    progress_callback=_progress_callback(args.output_dir),
+                    checkpoint=False,
+                )
+                _validate_network_header(result.network_path)
+                sidecars = _validate_audit_sidecars(config.output_dir)
+                staged = _stage_outputs(
+                    args.output_dir,
+                    {"network.csv": result.network_path, **sidecars},
+                )
+            except Exception as error:
+                try:
+                    _publish_failure_diagnostics(
+                        args.output_dir,
+                        scratch_output=config.output_dir,
+                        error=error,
+                    )
+                except Exception as publication_error:  # noqa: BLE001
+                    print(
+                        "SPATHI adapter could not preserve failure diagnostics: "
+                        f"{publication_error}",
+                        file=sys.stderr,
+                    )
+                raise
         # Sidecars become visible first and network.csv is the commit marker used by
         # ANDREA. A failed publication can therefore never expose a successful
         # inference result without all of its audit evidence.
@@ -399,17 +566,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         run(args)
     except Exception as exc:  # noqa: BLE001 - container boundary must record every failure
+        if _failure_manifest(args.output_dir) is None and _can_publish_failure_diagnostics(
+            args.output_dir
+        ):
+            try:
+                _publish_failure_diagnostics(
+                    args.output_dir,
+                    scratch_output=None,
+                    error=exc,
+                )
+            except Exception as publication_error:  # noqa: BLE001
+                print(
+                    f"SPATHI adapter could not preserve failure diagnostics: {publication_error}",
+                    file=sys.stderr,
+                )
+        message, manifest = _failure_message(exc, args.output_dir)
         try:
             _write_progress(
                 args.output_dir,
                 percent=100,
                 status="failed",
                 phase="failed",
-                message=str(exc),
+                message=message,
             )
         except OSError:
             pass
-        print(f"SPATHI adapter failed: {exc}", file=sys.stderr)
+        print(f"SPATHI adapter failed: {message}", file=sys.stderr)
+        if manifest is not None:
+            summary = manifest.get("model_diagnostics")
+            counts = summary.get("status_counts") if isinstance(summary, dict) else None
+            if isinstance(counts, dict) and counts:
+                rendered = ", ".join(f"{status}={count}" for status, count in counts.items())
+                print(f"SPATHI model status counts: {rendered}", file=sys.stderr)
         return 2
     return 0
 

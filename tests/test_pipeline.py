@@ -430,6 +430,121 @@ def test_single_run_preflight_requires_exact_dataset_and_run(tmp_path: Path) -> 
     assert report["runs"]["selected"] == ["genie3_seed_17"]
 
 
+def test_failed_inference_diagnostics_are_published_as_separate_immutable_evidence(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "work/v1/calibration-reduced/run"
+    run_root.mkdir(parents=True)
+    command_log = run_root / "logs/20-inference.log"
+    command_log.parent.mkdir()
+    command_log.write_text("ANDREA command failed\n", encoding="utf-8")
+
+    attempt = run_root / "attempt/output/dataset_run"
+    tool_root = attempt / "tools/spathi_run"
+    adapter_root = tool_root / "io/out/failure_diagnostics"
+    adapter_root.mkdir(parents=True)
+    container_log = tool_root / "container.log"
+    container_log.write_text("SPATHI adapter failed\n", encoding="utf-8")
+    progress = tool_root / "io/out/progress.json"
+    progress.write_text(
+        json.dumps(
+            {
+                "percent": 100,
+                "status": "failed",
+                "phase": "failed",
+                "message": "invalid feature importances",
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    diagnostics = adapter_root / "model_diagnostics.tsv.gz"
+    diagnostics.write_bytes(b"diagnostic evidence")
+    adapter_manifest = {
+        "schema_version": "1.0",
+        "artifact_type": "spathi_adapter_failure_diagnostics",
+        "status": "failed",
+        "error": {"type": "RuntimeError", "message": "79 models failed"},
+        "files": [
+            {
+                "path": diagnostics.name,
+                "sha256": pipeline.sha256_file(diagnostics),
+                "size": diagnostics.stat().st_size,
+            }
+        ],
+        "model_diagnostics": {"status_counts": {"invalid_feature_importances": 79}},
+    }
+    (adapter_root / "failure.json").write_text(
+        json.dumps(adapter_manifest),
+        encoding="utf-8",
+    )
+    report_path = attempt / "run_report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "tools": {
+                    "results": {
+                        "spathi_run": {
+                            "logs_path": str(container_log.resolve()),
+                            "progress_path": str(progress.resolve()),
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    inference_spec = {"dataset": "dataset_a", "run": "spathi_run"}
+    task = {
+        "key": ArtifactKey.from_spec("inference", inference_spec),
+        "spec": inference_spec,
+    }
+    failure = pipeline.InferenceExecutionFailure(
+        dataset_id="dataset_a",
+        batch_id="spathi",
+        run_id="spathi_run",
+        orchestrator_return_code=1,
+        tool_exit_code=2,
+        tool_duration_seconds=12.5,
+        tool_error="79 models failed",
+        command_log_path=command_log,
+        progress={
+            "percent": 100,
+            "status": "failed",
+            "phase": "failed",
+            "message": "invalid feature importances",
+            "warnings": [],
+        },
+        tool_log_tail="SPATHI adapter failed",
+    )
+
+    artifact = pipeline._publish_inference_failure_evidence(
+        store=_artifact_store(run_root),
+        task=task,
+        run_root=run_root,
+        report_path=report_path,
+        failure=failure,
+    )
+
+    assert artifact.key.kind == "inference-failure"
+    assert artifact.manifest["status"] == "complete"
+    failure_manifest = json.loads(artifact.file("failure.json").read_text(encoding="utf-8"))
+    assert failure_manifest["inference_status"] == "failed"
+    assert failure_manifest["attribution"] == {
+        "dataset_id": "dataset_a",
+        "batch_id": "spathi",
+        "run_id": "spathi_run",
+    }
+    assert artifact.file(
+        "tool/io/out/failure_diagnostics/model_diagnostics.tsv.gz"
+    ).read_bytes() == b"diagnostic evidence"
+    assert not any(path.name == "network.csv" for path in artifact.path.rglob("*"))
+    bound = failure.with_evidence(artifact)
+    assert bound.evidence_artifact == artifact
+    assert str(artifact.file("failure.json").resolve()) in str(bound)
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

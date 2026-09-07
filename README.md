@@ -456,6 +456,12 @@ The state files report cache hits and bind the concrete SPATHI image ID. Repeati
 workflow never discovers outputs by timestamps; it validates canonical manifests and content
 hashes.
 
+If inference fails, the harness preserves the validated ANDREA report, command/container logs,
+last progress snapshot and available SPATHI diagnostic sidecars as a separate content-addressed
+`inference-failure` evidence artifact before transient staging is removed. It remains explicitly
+failed, never substitutes `network.csv`, and cannot enter integration, evaluation, ranking or
+successful-inference cache reuse.
+
 ## ANDREA-compatible outputs
 
 For ordinary inference/evaluation pipelines, exports live below the run root:

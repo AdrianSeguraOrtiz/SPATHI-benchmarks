@@ -98,6 +98,7 @@ class InferenceExecutionFailure(RuntimeError):
         command_log_path: Path,
         progress: dict[str, Any] | None,
         tool_log_tail: str | None,
+        evidence_artifact: Artifact | None = None,
     ) -> None:
         self.dataset_id = dataset_id
         self.batch_id = batch_id
@@ -109,7 +110,32 @@ class InferenceExecutionFailure(RuntimeError):
         self.command_log_path = command_log_path.resolve()
         self.progress = progress
         self.tool_log_tail = tool_log_tail
-        super().__init__(f"Inference run {run_id!r} failed: {tool_error}")
+        self.evidence_artifact = evidence_artifact
+        evidence_suffix = (
+            f"; durable evidence: {evidence_artifact.file('failure.json').resolve()}"
+            if evidence_artifact is not None
+            else ""
+        )
+        super().__init__(f"Inference run {run_id!r} failed: {tool_error}{evidence_suffix}")
+
+    def with_evidence(self, artifact: Artifact) -> InferenceExecutionFailure:
+        """Return this validated failure bound to immutable diagnostic evidence."""
+
+        if artifact.key.kind != "inference-failure":
+            raise BenchmarkConfigError("Inference failure evidence has the wrong artifact kind")
+        return InferenceExecutionFailure(
+            dataset_id=self.dataset_id,
+            batch_id=self.batch_id,
+            run_id=self.run_id,
+            orchestrator_return_code=self.orchestrator_return_code,
+            tool_exit_code=self.tool_exit_code,
+            tool_duration_seconds=self.tool_duration_seconds,
+            tool_error=self.tool_error,
+            command_log_path=self.command_log_path,
+            progress=self.progress,
+            tool_log_tail=self.tool_log_tail,
+            evidence_artifact=artifact,
+        )
 
 
 def _artifact_store(run_root: Path) -> ArtifactStore:
@@ -1200,6 +1226,210 @@ def _validated_failed_inference(
     )
 
 
+_ADAPTER_FAILURE_DIRECTORY = "failure_diagnostics"
+_ADAPTER_FAILURE_MANIFEST = "failure.json"
+_ADAPTER_FAILURE_SIDECARS = {
+    "model_diagnostics.tsv.gz",
+    "run_metadata.json",
+    "target_eligibility.tsv.gz",
+}
+
+
+def _failed_result_paths(
+    report_path: Path,
+    *,
+    run_id: str,
+) -> tuple[Path, Path | None]:
+    report = load_json_object(report_path, "failed inference evidence report")
+    results = (report.get("tools") or {}).get("results")
+    if not isinstance(results, dict) or not isinstance(results.get(run_id), dict):
+        raise BenchmarkConfigError("Failed inference evidence has no matching tool result")
+    result = results[run_id]
+    log_path = _reported_failure_member(report_path, result.get("logs_path"), "logs_path")
+    progress_path = (
+        _reported_failure_member(report_path, result["progress_path"], "progress_path")
+        if result.get("progress_path") is not None
+        else None
+    )
+    return log_path, progress_path
+
+
+def _validated_adapter_failure_files(tool_log_path: Path) -> dict[str, Path]:
+    root = tool_log_path.parent / "io" / "out" / _ADAPTER_FAILURE_DIRECTORY
+    if not root.exists() and not root.is_symlink():
+        return {}
+    safe_root = path_below_no_symlinks(
+        root,
+        tool_log_path.parent,
+        "SPATHI adapter failure diagnostics",
+        require_directory=True,
+    )
+    manifest_path = path_below_no_symlinks(
+        safe_root / _ADAPTER_FAILURE_MANIFEST,
+        safe_root,
+        "SPATHI adapter failure manifest",
+        require_file=True,
+    )
+    manifest = load_json_object(manifest_path, "SPATHI adapter failure manifest")
+    if set(manifest) != {
+        "schema_version",
+        "artifact_type",
+        "status",
+        "error",
+        "files",
+        "model_diagnostics",
+    } or any(
+        (
+            manifest.get("schema_version") != "1.0",
+            manifest.get("artifact_type") != "spathi_adapter_failure_diagnostics",
+            manifest.get("status") != "failed",
+        )
+    ):
+        raise BenchmarkConfigError("SPATHI adapter failure manifest has an invalid contract")
+    error = manifest.get("error")
+    if (
+        not isinstance(error, dict)
+        or set(error) != {"type", "message"}
+        or not isinstance(error.get("type"), str)
+        or not error["type"]
+        or not isinstance(error.get("message"), str)
+        or not error["message"]
+    ):
+        raise BenchmarkConfigError("SPATHI adapter failure manifest has an invalid error")
+    raw_files = manifest.get("files")
+    if not isinstance(raw_files, list):
+        raise BenchmarkConfigError("SPATHI adapter failure manifest has no file inventory")
+    validated = {_ADAPTER_FAILURE_MANIFEST: manifest_path}
+    listed: set[str] = set()
+    for raw in raw_files:
+        if (
+            not isinstance(raw, dict)
+            or set(raw) != {"path", "sha256", "size"}
+            or raw.get("path") not in _ADAPTER_FAILURE_SIDECARS
+            or raw["path"] in listed
+            or not isinstance(raw.get("sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", raw["sha256"]) is None
+            or not isinstance(raw.get("size"), int)
+            or isinstance(raw["size"], bool)
+            or raw["size"] < 0
+        ):
+            raise BenchmarkConfigError(
+                "SPATHI adapter failure manifest contains an invalid file record"
+            )
+        name = str(raw["path"])
+        source = path_below_no_symlinks(
+            safe_root / name,
+            safe_root,
+            f"SPATHI adapter failure file {name}",
+            require_file=True,
+        )
+        if source.stat().st_size != raw["size"] or sha256_file(source) != raw["sha256"]:
+            raise BenchmarkConfigError(f"SPATHI adapter failure file changed: {name}")
+        listed.add(name)
+        validated[name] = source
+    disk_names: set[str] = set()
+    for child in safe_root.iterdir():
+        if child.is_symlink() or not child.is_file():
+            raise BenchmarkConfigError(
+                "SPATHI adapter failure diagnostics contain a non-regular member"
+            )
+        disk_names.add(child.name)
+    if disk_names != listed | {_ADAPTER_FAILURE_MANIFEST}:
+        raise BenchmarkConfigError(
+            "SPATHI adapter failure manifest differs from its diagnostic files"
+        )
+    return validated
+
+
+def _copy_failure_file(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    destination.chmod(0o644)
+
+
+def _publish_inference_failure_evidence(
+    *,
+    store: ArtifactStore,
+    task: dict[str, Any],
+    run_root: Path,
+    report_path: Path,
+    failure: InferenceExecutionFailure,
+) -> Artifact:
+    """Publish an immutable failed-attempt artifact before inference staging is removed."""
+
+    tool_log_path, progress_path = _failed_result_paths(report_path, run_id=failure.run_id)
+    command_log_path = path_below_no_symlinks(
+        failure.command_log_path,
+        run_root,
+        "Failed inference command log",
+        require_file=True,
+    )
+    sources: dict[str, Path] = {
+        "andrea/command.log": command_log_path,
+        "andrea/run_report.json": report_path,
+        "tool/container.log": tool_log_path,
+    }
+    if progress_path is not None:
+        sources["tool/io/out/progress.json"] = progress_path
+    for name, source in _validated_adapter_failure_files(tool_log_path).items():
+        sources[f"tool/io/out/{_ADAPTER_FAILURE_DIRECTORY}/{name}"] = source
+
+    source_records = {
+        name: {"sha256": sha256_file(source), "size": source.stat().st_size}
+        for name, source in sorted(sources.items())
+    }
+    evidence_spec = {
+        "schema_version": "1.0",
+        "evidence_contract": "andrea_inference_failure",
+        "inference_status": "failed",
+        "source_inference": {
+            "kind": task["key"].kind,
+            "digest": task["key"].digest,
+            "key": task["key"].value,
+            "spec_sha256": canonical_json_sha256(task["spec"]),
+        },
+        "attribution": {
+            "dataset_id": failure.dataset_id,
+            "batch_id": failure.batch_id,
+            "run_id": failure.run_id,
+        },
+        "execution": {
+            "orchestrator_return_code": failure.orchestrator_return_code,
+            "tool_exit_code": failure.tool_exit_code,
+            "tool_duration_seconds": failure.tool_duration_seconds,
+            "tool_error": failure.tool_error,
+        },
+        "source_files": source_records,
+    }
+    key = store.key_for("inference-failure", evidence_spec)
+    existing = store.lookup(key)
+    if existing is not None:
+        return existing
+    with store.staging_directory(key) as evidence_staging:
+        for name, source in sources.items():
+            _copy_failure_file(source, evidence_staging / name)
+        failure_manifest = {
+            "schema_version": "1.0",
+            "artifact_type": "andrea_inference_failure_evidence",
+            "inference_status": "failed",
+            "source_inference": evidence_spec["source_inference"],
+            "attribution": evidence_spec["attribution"],
+            "execution": evidence_spec["execution"],
+            "diagnostics": sorted(sources),
+        }
+        atomic_write_json(
+            evidence_staging / "failure.json",
+            failure_manifest,
+            "inference failure evidence",
+            boundary=evidence_staging,
+        )
+        return store.publish_from_temp(
+            evidence_staging,
+            kind="inference-failure",
+            spec=evidence_spec,
+        )
+
+
 def _validate_single_run_preflight(
     report_path: Path,
     *,
@@ -1496,14 +1726,22 @@ def _execute_inference_task(
                     raise BenchmarkConfigError(
                         "Failed inference produced an ambiguous run_report.json set"
                     ) from exc
-                raise _validated_failed_inference(
+                failure = _validated_failed_inference(
                     failed_reports[0].resolve(),
                     run_id=run_id,
                     dataset_id=str(task["dataset"]["dataset_id"]),
                     expected_origin=str(task["expected_origin"]),
                     command_failure=exc,
                     batch_id=str(task["batch"]["id"]),
-                ) from exc
+                )
+                evidence = _publish_inference_failure_evidence(
+                    store=store,
+                    task=task,
+                    run_root=run_root,
+                    report_path=failed_reports[0].resolve(),
+                    failure=failure,
+                )
+                raise failure.with_evidence(evidence) from exc
             _ensure_runtime_image(
                 state=state,
                 frozen_root=frozen_root,
