@@ -134,6 +134,7 @@ def _write_progress(
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+        temporary.chmod(0o644)
         os.replace(temporary, target)
         temporary = None
     finally:

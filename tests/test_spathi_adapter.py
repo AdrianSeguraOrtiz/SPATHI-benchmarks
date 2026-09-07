@@ -100,6 +100,7 @@ def test_progress_publication_is_atomic_under_concurrent_updates(
     payload = json.loads((output_dir / "progress.json").read_text(encoding="utf-8"))
     assert payload["percent"] in range(10, 90)
     assert payload["message"] == f"Completed {payload['percent']}"
+    assert (output_dir / "progress.json").stat().st_mode & 0o777 == 0o644
     assert not list(output_dir.glob(".progress.json.*.tmp"))
 
 
@@ -386,6 +387,9 @@ def test_run_forwards_contract_and_atomically_publishes_network(
     progress = json.loads(
         (external_tool_inputs["output_dir"] / "progress.json").read_text(encoding="utf-8")
     )
+    assert (
+        external_tool_inputs["output_dir"] / "progress.json"
+    ).stat().st_mode & 0o777 == 0o644
     assert progress == {
         "message": "Published ANDREA-compatible network.csv and SPATHI audit sidecars",
         "percent": 100,
@@ -469,6 +473,9 @@ def test_main_records_adapter_failures(
     progress = json.loads(
         (external_tool_inputs["output_dir"] / "progress.json").read_text(encoding="utf-8")
     )
+    assert (
+        external_tool_inputs["output_dir"] / "progress.json"
+    ).stat().st_mode & 0o777 == 0o644
     assert progress["status"] == "failed"
     assert progress["percent"] == 100
     assert "required tf_list input does not exist" in progress["message"]
