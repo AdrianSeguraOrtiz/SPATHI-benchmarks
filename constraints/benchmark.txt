@@ -24,7 +24,8 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
 narwhals==2.25.0
-numpy==2.5.2
+# Keep one reproducible NumPy line compatible with Python 3.11-3.13 and ANDREA's <2.5 marker.
+numpy==2.4.6
 ortools==9.15.6755
 packaging==26.3
 pandas==2.3.3
