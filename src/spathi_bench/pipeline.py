@@ -1051,6 +1051,17 @@ def _validate_generation_images(
             )
 
 
+def _dataset_job_attribution(job: dict[str, Any], replicate_index: int) -> dict[str, Any]:
+    """Return the workflow-owned fields added to one generated dataset record."""
+
+    return {
+        "dataset_role": job["dataset_role"],
+        "split_id": job["split_id"],
+        "condition_id": job["condition_id"],
+        "replicate_index": replicate_index,
+    }
+
+
 def generate_data(
     *,
     repo_root: Path,
@@ -1139,10 +1150,7 @@ def generate_data(
             for replicate_index, dataset in enumerate(job_datasets, start=1):
                 dataset.update(
                     {
-                        "dataset_role": job["dataset_role"],
-                        "split_id": job["split_id"],
-                        "condition_id": job["condition_id"],
-                        "replicate_index": replicate_index,
+                        **_dataset_job_attribution(job, replicate_index),
                         "dataset_artifact": _artifact_ref(artifact, cache_hit=cache_hit),
                     }
                 )
@@ -1213,10 +1221,7 @@ def generate_data(
         for replicate_index, dataset in enumerate(job_datasets, start=1):
             dataset.update(
                 {
-                    "dataset_role": job["dataset_role"],
-                    "split_id": job["split_id"],
-                    "condition_id": job["condition_id"],
-                    "replicate_index": replicate_index,
+                    **_dataset_job_attribution(job, replicate_index),
                     "dataset_artifact": _artifact_ref(artifact, cache_hit=cache_hit),
                 }
             )
@@ -2334,7 +2339,7 @@ def _validate_generated_state_contract(
             raise BenchmarkConfigError(
                 f"Generation job {job_id!r} dataset IDs differ from its immutable manifest"
             )
-        for expected in expected_datasets:
+        for replicate_index, expected in enumerate(expected_datasets, start=1):
             dataset_id = expected["dataset_id"]
             if dataset_id in expected_dataset_ids:
                 raise BenchmarkConfigError(f"Generated benchmark repeats dataset {dataset_id!r}")
@@ -2344,9 +2349,7 @@ def _validate_generated_state_contract(
                 raise BenchmarkConfigError(f"Generated benchmark omits dataset {dataset_id!r}")
             expected_record = {
                 **expected,
-                "dataset_role": job["dataset_role"],
-                "split_id": job["split_id"],
-                "condition_id": job["condition_id"],
+                **_dataset_job_attribution(job, replicate_index),
             }
             expected_fields = set(expected_record) | {"dataset_artifact"}
             if set(actual) != expected_fields or any(

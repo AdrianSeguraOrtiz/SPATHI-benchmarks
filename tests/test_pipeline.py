@@ -16,6 +16,7 @@ from spathi_bench.pipeline import (
     _batch_selects_dataset,
     _counterbalanced_efficiency_development_tasks,
     _dataset_execution_run,
+    _dataset_job_attribution,
     _evaluation_spec,
     _execute_unique_missing_tasks,
     _generation_spec,
@@ -400,6 +401,21 @@ def test_inference_batch_replicate_indices_are_one_based_and_job_scoped() -> Non
             "replicate_index": 2,
         },
     )
+
+
+def test_dataset_job_attribution_includes_the_job_scoped_replicate_index() -> None:
+    job = {
+        "dataset_role": "development",
+        "split_id": "development_v1",
+        "condition_id": "linear_baseline",
+    }
+
+    assert _dataset_job_attribution(job, 3) == {
+        "dataset_role": "development",
+        "split_id": "development_v1",
+        "condition_id": "linear_baseline",
+        "replicate_index": 3,
+    }
 
 
 def test_hash_target_scope_is_bound_to_dataset_without_mutating_logical_run() -> None:
