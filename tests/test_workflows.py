@@ -140,13 +140,13 @@ def test_workflow_identity_includes_the_docker_runtime(
     assert first["fingerprint"] != second["fingerprint"]
 
 
-def test_calibrate_chains_six_stages_freezes_and_resumes_idempotently(
+def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
-    materialized: list[tuple[str, Path | None]] = []
+    materialized: list[tuple[tuple[str, str], Path | None]] = []
     pipelines: list[tuple[str, bool]] = []
     ranked: list[str] = []
     frozen: list[Path] = []
@@ -156,22 +156,23 @@ def test_calibrate_chains_six_stages_freezes_and_resumes_idempotently(
         repo_root: Path,
         stage_id: str,
         calibration_budget: str,
+        fidelity: str,
         parent_ranking_path: Path | None,
         output_dir: Path,
         profile_output: Path,
     ) -> tuple[Path, Path]:
         assert repo_root == repo
         assert calibration_budget == "reduced"
-        materialized.append((stage_id, parent_ranking_path))
+        materialized.append(((stage_id, fidelity), parent_ranking_path))
         output_dir.mkdir(parents=True, exist_ok=True)
         _write_json(
             output_dir / "calibration-manifest.json",
-            {"stage_id": stage_id},
+            {"stage_id": stage_id, "fidelity": fidelity},
         )
         if not profile_output.exists():
             _write_json(
                 profile_output,
-                {"id": workflows.stage_profile_id(stage_id, calibration_budget)},
+                {"id": workflows.stage_profile_id(stage_id, calibration_budget, fidelity)},
             )
         return output_dir, profile_output
 
@@ -196,6 +197,7 @@ def test_calibrate_chains_six_stages_freezes_and_resumes_idempotently(
         repo_root: Path,
         stage_id: str,
         calibration_budget: str,
+        fidelity: str,
         manifest_path: Path,
         summary_path: Path,
         output_path: Path,
@@ -204,9 +206,9 @@ def test_calibrate_chains_six_stages_freezes_and_resumes_idempotently(
         assert calibration_budget == "reduced"
         assert manifest_path.is_file()
         assert summary_path.is_file()
-        ranked.append(stage_id)
+        ranked.append(f"{stage_id}__{fidelity}")
         if not output_path.exists():
-            _write_json(output_path, {"stage_id": stage_id})
+            _write_json(output_path, {"stage_id": stage_id, "fidelity": fidelity})
         return output_path
 
     def fake_freeze(*, repo_root: Path, ranking_path: Path, output_path: Path) -> Path:
@@ -257,23 +259,25 @@ def test_calibrate_chains_six_stages_freezes_and_resumes_idempotently(
         run_id="calibration-test",
     )
 
-    expected_stages = list(workflows.CALIBRATION_STAGES)
-    stage_count = len(expected_stages)
-    assert [stage for stage, _parent in materialized[:stage_count]] == expected_stages
+    expected_phases = list(workflows.CALIBRATION_PHASES)
+    phase_ids = [f"{stage}__{fidelity}" for stage, fidelity in expected_phases]
+    stage_count = len(expected_phases)
+    assert [phase for phase, _parent in materialized[:stage_count]] == expected_phases
     assert materialized[0][1] is None
     for index, (_stage, parent) in enumerate(materialized[1:stage_count], start=1):
         assert parent is not None
-        assert parent.parent.name == expected_stages[index - 1]
+        assert parent.parent.name == phase_ids[index - 1]
         assert parent.name == "ranking.json"
     assert pipelines[:stage_count] == [
-        (workflows.stage_profile_id(stage, "reduced"), False) for stage in expected_stages
+        (workflows.stage_profile_id(stage, "reduced", fidelity), False)
+        for stage, fidelity in expected_phases
     ]
-    assert ranked[:stage_count] == expected_stages
+    assert ranked[:stage_count] == phase_ids
     assert len(frozen) == 1
     assert first == second
     assert second["status"] == "complete"
     assert second["calibration_budget"] == "reduced"
-    assert set(second["stages"]) == set(expected_stages)
+    assert set(second["stages"]) == set(phase_ids)
     selected = repo / second["selected_config"]
     assert selected.is_file()
     assert second["selected_config_sha256"] == sha256_file(selected)

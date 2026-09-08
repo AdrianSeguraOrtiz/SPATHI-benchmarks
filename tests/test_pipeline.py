@@ -14,6 +14,8 @@ from spathi_bench.pipeline import (
     _analysis_bundle_spec,
     _artifact_store,
     _batch_selects_dataset,
+    _counterbalanced_efficiency_development_tasks,
+    _dataset_execution_run,
     _evaluation_spec,
     _execute_unique_missing_tasks,
     _generation_spec,
@@ -23,9 +25,137 @@ from spathi_bench.pipeline import (
     _validate_inference_state_contract,
     build_spathi_image,
 )
+from spathi_bench.resource_scheduler import ResourceCapacity, ResourceClaim
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCKER_RUNTIME = {"fingerprint": "d" * 64}
+INFERENCE_RESOURCES = {
+    "cpu_threads": 1,
+    "memory_bytes": 4 * 1024**3,
+    "memory_gib": 4.0,
+    "planner": "heuristic",
+    "planner_time_limit_seconds": 30,
+}
+EXECUTION_PLAN = {
+    "fingerprint": "x" * 64,
+    "output_profile": "canonical",
+    "exclusive_inference": False,
+    "capacity": {
+        "cpu_threads": 1,
+        "memory_bytes": 4 * 1024**3,
+        "memory_gib": 4.0,
+    },
+    "detected": {"allowed_cpus": [0], "cpu_allocation_order": [0]},
+    "operations": {"inference": deepcopy(INFERENCE_RESOURCES)},
+}
+
+
+def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() -> None:
+    labels = ("adaptive", "combined", "eligibility", "reference")
+    tasks = [
+        {
+            "dataset": {"dataset_id": dataset_id},
+            "metadata": {
+                "algorithm_seed": seed,
+                "configuration_id": label,
+                "efficiency_development_step": "joint_confirmation",
+                "execution_order_seed": 99,
+                "family": "spathi_efficiency_development",
+            },
+        }
+        for dataset_id in ("dataset_a", "dataset_b", "dataset_c", "dataset_d", "dataset_e")
+        for seed in (11, 12)
+        for label in labels
+    ]
+
+    ordered = _counterbalanced_efficiency_development_tasks(list(reversed(tasks)))
+    blocks = [ordered[index : index + len(labels)] for index in range(0, len(ordered), 4)]
+    position_counts = {
+        label: [
+            sum(block[position]["metadata"]["configuration_id"] == label for block in blocks)
+            for position in range(len(labels))
+        ]
+        for label in labels
+    }
+
+    assert all(
+        len({(task["dataset"]["dataset_id"], task["metadata"]["algorithm_seed"]) for task in block})
+        == 1
+        for block in blocks
+    )
+    assert all(max(counts) - min(counts) <= 1 for counts in position_counts.values())
+    for algorithm_seed in (11, 12):
+        seed_blocks = [
+            block for block in blocks if block[0]["metadata"]["algorithm_seed"] == algorithm_seed
+        ]
+        seed_position_counts = {
+            label: [
+                sum(
+                    block[position]["metadata"]["configuration_id"] == label
+                    for block in seed_blocks
+                )
+                for position in range(len(labels))
+            ]
+            for label in labels
+        }
+        assert all(
+            max(counts) - min(counts) <= 1 for counts in seed_position_counts.values()
+        )
+
+
+def _physical_measurement() -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "scope": "physical_task",
+        "wall_time_seconds": 12.5,
+        "cpu_time_seconds": 10.0,
+        "peak_memory_bytes": 1024,
+        "output_bytes": 128,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:13Z",
+        "task_started_monotonic_ns": 1,
+        "task_finished_monotonic_ns": 12_500_000_001,
+        "container_started_at_utc": "2026-01-01T00:00:00Z",
+        "container_finished_at_utc": "2026-01-01T00:00:13Z",
+        "assigned_resources": {
+            "threads": 1,
+            "ram_limit_bytes": 4 * 1024**3,
+            "cpuset_cpus_requested": None,
+            "cpuset_cpus_configured": None,
+            "cpuset_cpus_effective": None,
+            "cpu_quota_cores_effective": 1.0,
+            "ram_limit_bytes_effective": 4 * 1024**3,
+        },
+        "telemetry": {
+            "status": "complete",
+            "cpu_source": "test",
+            "memory_source": "test",
+            "memory_semantics": "container_peak",
+            "io_source": None,
+            "io_semantics": "unavailable",
+            "throttled_time_seconds": 0.0,
+            "oom_events": 0,
+            "oom_killed": False,
+        },
+    }
+
+
+def _execution_measurement() -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "scope": "andrea_execution",
+        "wall_time_seconds": 13.0,
+        "assigned_resources": {},
+        "telemetry": {
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "andrea_execution_end_to_end_including_input_verification_preparation_"
+                "scheduling_merging_and_requested_output_materialization"
+            ),
+        },
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -40,10 +170,11 @@ def _stable_docker_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
 def _state() -> dict[str, Any]:
     return {
         "benchmark_repository": {"commit": "b" * 40},
-        "repositories": {"observed": {"andrea": {"commit": "a" * 40}}},
+        "repositories": {"observed": {"andrea": {"commit": "a" * 40, "path": str(REPO_ROOT)}}},
         "host_environment": {"fingerprint": "h" * 64},
         "benchmark_environment": {"fingerprint": "j" * 64},
         "docker_runtime_environment": deepcopy(DOCKER_RUNTIME),
+        "execution_plan": deepcopy(EXECUTION_PLAN),
         "catalog_images": {"simulator:dyngen": {"locked_repo_digest": "dyngen@sha256:" + "d" * 64}},
     }
 
@@ -100,13 +231,7 @@ def test_preflight_writes_scale_stress_generation_plan(
                 "generator_request": ("experiments/v1/simulations/scale_stress/scale-reduced.json"),
             }
         ],
-        "resources": {
-            "generate_data": {
-                "max_parallel_tasks": 1,
-                "max_cores": 1,
-                "max_ram_gb": 1,
-            }
-        },
+        "execution_class": "scale_canonical",
     }
     monkeypatch.setattr(pipeline, "validate_all_profiles", lambda _root: None)
     monkeypatch.setattr(pipeline, "validate_design_contracts", lambda _root, _andrea: None)
@@ -155,6 +280,22 @@ def test_preflight_writes_scale_stress_generation_plan(
         lambda **_kwargs: {"schema_version": "1.0", "status": "preflighted"},
     )
     monkeypatch.setattr(pipeline, "write_state", lambda *_args: None)
+    runtime_plan = {"fingerprint": "r" * 64}
+    execution_plan = {
+        "operations": {
+            "generate_data": {
+                "max_parallel_tasks": 1,
+                "cpu_threads": 1,
+                "memory_gib": 1,
+            }
+        }
+    }
+    monkeypatch.setattr(pipeline, "_prepare_runtime_plan", lambda **_kwargs: runtime_plan)
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_execution_class",
+        lambda **_kwargs: execution_plan,
+    )
 
     report = pipeline.preflight(
         repo_root=REPO_ROOT,
@@ -228,6 +369,58 @@ def test_inference_batch_generation_jobs_filter_datasets_within_role() -> None:
     )
 
 
+def test_inference_batch_replicate_indices_are_one_based_and_job_scoped() -> None:
+    batch = {
+        "dataset_role": "development",
+        "generation_jobs": ["dyngen", "scmultisim"],
+        "replicate_indices": {"dyngen": [1, 3], "scmultisim": [2]},
+    }
+
+    assert _batch_selects_dataset(
+        batch,
+        {
+            "dataset_role": "development",
+            "generation_job": "dyngen",
+            "replicate_index": 1,
+        },
+    )
+    assert not _batch_selects_dataset(
+        batch,
+        {
+            "dataset_role": "development",
+            "generation_job": "dyngen",
+            "replicate_index": 2,
+        },
+    )
+    assert _batch_selects_dataset(
+        batch,
+        {
+            "dataset_role": "development",
+            "generation_job": "scmultisim",
+            "replicate_index": 2,
+        },
+    )
+
+
+def test_hash_target_scope_is_bound_to_dataset_without_mutating_logical_run() -> None:
+    run = {
+        "run_id": "high_tf",
+        "params": {
+            "random_seed": 17,
+            "target_scope": {
+                "method": "sha256_gene_id",
+                "size": 256,
+                "salt": "spathi-calibration-high-tf-v1",
+            },
+        },
+    }
+
+    resolved = _dataset_execution_run(run, {"dataset_id": "dataset_a"})
+
+    assert resolved["params"]["target_scope"]["dataset_id"] == "dataset_a"
+    assert "dataset_id" not in run["params"]["target_scope"]
+
+
 def test_parameter_hashes_preserve_declared_logical_calibration_identity() -> None:
     run = {
         "run_id": "geometry__base__seed_17",
@@ -255,6 +448,7 @@ def _inference_attribution_case(
         "tool_id": "genie3",
         "params": {"random_seed": 17},
         "execution": {"mode": "group_emulated"},
+        "resources": {"threads": 1, "ram_gb": 4.0, "cpuset_cpus": [0]},
     }
     params_path.write_text(json.dumps({"runs": [run]}), encoding="utf-8")
     metadata = {
@@ -276,16 +470,7 @@ def _inference_attribution_case(
     profile = {
         "generation_jobs": [],
         "inference_batches": [batch],
-        "resources": {
-            "generate_data": {"max_parallel_tasks": 1, "max_cores": 1, "max_ram_gb": 1},
-            "infer_network": {
-                "max_parallel_runs": 1,
-                "max_cores": 1,
-                "max_ram_gb": 1,
-                "planner": "heuristic",
-                "planner_time_limit_seconds": 30,
-            },
-        },
+        "execution_class": "bulk_canonical",
     }
     dataset = {
         "dataset_id": "dataset_a",
@@ -307,11 +492,7 @@ def _inference_attribution_case(
         "inference_runs": [],
     }
     tool_image = {"kind": "catalog", "repo_digest": "genie3@sha256:" + "e" * 64}
-    resources = {
-        key: value
-        for key, value in profile["resources"]["infer_network"].items()
-        if key != "max_parallel_runs"
-    }
+    resources = deepcopy(INFERENCE_RESOURCES)
     spec = _inference_spec(
         state=state,
         dataset=dataset,
@@ -384,6 +565,7 @@ def _inference_attribution_case(
             "execution_sha256": execution_sha256,
             "dataset_fingerprint": fingerprint,
             "tool_image": tool_image,
+            "resources": run["resources"],
             "run_report": str(published_report),
             "artifact": pipeline._artifact_ref(artifact, cache_hit=False),
         }
@@ -397,6 +579,14 @@ def _inference_attribution_case(
         lambda _root, _path, _label: {"schema_version": "1.0", "runs": [metadata]},
     )
     monkeypatch.setattr(pipeline, "_runtime_image_contract", lambda **_kwargs: tool_image)
+    monkeypatch.setattr(
+        pipeline,
+        "_inference_toolspec",
+        lambda **_kwargs: {
+            "id": "genie3",
+            "runtime_resources": {"threading": {"supported": True, "max_threads": None}},
+        },
+    )
     monkeypatch.setattr(pipeline, "_validate_generated_state_contract", lambda **_kwargs: None)
     return state, run_root
 
@@ -506,8 +696,9 @@ def test_failed_inference_diagnostics_are_published_as_separate_immutable_eviden
         run_id="spathi_run",
         orchestrator_return_code=1,
         tool_exit_code=2,
-        tool_duration_seconds=12.5,
         tool_error="79 models failed",
+        measurement=_physical_measurement(),
+        execution_measurement=_execution_measurement(),
         command_log_path=command_log,
         progress={
             "percent": 100,
@@ -536,9 +727,10 @@ def test_failed_inference_diagnostics_are_published_as_separate_immutable_eviden
         "batch_id": "spathi",
         "run_id": "spathi_run",
     }
-    assert artifact.file(
-        "tool/io/out/failure_diagnostics/model_diagnostics.tsv.gz"
-    ).read_bytes() == b"diagnostic evidence"
+    assert (
+        artifact.file("tool/io/out/failure_diagnostics/model_diagnostics.tsv.gz").read_bytes()
+        == b"diagnostic evidence"
+    )
     assert not any(path.name == "network.csv" for path in artifact.path.rglob("*"))
     bound = failure.with_evidence(artifact)
     assert bound.evidence_artifact == artifact
@@ -734,6 +926,48 @@ def test_inference_key_ignores_classification_regime() -> None:
     )
 
 
+def test_inference_spec_and_cache_key_bind_explicit_run_ram() -> None:
+    state = _state()
+    dataset = {
+        "dataset_id": "dataset_a",
+        "dataset_artifact": {"key": "sha256:" + "d" * 64},
+    }
+    metadata = {
+        "run_id": "genie3_seed_17",
+        "configuration_id": "genie3_default",
+        "selection_role": "baseline",
+        "algorithm_seed": 17,
+        "algorithm_seed_parameter": "random_seed",
+    }
+    base_run = {
+        "run_id": metadata["run_id"],
+        "tool_id": "genie3",
+        "params": {"random_seed": 17},
+        "execution": {"mode": "group_emulated"},
+        "resources": {"threads": 1, "ram_gb": 4.0},
+    }
+    common = {
+        "state": state,
+        "dataset": dataset,
+        "batch": {"kind": "baseline", "regime": "group_only"},
+        "metadata": metadata,
+        "custom_definition": None,
+        "tool_image": {"kind": "catalog", "repo_digest": "genie3@sha256:" + "e" * 64},
+        "resources": deepcopy(INFERENCE_RESOURCES),
+    }
+    low_ram = _inference_spec(run=base_run, **common)
+    high_ram_run = deepcopy(base_run)
+    high_ram_run["resources"]["ram_gb"] = 8.0
+    high_ram = _inference_spec(run=high_ram_run, **common)
+
+    assert low_ram["run"]["resources"]["ram_gb"] == 4.0
+    assert high_ram["run"]["resources"]["ram_gb"] == 8.0
+    assert low_ram != high_ram
+    assert ArtifactKey.from_spec("inference", low_ram) != ArtifactKey.from_spec(
+        "inference", high_ram
+    )
+
+
 def test_missing_tasks_execute_once_per_key_and_reuse_the_artifact(tmp_path: Path) -> None:
     first_key = ArtifactKey.from_spec("inference", {"request": "first"})
     second_key = ArtifactKey.from_spec("inference", {"request": "second"})
@@ -765,8 +999,11 @@ def test_missing_tasks_execute_once_per_key_and_reuse_the_artifact(tmp_path: Pat
 
     reused = _execute_unique_missing_tasks(
         prepared,
-        max_workers=2,
+        capacity=ResourceCapacity(cpu_threads=2, memory_bytes=2),
+        claim=lambda _task: ResourceClaim(cpu_threads=1, memory_bytes=1),
         thread_name_prefix="test-deduplication",
+        schedule_path=tmp_path / "schedule.json",
+        run_root=tmp_path,
         execute=execute,
     )
 
@@ -780,7 +1017,7 @@ def test_missing_tasks_execute_once_per_key_and_reuse_the_artifact(tmp_path: Pat
     assert [task["cache_hit"] for task in prepared] == [False, True, False]
 
 
-def test_missing_tasks_reject_same_key_with_different_specs() -> None:
+def test_missing_tasks_reject_same_key_with_different_specs(tmp_path: Path) -> None:
     key = ArtifactKey.from_spec("inference", {"request": "first"})
     prepared = [
         {"key": key, "spec": {"request": "first"}, "artifact": None},
@@ -790,8 +1027,11 @@ def test_missing_tasks_reject_same_key_with_different_specs() -> None:
     with pytest.raises(BenchmarkConfigError, match="different execution specifications"):
         _execute_unique_missing_tasks(
             prepared,
-            max_workers=1,
+            capacity=ResourceCapacity(cpu_threads=1, memory_bytes=1),
+            claim=lambda _task: ResourceClaim(cpu_threads=1, memory_bytes=1),
             thread_name_prefix="test-deduplication",
+            schedule_path=tmp_path / "schedule.json",
+            run_root=tmp_path,
             execute=lambda _task: pytest.fail("inconsistent tasks must not execute"),
         )
 
@@ -811,8 +1051,11 @@ def test_missing_tasks_reject_executor_artifact_with_another_key(tmp_path: Path)
     with pytest.raises(BenchmarkConfigError, match="for requested key"):
         _execute_unique_missing_tasks(
             prepared,
-            max_workers=1,
+            capacity=ResourceCapacity(cpu_threads=1, memory_bytes=1),
+            claim=lambda _task: ResourceClaim(cpu_threads=1, memory_bytes=1),
             thread_name_prefix="test-deduplication",
+            schedule_path=tmp_path / "schedule.json",
+            run_root=tmp_path,
             execute=lambda _task: Artifact(
                 key=returned,
                 path=tmp_path / returned.digest,

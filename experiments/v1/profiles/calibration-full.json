@@ -80,20 +80,7 @@
     }
   ],
   "inference_batches": [],
-  "resources": {
-    "generate_data": {
-      "max_parallel_tasks": 2,
-      "max_cores": 8,
-      "max_ram_gb": 32
-    },
-    "infer_network": {
-      "max_parallel_runs": 2,
-      "max_cores": 4,
-      "max_ram_gb": 16,
-      "planner": "heuristic",
-      "planner_time_limit_seconds": 60
-    }
-  },
+  "execution_class": "bulk_canonical",
   "planned_design": {
     "simulators": ["dyngen", "scmultisim"],
     "replicates_per_condition": 3,

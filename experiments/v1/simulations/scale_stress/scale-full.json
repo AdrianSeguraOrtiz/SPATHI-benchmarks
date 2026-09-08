@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "id": "scale_stress_full_v1",
-  "description": "Publication scale-stress panel on a rounded, author-defined synthetic grid. The cases exercise separate and joint resource axes without representing or projecting any external dataset.",
+  "description": "Publication scale-stress panel on a rounded, author-defined public synthetic grid selected to cover the intended application-scale envelope. The cases exercise separate and joint resource axes without retaining source samples, identifiers, exact dimensions or biological observations.",
   "seed_plan": "experiments/v1/seeds/seed-plan.json",
   "scale_grid": {
     "provenance": "author_defined_public_synthetic_grid",

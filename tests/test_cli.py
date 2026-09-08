@@ -188,6 +188,10 @@ def test_high_level_scalability_cli_forwards_frozen_policy_selection(
             "work_root": repo.resolve() / "work",
             "profile": "reduced",
             "efficiency_run_id": "efficiency-fixture",
+            "max_cores": None,
+            "max_ram_gb": None,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 0.0,
         }
     ]
 
@@ -229,6 +233,10 @@ def test_high_level_dimensional_transfer_cli_forwards_frozen_policy_selection(
             "work_root": repo.resolve() / "work",
             "profile": "reduced",
             "efficiency_run_id": "efficiency-fixture",
+            "max_cores": None,
+            "max_ram_gb": None,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 0.0,
         }
     ]
 

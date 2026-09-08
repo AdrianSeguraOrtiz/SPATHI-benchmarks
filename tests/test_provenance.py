@@ -45,6 +45,8 @@ def _tracked_repository(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
         },
     )
     _write_json(root, "schemas/profile.json", {})
+    _write_json(root, "schemas/execution-policy.schema.json", {})
+    _write_json(root, "experiments/v1/execution/policy.json", {})
     _write_json(root, "experiments/v1/seeds/seed-plan.json", {"schema_version": "1.0"})
     _write_json(root, "experiments/v1/spathi/search-space.json", {})
     topology = root / "experiments/v1/simulations/input/network.tsv"
@@ -135,6 +137,30 @@ def test_snapshot_includes_scale_stress_generator_request(tmp_path: Path) -> Non
     }
 
     assert request in sources
+
+
+def test_snapshot_includes_runtime_convergence_plan(tmp_path: Path) -> None:
+    root, profile = _tracked_repository(tmp_path)
+    paths = {
+        "tools_params": "work/calibration/tools-params.json",
+        "run_metadata": "work/calibration/run-metadata.json",
+        "custom_tools": "work/calibration/custom-tools.json",
+        "convergence_plans": "work/calibration/convergence-plans.json",
+    }
+    for relative in paths.values():
+        _write_json(root, relative, {})
+    profile["inference_batches"] = [
+        {
+            "id": "convergence",
+            "kind": "spathi",
+            **paths,
+        }
+    ]
+
+    records = _snapshot_source_records(root, profile)
+    by_relative = {record.relative: record.kind for record in records}
+
+    assert by_relative[paths["convergence_plans"]] == "runtime-derived"
 
 
 def _add_production_policy(

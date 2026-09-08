@@ -3,12 +3,20 @@
     {
       "run_id": "spathi_smoke",
       "name": "SPATHI smoke",
-      "docker_image": "spathi-benchmarks/spathi:8bb14c82",
+      "docker_image": "spathi-benchmarks/spathi:06135b7b",
       "execution_mode": "group_native",
       "extra_inputs": ["groups", "tf_list"],
       "outputs": {
         "directed": true,
         "sign": "none"
+      },
+      "runtime_resources": {
+        "threading": {
+          "supported": true,
+          "default_threads": 1,
+          "max_threads": null,
+          "upstream_mapping": "cli:--threads"
+        }
       }
     }
   ]

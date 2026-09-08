@@ -63,16 +63,7 @@
     }
   ],
   "inference_batches": [],
-  "resources": {
-    "generate_data": {"max_parallel_tasks": 1, "max_cores": 8, "max_ram_gb": 48},
-    "infer_network": {
-      "max_parallel_runs": 1,
-      "max_cores": 8,
-      "max_ram_gb": 48,
-      "planner": "heuristic",
-      "planner_time_limit_seconds": 120
-    }
-  },
+  "execution_class": "scale_full",
   "planned_design": {
     "simulators": ["scmultisim"],
     "replicates_per_condition": 1,

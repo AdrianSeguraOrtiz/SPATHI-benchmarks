@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/performance-design.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "claim_scope",
+    "protocol",
+    "budgets"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "performance_v1"},
+    "claim_scope": {"const": "computational_performance_only"},
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_profile",
+        "inference_cache",
+        "concurrency",
+        "repetition_semantics",
+        "order_algorithm",
+        "order_salt",
+        "measurement_source",
+        "measurement_scope",
+        "wall_time_semantics",
+        "memory_measurement_source",
+        "memory_measurement_semantics",
+        "io_measurement"
+      ],
+      "properties": {
+        "output_profile": {"const": "full"},
+        "inference_cache": {"const": "disabled"},
+        "concurrency": {"const": "one_logical_execution_at_a_time"},
+        "repetition_semantics": {"const": "same_algorithm_seed_independent_system_repetitions"},
+        "order_algorithm": {"const": "sha256_rank_rotate_reverse_v1"},
+        "order_salt": {"const": "spathi-performance-counterbalance-v1"},
+        "measurement_source": {"const": "run_report.execution.measurement"},
+        "measurement_scope": {"const": "andrea_execution"},
+        "wall_time_semantics": {"const": "andrea_execution_end_to_end_including_input_verification_preparation_scheduling_merging_and_requested_output_materialization"},
+        "memory_measurement_source": {"const": "run_report.execution.measurement.peak_memory_bytes"},
+        "memory_measurement_semantics": {"const": "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"},
+        "io_measurement": {"const": "unavailable_in_andrea_v1_output_bytes_only"}
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reduced", "full"],
+      "properties": {
+        "reduced": {"$ref": "#/$defs/budget"},
+        "full": {"$ref": "#/$defs/budget"}
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_job_id", "replicate_index", "size_class"],
+      "properties": {
+        "generation_job_id": {"$ref": "#/$defs/id"},
+        "replicate_index": {"type": "integer", "minimum": 1},
+        "size_class": {"enum": ["small", "medium"]}
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configuration_id", "tool_id", "origin"],
+      "properties": {
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "tool_id": {"$ref": "#/$defs/id"},
+        "origin": {"enum": ["catalog", "spathi_production_policy"]}
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "catalog_request",
+        "catalog_metadata",
+        "datasets",
+        "tools",
+        "thread_counts",
+        "system_repetitions",
+        "warmups_per_condition",
+        "algorithm_seed_namespace",
+        "algorithm_seed_replicate_index",
+        "expected_measured_runs",
+        "expected_warmup_runs"
+      ],
+      "properties": {
+        "profile_id": {"$ref": "#/$defs/id"},
+        "catalog_request": {"$ref": "#/$defs/relative_path"},
+        "catalog_metadata": {"$ref": "#/$defs/relative_path"},
+        "datasets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/dataset"}
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/tool"}
+        },
+        "thread_counts": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "system_repetitions": {"type": "integer", "minimum": 1},
+        "warmups_per_condition": {"const": 1},
+        "algorithm_seed_namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+\\.[a-z0-9_]+$"
+        },
+        "algorithm_seed_replicate_index": {"const": 1},
+        "expected_measured_runs": {"type": "integer", "minimum": 1},
+        "expected_warmup_runs": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

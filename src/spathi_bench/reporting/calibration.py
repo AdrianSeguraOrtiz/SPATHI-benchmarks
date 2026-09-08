@@ -20,30 +20,35 @@ from .common import (
     verify_sha256,
     write_report_bundle,
 )
-from .datasets import build_dataset_overview, combine_dataset_overviews
+from .datasets import build_dataset_overview
 
-CALIBRATION_STAGE_ORDER = (
-    "geometry",
-    "estimator",
-    "interaction",
-    "estimator_scale_transfer",
-    "convergence",
-    "validation",
+CALIBRATION_PHASE_ORDER = (
+    ("geometry", "scout"),
+    ("geometry", "confirmation"),
+    ("estimator", "scout"),
+    ("estimator", "confirmation"),
+    ("interaction", "scout"),
+    ("interaction", "confirmation"),
+    ("estimator_scale_transfer", "scout"),
+    ("estimator_scale_transfer", "confirmation"),
+    ("convergence", "final"),
+    ("validation", "final"),
 )
 
 
-def _stage_specifications(search_space: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    specifications: dict[str, dict[str, Any]] = {}
+def _stage_specifications(
+    search_space: dict[str, Any], calibration_budget: str
+) -> dict[str, dict[str, Any]]:
+    stage_definitions: dict[str, dict[str, Any]] = {}
     for raw_stage in require_array(search_space.get("stages"), "calibration search stages"):
         stage = require_mapping(raw_stage, "calibration stage specification")
         stage_id = stage.get("id")
         if isinstance(stage_id, str) and stage_id:
-            specifications[stage_id] = stage
+            stage_definitions[stage_id] = stage
     protocol = search_space.get("selection_protocol")
-    if "validation" not in specifications and isinstance(protocol, dict):
-        specifications["validation"] = {
+    if "validation" not in stage_definitions and isinstance(protocol, dict):
+        stage_definitions["validation"] = {
             "id": "validation",
-            "order": 6,
             "dataset_role": "validation",
             "strategy": "frozen_finalist_selection",
             "purpose": (
@@ -52,6 +57,39 @@ def _stage_specifications(search_space: dict[str, Any]) -> dict[str, dict[str, A
             ),
             "advance_limit": 1,
             "candidates": [],
+        }
+    budgets = require_mapping(search_space.get("calibration_budgets"), "calibration budgets")
+    budget = require_mapping(budgets.get(calibration_budget), "calibration budget")
+    multifidelity = require_mapping(budget.get("multifidelity"), "multifidelity design")
+    phases = require_mapping(multifidelity.get("stages"), "multifidelity phases")
+    specifications: dict[str, dict[str, Any]] = {}
+    for order, (stage_id, fidelity) in enumerate(CALIBRATION_PHASE_ORDER, start=1):
+        definition = require_mapping(
+            stage_definitions.get(stage_id), f"{stage_id} stage specification"
+        )
+        raw_stage_phases = require_mapping(phases.get(stage_id), f"{stage_id} phase design")
+        tier = (
+            require_mapping(raw_stage_phases.get(fidelity), f"{stage_id}.{fidelity} design")
+            if fidelity != "final" or stage_id not in {"convergence", "validation"}
+            else raw_stage_phases
+        )
+        phase_id = f"{stage_id}__{fidelity}"
+        purpose = str(definition.get("purpose", "")).strip()
+        fidelity_explanation = {
+            "scout": "All predeclared values enter this outcome-blind screening phase.",
+            "confirmation": (
+                "Only the fixed-size scout shortlist enters this independent confirmation panel."
+            ),
+            "final": ("This final phase uses the prospectively frozen panel and selection rule."),
+        }[fidelity]
+        specifications[phase_id] = {
+            **definition,
+            **tier,
+            "id": phase_id,
+            "stage_id": stage_id,
+            "fidelity": fidelity,
+            "order": order,
+            "purpose": f"{purpose} {fidelity_explanation}".strip(),
         }
     return specifications
 
@@ -81,7 +119,9 @@ def _parameter_value(value: Any) -> str:
 
 def _stage_payload(
     *,
+    phase_id: str,
     stage_id: str,
+    fidelity: str,
     ranking: dict[str, Any],
     specification: dict[str, Any],
 ) -> dict[str, Any]:
@@ -140,13 +180,23 @@ def _stage_payload(
         isinstance(row, dict) and row.get("peak_memory_mb") is not None for row in observations
     )
     return {
-        "id": stage_id,
+        "id": phase_id,
+        "stage_id": stage_id,
+        "fidelity": fidelity,
         "order": specification.get("order"),
         "purpose": specification.get("purpose"),
         "dataset_role": ranking.get("dataset_role"),
         "primary_metric": ranking.get("primary_metric"),
         "strategy": specification.get("strategy"),
         "advance_limit": specification.get("advance_limit"),
+        "candidate_source": specification.get("candidate_source"),
+        "dataset_selector": specification.get("dataset_selector"),
+        "algorithm_seed_indices": specification.get("algorithm_seed_indices"),
+        "target_scope": specification.get("target_scope"),
+        "expected_physical_fits": specification.get("expected_physical_fits"),
+        "expected_logical_results": specification.get(
+            "expected_logical_results", specification.get("expected_physical_fits")
+        ),
         "candidates": candidates,
         "observations": observations,
         "varying_parameters": varying_parameters,
@@ -184,24 +234,6 @@ def _stage_run_state(
     ):
         raise BenchmarkConfigError(f"{stage_id} benchmark state is not complete for its profile")
     return state, state_path
-
-
-def _dataset_identity(state: dict[str, Any]) -> tuple[tuple[Any, ...], ...]:
-    fields = (
-        "dataset_id",
-        "dataset_role",
-        "simulator_id",
-        "condition_id",
-        "seed",
-        "split_id",
-        "dataset_manifest",
-    )
-    return tuple(
-        sorted(
-            tuple(require_mapping(raw, "benchmark dataset").get(field) for field in fields)
-            for raw in require_array(state.get("datasets"), "benchmark datasets")
-        )
-    )
 
 
 def _record_group_counts(
@@ -263,12 +295,13 @@ def render_calibration_report(
 
     search_path = root / "experiments/v1/spathi/search-space.json"
     search_space = load_json_object(search_path, "SPATHI calibration search space")
-    specifications = _stage_specifications(search_space)
+    specifications = _stage_specifications(search_space, calibration_budget)
     stage_records = require_mapping(workflow.get("stages"), "calibration workflow stages")
-    if set(stage_records) != set(CALIBRATION_STAGE_ORDER):
+    phase_ids = tuple(f"{stage_id}__{fidelity}" for stage_id, fidelity in CALIBRATION_PHASE_ORDER)
+    if set(stage_records) != set(phase_ids):
         raise BenchmarkConfigError(
-            "Completed calibration must contain geometry, estimator, interaction, "
-            "estimator scale transfer, convergence and validation"
+            "Completed calibration must contain every predeclared scout, confirmation "
+            "and final phase"
         )
 
     report_path = central_report_path(
@@ -284,68 +317,74 @@ def render_calibration_report(
     previous_ranking_path: Path | None = None
     previous_ranking_sha256: str | None = None
     ranking_paths: dict[str, Path] = {}
-    dataset_states: dict[str, dict[str, Any]] = {}
+    dataset_records: dict[tuple[str, str], dict[str, Any]] = {}
+    artifact_store: str | None = None
     dataset_state_paths: list[Path] = []
     group_counts: dict[tuple[str, str], int] = {}
     test_access_flags: list[bool] = []
     spathi_commits: set[str] = set()
-    for stage_id in CALIBRATION_STAGE_ORDER:
-        record = require_mapping(stage_records.get(stage_id), f"{stage_id} workflow stage")
+    for phase_index, (stage_id, fidelity) in enumerate(CALIBRATION_PHASE_ORDER):
+        phase_id = f"{stage_id}__{fidelity}"
+        record = require_mapping(stage_records.get(phase_id), f"{phase_id} workflow phase")
         if record.get("status") != "ranked":
-            raise BenchmarkConfigError(f"Completed calibration stage {stage_id!r} is not ranked")
+            raise BenchmarkConfigError(f"Completed calibration phase {phase_id!r} is not ranked")
         ranking_path = repo_file(
             root,
             record.get("ranking"),
-            f"{stage_id} ranking",
+            f"{phase_id} ranking",
             below=calibration_root,
         )
-        verify_sha256(ranking_path, record.get("ranking_sha256"), f"{stage_id} ranking")
-        ranking = load_json_object(ranking_path, f"{stage_id} ranking")
-        if ranking.get("schema_version") != "1.0" or ranking.get("stage_id") != stage_id:
-            raise BenchmarkConfigError(f"Invalid {stage_id} calibration ranking contract")
+        verify_sha256(ranking_path, record.get("ranking_sha256"), f"{phase_id} ranking")
+        ranking = load_json_object(ranking_path, f"{phase_id} ranking")
+        if (
+            ranking.get("schema_version") != "1.0"
+            or ranking.get("stage_id") != stage_id
+            or ranking.get("fidelity") != fidelity
+        ):
+            raise BenchmarkConfigError(f"Invalid {phase_id} calibration ranking contract")
         if ranking.get("calibration_budget") != calibration_budget:
-            raise BenchmarkConfigError(f"{stage_id} ranking uses a different calibration budget")
+            raise BenchmarkConfigError(f"{phase_id} ranking uses a different calibration budget")
         if ranking.get("profile_id") != record.get("profile_id"):
-            raise BenchmarkConfigError(f"{stage_id} ranking profile differs from workflow state")
+            raise BenchmarkConfigError(f"{phase_id} ranking profile differs from workflow state")
         if ranking.get("search_space_sha256") != sha256_file(search_path):
-            raise BenchmarkConfigError(f"{stage_id} ranking uses a different search space")
+            raise BenchmarkConfigError(f"{phase_id} ranking uses a different search space")
         if ranking.get("spathi_commit") != workflow["identity"].get("spathi_commit"):
-            raise BenchmarkConfigError(f"{stage_id} ranking uses a different SPATHI commit")
+            raise BenchmarkConfigError(f"{phase_id} ranking uses a different SPATHI commit")
         parent = ranking.get("parent_ranking")
         if previous_ranking_path is None:
             if parent is not None:
-                raise BenchmarkConfigError("Geometry ranking unexpectedly declares a parent")
+                raise BenchmarkConfigError("Geometry scout unexpectedly declares a parent")
         else:
-            parent_record = require_mapping(parent, f"{stage_id} parent ranking")
+            parent_record = require_mapping(parent, f"{phase_id} parent ranking")
             parent_path = repo_file(
                 root,
                 parent_record.get("path"),
-                f"{stage_id} parent ranking",
+                f"{phase_id} parent ranking",
                 below=calibration_root,
             )
             if (
                 parent_path != previous_ranking_path
                 or parent_record.get("sha256") != previous_ranking_sha256
-                or parent_record.get("stage_id")
-                != CALIBRATION_STAGE_ORDER[CALIBRATION_STAGE_ORDER.index(stage_id) - 1]
+                or parent_record.get("stage_id") != CALIBRATION_PHASE_ORDER[phase_index - 1][0]
+                or parent_record.get("fidelity") != CALIBRATION_PHASE_ORDER[phase_index - 1][1]
             ):
-                raise BenchmarkConfigError(f"{stage_id} ranking breaks the calibration chain")
+                raise BenchmarkConfigError(f"{phase_id} ranking breaks the calibration chain")
         test_access = ranking.get("test_data_accessed")
         if test_access is not False:
             raise BenchmarkConfigError(
-                f"{stage_id} ranking accessed or ambiguously handled test data"
+                f"{phase_id} ranking accessed or ambiguously handled test data"
             )
         test_access_flags.append(test_access)
         spathi_commit = ranking.get("spathi_commit")
         if isinstance(spathi_commit, str):
             spathi_commits.add(spathi_commit)
         observations = require_array(
-            ranking.get("calibration_rows"), f"{stage_id} calibration rows"
+            ranking.get("calibration_rows"), f"{phase_id} calibration rows"
         )
         observed_datasets = _record_group_counts(
             observations=observations,
             dataset_role=ranking.get("dataset_role"),
-            stage_id=stage_id,
+            stage_id=phase_id,
             known=group_counts,
         )
         stage_state, stage_state_path = _stage_run_state(
@@ -353,7 +392,7 @@ def render_calibration_report(
             version_root=version,
             record=record,
             profile_id=record.get("profile_id"),
-            stage_id=stage_id,
+            stage_id=phase_id,
         )
         state_datasets = {
             (str(item.get("dataset_role")), str(item.get("dataset_id")))
@@ -364,28 +403,31 @@ def render_calibration_report(
             raise BenchmarkConfigError(
                 f"{stage_id} ranking datasets differ from its completed benchmark state"
             )
-        role = str(ranking["dataset_role"])
-        specification = specifications.get(stage_id, {})
-        selector = specification.get("dataset_selector")
-        panel_id = (
-            str(selector.get("split_id"))
-            if isinstance(selector, dict) and selector.get("split_id")
-            else role
-        )
-        previous_state = dataset_states.setdefault(panel_id, stage_state)
-        if _dataset_identity(previous_state) != _dataset_identity(stage_state):
-            raise BenchmarkConfigError(
-                f"Calibration stages disagree on the {panel_id!r} dataset panel"
-            )
+        specification = specifications.get(phase_id, {})
+        raw_artifact_store = stage_state.get("artifact_store")
+        if not isinstance(raw_artifact_store, str) or not raw_artifact_store:
+            raise BenchmarkConfigError(f"{phase_id} state has no artifact store")
+        if artifact_store is None:
+            artifact_store = raw_artifact_store
+        elif artifact_store != raw_artifact_store:
+            raise BenchmarkConfigError("Calibration phases use different artifact stores")
+        for raw_dataset in require_array(stage_state.get("datasets"), "benchmark datasets"):
+            dataset = require_mapping(raw_dataset, "benchmark dataset")
+            key = (str(dataset.get("dataset_role")), str(dataset.get("dataset_id")))
+            existing = dataset_records.setdefault(key, dict(dataset))
+            if existing != dataset:
+                raise BenchmarkConfigError(f"Calibration phases disagree on dataset {key!r}")
         dataset_state_paths.append(stage_state_path)
         stages.append(
             _stage_payload(
                 stage_id=stage_id,
+                phase_id=phase_id,
+                fidelity=fidelity,
                 ranking=ranking,
                 specification=specification,
             )
         )
-        ranking_paths[stage_id] = ranking_path
+        ranking_paths[phase_id] = ranking_path
         input_paths.append(ranking_path)
         previous_ranking_path = ranking_path
         previous_ranking_sha256 = sha256_file(ranking_path)
@@ -423,17 +465,18 @@ def render_calibration_report(
         raise BenchmarkConfigError("Frozen selection differs from the validation winner")
     input_paths.append(selected_path)
 
-    dataset_overviews: list[dict[str, Any]] = []
-    for role in sorted(dataset_states):
-        overview, overview_inputs = build_dataset_overview(
-            repo_root=root,
-            version_root=version,
-            benchmark_state=dataset_states[role],
-            group_counts=group_counts,
-        )
-        dataset_overviews.append(overview)
-        input_paths.extend(overview_inputs)
-    datasets = combine_dataset_overviews(dataset_overviews)
+    if artifact_store is None or not dataset_records:
+        raise BenchmarkConfigError("Calibration contains no benchmark datasets")
+    datasets, overview_inputs = build_dataset_overview(
+        repo_root=root,
+        version_root=version,
+        benchmark_state={
+            "artifact_store": artifact_store,
+            "datasets": [dataset_records[key] for key in sorted(dataset_records)],
+        },
+        group_counts=group_counts,
+    )
+    input_paths.extend(overview_inputs)
     input_paths.extend(dataset_state_paths)
 
     links = [
@@ -448,10 +491,14 @@ def render_calibration_report(
     ]
     links.extend(
         {
-            "label": f"{stage_id.title()} ranking",
-            "href": safe_relative_link(report_path, ranking_paths[stage_id], calibration_root),
+            "label": f"{stage_id.replace('_', ' ').title()} {fidelity.title()} ranking",
+            "href": safe_relative_link(
+                report_path,
+                ranking_paths[f"{stage_id}__{fidelity}"],
+                calibration_root,
+            ),
         }
-        for stage_id in CALIBRATION_STAGE_ORDER
+        for stage_id, fidelity in CALIBRATION_PHASE_ORDER
     )
     payload = {
         "schema_version": "1.0",
@@ -463,7 +510,7 @@ def render_calibration_report(
             "identity": workflow["identity"],
         },
         "integrity": {
-            "stage_order": list(CALIBRATION_STAGE_ORDER),
+            "phase_order": list(phase_ids),
             "all_stages_ranked": True,
             "test_data_accessed_before_freeze": False,
             "single_spathi_commit": len(spathi_commits) == 1,

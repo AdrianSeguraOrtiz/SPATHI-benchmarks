@@ -11,7 +11,7 @@
     "description",
     "generation_jobs",
     "inference_batches",
-    "resources",
+    "execution_class",
     "planned_design",
     "statistics"
   ],
@@ -20,12 +20,13 @@
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
     "purpose": {
-      "enum": ["smoke", "calibration", "selection", "regression", "benchmark", "efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer"]
+      "enum": ["smoke", "calibration", "selection", "regression", "benchmark", "efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer", "performance"]
     },
     "calibration_budget": {"enum": ["full", "reduced"]},
     "calibration_stage": {
       "enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"]
     },
+    "calibration_fidelity": {"enum": ["scout", "confirmation", "final"]},
     "production_config": {"$ref": "#/$defs/relative_path"},
     "materialization_manifest": {"$ref": "#/$defs/relative_path"},
     "description": {"type": "string", "minLength": 1},
@@ -37,7 +38,17 @@
       "type": "array",
       "items": {"$ref": "#/$defs/inference_batch"}
     },
-    "resources": {"$ref": "#/$defs/resources"},
+    "execution_class": {
+      "enum": [
+        "bulk_canonical",
+        "bulk_full",
+        "efficiency_development_canonical",
+        "performance_full",
+        "scale_canonical",
+        "scale_full",
+        "smoke_full"
+      ]
+    },
     "planned_design": {"$ref": "#/$defs/planned_design"},
     "statistics": {"$ref": "#/$defs/statistics"}
   },
@@ -73,11 +84,26 @@
         },
         "required": ["status", "purpose"]
       },
-      "then": {"required": ["calibration_stage"]}
+      "then": {"required": ["calibration_stage", "calibration_fidelity"]}
     },
     {
       "if": {"properties": {"purpose": {"const": "selection"}}, "required": ["purpose"]},
-      "then": {"properties": {"calibration_stage": {"const": "validation"}}}
+      "then": {"properties": {"calibration_stage": {"const": "validation"}, "calibration_fidelity": {"const": "final"}}}
+    },
+    {
+      "if": {"properties": {"calibration_stage": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer"]}}, "required": ["calibration_stage"]},
+      "then": {"properties": {"calibration_fidelity": {"enum": ["scout", "confirmation"]}}}
+    },
+    {
+      "if": {"properties": {"calibration_stage": {"const": "convergence"}}, "required": ["calibration_stage"]},
+      "then": {
+        "properties": {
+          "calibration_fidelity": {"const": "final"},
+          "inference_batches": {
+            "items": {"required": ["convergence_plans"]}
+          }
+        }
+      }
     },
     {
       "if": {
@@ -86,7 +112,8 @@
       },
       "then": {
         "properties": {
-          "calibration_stage": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"]}
+          "calibration_stage": {"enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"]},
+          "calibration_fidelity": {"enum": ["scout", "confirmation", "final"]}
         }
       }
     },
@@ -123,7 +150,7 @@
         "simulator_runs": {"$ref": "#/$defs/relative_path"},
         "generator_request": {"$ref": "#/$defs/relative_path"},
         "dataset_role": {
-          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
         },
         "split_id": {"$ref": "#/$defs/id"},
         "condition_id": {"$ref": "#/$defs/id"}
@@ -154,7 +181,7 @@
         "id": {"$ref": "#/$defs/id"},
         "kind": {"enum": ["baseline", "spathi"]},
         "dataset_role": {
-          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
         },
         "generation_jobs": {
           "type": "array",
@@ -162,12 +189,24 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/id"}
         },
+        "replicate_indices": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/id"},
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "integer", "minimum": 1}
+          }
+        },
         "regime": {
           "enum": ["group_only", "order_aware", "prior_assisted"]
         },
         "tools_params": {"$ref": "#/$defs/relative_path"},
         "custom_tools": {"$ref": "#/$defs/relative_path"},
         "calibration_manifest": {"$ref": "#/$defs/relative_path"},
+        "convergence_plans": {"$ref": "#/$defs/relative_path"},
         "run_metadata": {"$ref": "#/$defs/relative_path"}
       },
       "allOf": [
@@ -177,41 +216,6 @@
           "else": {"not": {"required": ["custom_tools"]}}
         }
       ]
-    },
-    "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["generate_data", "infer_network"],
-      "properties": {
-        "generate_data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["max_parallel_tasks", "max_cores", "max_ram_gb"],
-          "properties": {
-            "max_parallel_tasks": {"type": "integer", "minimum": 1},
-            "max_cores": {"type": "integer", "minimum": 1},
-            "max_ram_gb": {"type": "number", "minimum": 1}
-          }
-        },
-        "infer_network": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "max_parallel_runs",
-            "max_cores",
-            "max_ram_gb",
-            "planner",
-            "planner_time_limit_seconds"
-          ],
-          "properties": {
-            "max_parallel_runs": {"type": "integer", "minimum": 1},
-            "max_cores": {"type": "integer", "minimum": 1},
-            "max_ram_gb": {"type": "number", "minimum": 1},
-            "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
-            "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0}
-          }
-        }
-      }
     },
     "planned_design": {
       "type": "object",
@@ -392,7 +396,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer"]
+            "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
           }
         },
         "generation_jobs": {

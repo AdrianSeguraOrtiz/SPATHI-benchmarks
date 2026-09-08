@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "id": "spathi_scalability_boundary_v1",
+  "decision_scope": "computational_resources_only",
+  "resource_telemetry": "andrea_canonical_execution_telemetry",
+  "forbidden_decision_inputs": [
+    "ground_truth",
+    "accuracy_metric",
+    "network_edges",
+    "expression_values"
+  ],
+  "target_scout": {
+    "method": "sha256_gene_id",
+    "salt": "spathi-scalability-scout-v1",
+    "hash_coordinates": ["random_seed", "dataset_id", "gene_id"],
+    "sizes": {
+      "reduced": 64,
+      "full": 128
+    }
+  },
+  "resource_boundary": {
+    "wall_time_measurement": "andrea_execution.wall_time_seconds",
+    "wall_time_limit_seconds": {
+      "reduced": 43200,
+      "full": 86400
+    },
+    "maximum_projected_wall_time_fraction": 0.8,
+    "maximum_observed_memory_fraction": 0.8,
+    "terminal_statuses": ["oom", "timeout", "tool_error"]
+  },
+  "panels": {
+    "reduced": {
+      "dataset_ids": [
+        "scale_stress_reduced_baseline",
+        "scale_stress_reduced_moderate"
+      ],
+      "lanes": [
+        {
+          "id": "reduced_progression",
+          "ordered_dataset_ids": [
+            "scale_stress_reduced_baseline",
+            "scale_stress_reduced_moderate"
+          ]
+        }
+      ]
+    },
+    "full": {
+      "dataset_ids": [
+        "scale_stress_full_baseline",
+        "scale_stress_full_cell_heavy",
+        "scale_stress_full_gene_heavy",
+        "scale_stress_full_tf_heavy",
+        "scale_stress_full_joint_balanced",
+        "scale_stress_full_joint_imbalanced",
+        "scale_stress_full_invariant_control"
+      ],
+      "lanes": [
+        {
+          "id": "cell_axis",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_cell_heavy"
+          ]
+        },
+        {
+          "id": "gene_axis",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_gene_heavy"
+          ]
+        },
+        {
+          "id": "tf_axis",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_tf_heavy"
+          ]
+        },
+        {
+          "id": "joint_balanced_axis",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_joint_balanced"
+          ]
+        },
+        {
+          "id": "joint_imbalanced_axis",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_joint_imbalanced"
+          ]
+        },
+        {
+          "id": "joint_invariant_control",
+          "ordered_dataset_ids": [
+            "scale_stress_full_baseline",
+            "scale_stress_full_invariant_control"
+          ]
+        }
+      ]
+    }
+  }
+}

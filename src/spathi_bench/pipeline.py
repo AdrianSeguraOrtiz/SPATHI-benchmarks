@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 from collections import defaultdict
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,19 @@ from .config import (
     validate_locked_repository,
     validate_profile_references,
 )
+from .convergence_execution import (
+    ConvergenceBinding,
+    execute_convergence_tasks,
+    index_convergence_plans,
+    logical_execution_contract,
+    validate_logical_convergence_artifact,
+)
+from .efficiency_order import counterbalanced_execution_orders
 from .environment_lock import validate_environment_lock
+from .execution_policy import (
+    materialize_inference_run_resources,
+    resolve_execution_class,
+)
 from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
 from .provenance import (
@@ -44,6 +57,18 @@ from .provenance import (
     frozen_profile,
     frozen_repository_root,
     validate_run_inputs,
+)
+from .resource_plan import (
+    detect_host_capacity,
+    load_or_create_runtime_plan,
+    validate_runtime_plan,
+)
+from .resource_scheduler import (
+    ResourceCapacity,
+    ResourceClaim,
+    ResourceScheduleError,
+    ScheduledTask,
+    execute_resource_schedule,
 )
 from .runtime import (
     CommandExecutionError,
@@ -59,7 +84,12 @@ from .runtime import (
     stream_command,
     validate_andrea_import,
 )
-from .safe_io import atomic_write_json, path_below_no_symlinks, reject_symlink_components
+from .safe_io import (
+    atomic_write_json,
+    path_below_no_symlinks,
+    reject_symlink_components,
+    write_idempotent_json,
+)
 from .scenario_inputs import scenario_external_input_records
 from .state import (
     STATE_SCHEMA_VERSION,
@@ -93,8 +123,9 @@ class InferenceExecutionFailure(RuntimeError):
         run_id: str,
         orchestrator_return_code: int,
         tool_exit_code: int,
-        tool_duration_seconds: float,
         tool_error: str,
+        measurement: dict[str, Any],
+        execution_measurement: dict[str, Any],
         command_log_path: Path,
         progress: dict[str, Any] | None,
         tool_log_tail: str | None,
@@ -105,8 +136,9 @@ class InferenceExecutionFailure(RuntimeError):
         self.run_id = run_id
         self.orchestrator_return_code = orchestrator_return_code
         self.tool_exit_code = tool_exit_code
-        self.tool_duration_seconds = tool_duration_seconds
         self.tool_error = tool_error
+        self.measurement = copy.deepcopy(measurement)
+        self.execution_measurement = copy.deepcopy(execution_measurement)
         self.command_log_path = command_log_path.resolve()
         self.progress = progress
         self.tool_log_tail = tool_log_tail
@@ -129,8 +161,9 @@ class InferenceExecutionFailure(RuntimeError):
             run_id=self.run_id,
             orchestrator_return_code=self.orchestrator_return_code,
             tool_exit_code=self.tool_exit_code,
-            tool_duration_seconds=self.tool_duration_seconds,
             tool_error=self.tool_error,
+            measurement=self.measurement,
+            execution_measurement=self.execution_measurement,
             command_log_path=self.command_log_path,
             progress=self.progress,
             tool_log_tail=self.tool_log_tail,
@@ -223,7 +256,21 @@ def _load_existing_state(repo_root: Path, profile_id: str, run_root: Path) -> di
     if not state_path(run_root).is_file():
         return None
     validate_run_inputs(repo_root, profile_id, run_root)
-    return load_state(run_root, profile_id)
+    state = load_state(run_root, profile_id)
+    runtime_plan = validate_runtime_plan(
+        load_json_object(run_root / "runtime-plan.json", "runtime plan")
+    )
+    if state.get("runtime_plan") != runtime_plan:
+        raise BenchmarkConfigError("Benchmark state differs from its immutable runtime plan")
+    profile = frozen_profile(run_root, profile_id)
+    execution_plan = resolve_execution_class(
+        repo_root=frozen_repository_root(run_root),
+        class_id=str(profile["execution_class"]),
+        runtime_plan=runtime_plan,
+    )
+    if state.get("execution_plan") != execution_plan:
+        raise BenchmarkConfigError("Benchmark state differs from its resolved execution plan")
+    return state
 
 
 def _validate_state_andrea(state: dict[str, Any], observed: dict[str, Any]) -> None:
@@ -364,6 +411,41 @@ def _benchmark_repository_provenance(run_root: Path) -> dict[str, Any]:
     return dict(repository)
 
 
+def _prepare_runtime_plan(
+    *,
+    run_root: Path,
+    supplied: Mapping[str, Any] | None,
+    max_cores: int | None,
+    max_ram_gb: float | None,
+    reserve_cores: int,
+    reserve_ram_gb: float,
+) -> dict[str, Any]:
+    """Persist the exact machine capacity used by one immutable stage run."""
+
+    path = run_root / "runtime-plan.json"
+    if supplied is not None:
+        if (
+            any(value is not None for value in (max_cores, max_ram_gb))
+            or reserve_cores != 0
+            or reserve_ram_gb != 0
+        ):
+            raise BenchmarkConfigError(
+                "A supplied runtime plan cannot be combined with resource options"
+            )
+        plan = validate_runtime_plan(supplied)
+        write_idempotent_json(path, plan, "Runtime plan", boundary=run_root)
+        return plan
+    return load_or_create_runtime_plan(
+        path,
+        boundary=run_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=run_root),
+    )
+
+
 def _initial_state(
     *,
     created_at: str,
@@ -376,6 +458,8 @@ def _initial_state(
     host_environment: dict[str, Any],
     benchmark_environment: dict[str, Any],
     docker_runtime: dict[str, Any],
+    runtime_plan: dict[str, Any],
+    execution_plan: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": STATE_SCHEMA_VERSION,
@@ -393,6 +477,8 @@ def _initial_state(
         "host_environment": host_environment,
         "benchmark_environment": benchmark_environment,
         "docker_runtime_environment": docker_runtime,
+        "runtime_plan": runtime_plan,
+        "execution_plan": execution_plan,
         "artifact_store": str(_artifact_store(run_root).root.resolve()),
         "benchmarks": [],
         "datasets": [],
@@ -421,6 +507,11 @@ def preflight(
     andrea_repo: Path,
     spathi_repo: Path,
     profile_file: Path | None = None,
+    runtime_plan: Mapping[str, Any] | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> Path:
     # Re-run the committed design gates before both fresh and resumed work.  A
     # stale seed plan must never be hidden by an already-preflighted state.
@@ -429,6 +520,25 @@ def preflight(
     validate_design_contracts(repo_root, andrea_repo)
     existing = _load_existing_state(repo_root, profile_id, run_root)
     if existing is not None:
+        persisted_runtime_plan = _prepare_runtime_plan(
+            run_root=run_root,
+            supplied=runtime_plan,
+            max_cores=max_cores,
+            max_ram_gb=max_ram_gb,
+            reserve_cores=reserve_cores,
+            reserve_ram_gb=reserve_ram_gb,
+        )
+        frozen_root = frozen_repository_root(run_root)
+        profile = frozen_profile(run_root, profile_id)
+        execution_plan = resolve_execution_class(
+            repo_root=frozen_root,
+            class_id=str(profile["execution_class"]),
+            runtime_plan=persisted_runtime_plan,
+        )
+        if existing.get("runtime_plan") != persisted_runtime_plan:
+            raise BenchmarkConfigError("Existing state differs from its immutable runtime plan")
+        if existing.get("execution_plan") != execution_plan:
+            raise BenchmarkConfigError("Existing state differs from its resolved execution plan")
         _validate_docker_runtime(existing, docker_runtime_environment())
         if not status_at_least(existing, "preflighted"):
             raise BenchmarkConfigError("Existing run has not completed preflight")
@@ -457,6 +567,19 @@ def preflight(
     frozen_root = frozen_repository_root(run_root)
     profile = frozen_profile(run_root, profile_id)
     validate_profile_references(frozen_root, profile)
+    persisted_runtime_plan = _prepare_runtime_plan(
+        run_root=run_root,
+        supplied=runtime_plan,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+    )
+    execution_plan = resolve_execution_class(
+        repo_root=frozen_root,
+        class_id=str(profile["execution_class"]),
+        runtime_plan=persisted_runtime_plan,
+    )
     repository_lock = load_repo_lock(frozen_root)
     repositories = {
         "andrea": _validate_andrea_repository(frozen_root, andrea_repo),
@@ -494,6 +617,8 @@ def preflight(
             "host_environment": host_environment,
             "benchmark_environment": benchmark_environment,
             "docker_runtime_environment": docker_runtime,
+            "runtime_plan": persisted_runtime_plan,
+            "execution_plan": execution_plan,
             "status": "passed",
         }
         if any(report.get(field) != value for field, value in expected.items()):
@@ -522,12 +647,14 @@ def preflight(
             host_environment=host_environment,
             benchmark_environment=benchmark_environment,
             docker_runtime=docker_runtime,
+            runtime_plan=persisted_runtime_plan,
+            execution_plan=execution_plan,
         )
         write_state(run_root, state)
         return preflight_dir / "benchmark-preflight.json"
     temporary = Path(tempfile.mkdtemp(prefix=".preflight-", dir=run_root))
     try:
-        resources = profile["resources"]["generate_data"]
+        resources = execution_plan["operations"]["generate_data"]
         for job in profile["generation_jobs"]:
             if "generator_request" in job:
                 from .scale_stress import validate_scale_stress_request
@@ -592,9 +719,9 @@ def preflight(
                     "--max-parallel-tasks",
                     str(resources["max_parallel_tasks"]),
                     "--max-cores",
-                    str(resources["max_cores"]),
+                    str(resources["cpu_threads"]),
                     "--max-ram-gb",
-                    str(resources["max_ram_gb"]),
+                    str(resources["memory_gib"]),
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
@@ -610,6 +737,8 @@ def preflight(
             "host_environment": host_environment,
             "benchmark_environment": benchmark_environment,
             "docker_runtime_environment": docker_runtime,
+            "runtime_plan": persisted_runtime_plan,
+            "execution_plan": execution_plan,
             "status": "passed",
         }
         atomic_write_json(
@@ -634,6 +763,8 @@ def preflight(
         host_environment=host_environment,
         benchmark_environment=benchmark_environment,
         docker_runtime=docker_runtime,
+        runtime_plan=persisted_runtime_plan,
+        execution_plan=execution_plan,
     )
     write_state(run_root, state)
     return preflight_dir / "benchmark-preflight.json"
@@ -825,6 +956,7 @@ def _scale_stress_generation_spec(
     return {
         "schema_version": "1.0",
         "generator": "spathi_scale_stress",
+        "measurement_contract": "scale_stress_generation_monotonic_wall_v1",
         "generator_implementation": {
             name: sha256_file(implementation_root / name)
             for name in ("scale_stress.py", "safe_io.py", "seeds.py")
@@ -844,6 +976,45 @@ def _scale_stress_generation_spec(
         "split_id": job["split_id"],
         "condition_id": job["condition_id"],
     }
+
+
+def scale_stress_generation_wall_time(artifact: Artifact) -> float:
+    """Return the immutable wall time recorded while a scale-stress artifact was built."""
+
+    try:
+        measurement_path = artifact.file("generation-measurement.json")
+    except Exception as exc:  # Translate the artifact boundary to the public config error.
+        raise BenchmarkConfigError(
+            "Scale-stress dataset artifact has no canonical generation measurement"
+        ) from exc
+    measurement = load_json_object(
+        measurement_path,
+        "scale-stress generation measurement",
+    )
+    expected_fields = {
+        "schema_version",
+        "scope",
+        "wall_time_seconds",
+        "wall_source",
+        "wall_semantics",
+    }
+    wall_time = measurement.get("wall_time_seconds")
+    if (
+        set(measurement) != expected_fields
+        or measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "scale_stress_generation"
+        or measurement.get("wall_source") != "benchmark_monotonic_clock"
+        or measurement.get("wall_semantics")
+        != "fresh_artifact_generation_excluding_cache_lookup_and_publication"
+        or isinstance(wall_time, bool)
+        or not isinstance(wall_time, (int, float))
+        or not math.isfinite(float(wall_time))
+        or float(wall_time) < 0
+    ):
+        raise BenchmarkConfigError(
+            "Scale-stress dataset artifact has an invalid generation measurement"
+        )
+    return float(wall_time)
 
 
 def _generation_image_requirements(
@@ -902,7 +1073,7 @@ def generate_data(
     _validate_state_andrea(state, observed_andrea)
     _validate_host_environment(state, andrea_host_environment())
     profile = frozen_profile(run_root, profile_id)
-    resources = profile["resources"]["generate_data"]
+    resources = state["execution_plan"]["operations"]["generate_data"]
     store = _artifact_store(run_root)
     benchmarks: list[dict[str, Any]] = []
     datasets: list[dict[str, Any]] = []
@@ -931,25 +1102,47 @@ def generate_data(
                 with store.staging_directory(key) as staging:
                     output_root = staging / "output"
                     output_root.mkdir()
+                    generation_started_ns = time.perf_counter_ns()
                     generate_scale_stress_panel(
                         repo_root=frozen_root,
                         request_path=request,
                         output_root=output_root,
                     )
+                    generation_finished_ns = time.perf_counter_ns()
+                    atomic_write_json(
+                        staging / "generation-measurement.json",
+                        {
+                            "schema_version": "1.0",
+                            "scope": "scale_stress_generation",
+                            "wall_time_seconds": round(
+                                (generation_finished_ns - generation_started_ns)
+                                / 1_000_000_000.0,
+                                6,
+                            ),
+                            "wall_source": "benchmark_monotonic_clock",
+                            "wall_semantics": (
+                                "fresh_artifact_generation_excluding_cache_lookup_and_publication"
+                            ),
+                        },
+                        "scale-stress generation measurement",
+                        boundary=staging,
+                    )
                     unique_direct_manifest(output_root, "benchmark-manifest.json")
                     artifact = store.publish_from_temp(staging, kind="dataset", spec=spec)
             else:
                 dataset_hits += 1
+            scale_stress_generation_wall_time(artifact)
             manifest_path = unique_direct_manifest(
                 artifact.path / "output", "benchmark-manifest.json"
             )
             job_datasets = datasets_from_benchmark(manifest_path, job["id"])
-            for dataset in job_datasets:
+            for replicate_index, dataset in enumerate(job_datasets, start=1):
                 dataset.update(
                     {
                         "dataset_role": job["dataset_role"],
                         "split_id": job["split_id"],
                         "condition_id": job["condition_id"],
+                        "replicate_index": replicate_index,
                         "dataset_artifact": _artifact_ref(artifact, cache_hit=cache_hit),
                     }
                 )
@@ -998,9 +1191,9 @@ def generate_data(
                             "--max-parallel-tasks",
                             str(resources["max_parallel_tasks"]),
                             "--max-cores",
-                            str(resources["max_cores"]),
+                            str(resources["cpu_threads"]),
                             "--max-ram-gb",
-                            str(resources["max_ram_gb"]),
+                            str(resources["memory_gib"]),
                         ],
                         repo_root=repo_root,
                         andrea_repo=andrea_repo,
@@ -1017,12 +1210,13 @@ def generate_data(
             dataset_hits += 1
         manifest_path = unique_direct_manifest(artifact.path / "output", "benchmark-manifest.json")
         job_datasets = datasets_from_benchmark(manifest_path, job["id"])
-        for dataset in job_datasets:
+        for replicate_index, dataset in enumerate(job_datasets, start=1):
             dataset.update(
                 {
                     "dataset_role": job["dataset_role"],
                     "split_id": job["split_id"],
                     "condition_id": job["condition_id"],
+                    "replicate_index": replicate_index,
                     "dataset_artifact": _artifact_ref(artifact, cache_hit=cache_hit),
                 }
             )
@@ -1054,6 +1248,27 @@ def _single_custom_definition(custom_tools: dict[str, Any], run_id: str) -> dict
             f"Expected one custom tool definition for {run_id!r}, found {len(matches)}"
         )
     return matches[0]
+
+
+def _inference_toolspec(
+    *,
+    andrea_repo: Path,
+    batch_kind: str,
+    run: Mapping[str, Any],
+    custom_definition: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if batch_kind == "spathi":
+        if custom_definition is None:
+            raise BenchmarkConfigError(
+                f"SPATHI run {run.get('run_id')!r} has no custom tool definition"
+            )
+        return dict(custom_definition)
+    if custom_definition is not None:
+        raise BenchmarkConfigError("Catalog runs cannot carry a custom tool definition")
+    return load_json_object(
+        _catalog_spec_path(andrea_repo, f"tool:{run['tool_id']}"),
+        f"{run['tool_id']} tool specification",
+    )
 
 
 def _validate_single_run_report(
@@ -1192,19 +1407,25 @@ def _validated_failed_inference(
     if not isinstance(result, dict) or result.get("status") != "failed":
         raise BenchmarkConfigError("Failed inference report has invalid tool execution details")
     exit_code = result.get("exit_code")
-    duration = result.get("duration_seconds")
     error = result.get("error")
+    measurement = result.get("measurement")
+    execution = result.get("execution")
+    report_execution = report.get("execution")
+    execution_measurement = (
+        report_execution.get("measurement") if isinstance(report_execution, dict) else None
+    )
     if (
         not isinstance(exit_code, int)
         or isinstance(exit_code, bool)
-        or not isinstance(duration, (int, float))
-        or isinstance(duration, bool)
-        or not math.isfinite(float(duration))
-        or float(duration) < 0
         or not isinstance(error, str)
         or not error.strip()
+        or not isinstance(measurement, dict)
+        or not isinstance(execution, dict)
+        or not isinstance(execution_measurement, dict)
     ):
         raise BenchmarkConfigError("Failed inference report lacks valid failure accounting")
+    _validate_failed_measurement(measurement, execution=execution)
+    _validate_andrea_execution_measurement(execution_measurement)
 
     progress_path: Path | None = None
     if result.get("progress_path") is not None:
@@ -1218,12 +1439,132 @@ def _validated_failed_inference(
         run_id=run_id,
         orchestrator_return_code=command_failure.return_code,
         tool_exit_code=exit_code,
-        tool_duration_seconds=float(duration),
         tool_error=error.strip(),
+        measurement=measurement,
+        execution_measurement=execution_measurement,
         command_log_path=command_failure.log_path,
         progress=_failure_progress_snapshot(progress_path),
         tool_log_tail=_tail_text(log_path),
     )
+
+
+def _validate_failed_measurement(
+    measurement: Mapping[str, Any],
+    *,
+    execution: Mapping[str, Any],
+) -> None:
+    """Validate the physical or grouped logical telemetry emitted by ANDREA."""
+
+    mode = execution.get("mode")
+    scope_by_mode = {
+        "global": "physical_task",
+        "group_native": "physical_task",
+        "column_native": "physical_task",
+        "group_emulated": "logical_run",
+        "group_aggregated": "logical_run",
+    }
+    expected_scope = scope_by_mode.get(mode)
+    wall_time = measurement.get("wall_time_seconds")
+    cpu_time = measurement.get("cpu_time_seconds")
+    peak_memory = measurement.get("peak_memory_bytes")
+    output_bytes = measurement.get("output_bytes")
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
+    if (
+        expected_scope is None
+        or measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != expected_scope
+        or isinstance(wall_time, bool)
+        or not isinstance(wall_time, (int, float))
+        or not math.isfinite(float(wall_time))
+        or float(wall_time) < 0
+        or (
+            cpu_time is not None
+            and (
+                isinstance(cpu_time, bool)
+                or not isinstance(cpu_time, (int, float))
+                or not math.isfinite(float(cpu_time))
+                or float(cpu_time) < 0
+            )
+        )
+        or (peak_memory is not None and (type(peak_memory) is not int or peak_memory < 0))
+        or type(output_bytes) is not int
+        or output_bytes < 0
+        or not isinstance(assigned, Mapping)
+        or not isinstance(telemetry, Mapping)
+    ):
+        raise BenchmarkConfigError("Failed inference report has invalid resource telemetry")
+
+    if expected_scope == "physical_task":
+        status = telemetry.get("status")
+        started = status != "not_started"
+        if (
+            status not in {"complete", "partial", "unavailable", "not_started"}
+            or "container_wall_time_seconds" not in measurement
+            or telemetry.get("wall_source") != ("andrea_monotonic_clock" if started else None)
+            or telemetry.get("wall_semantics")
+            != (
+                "physical_task_end_to_end_including_container_launch_and_exit_collection"
+                if started
+                else "not_started"
+            )
+            or type(assigned.get("threads")) is not int
+            or assigned["threads"] < 1
+            or type(assigned.get("ram_limit_bytes")) is not int
+            or assigned["ram_limit_bytes"] < 1
+        ):
+            raise BenchmarkConfigError(
+                "Failed physical inference report has invalid telemetry semantics"
+            )
+        return
+
+    child_wall = measurement.get("child_wall_time_sum_seconds")
+    postprocess_wall = measurement.get("postprocess_wall_time_seconds")
+    if (
+        isinstance(child_wall, bool)
+        or not isinstance(child_wall, (int, float))
+        or not math.isfinite(float(child_wall))
+        or float(child_wall) < 0
+        or isinstance(postprocess_wall, bool)
+        or not isinstance(postprocess_wall, (int, float))
+        or not math.isfinite(float(postprocess_wall))
+        or float(postprocess_wall) < 0
+        or telemetry.get("status") not in {"complete", "partial", "unavailable"}
+        or telemetry.get("wall_source") != "andrea_monotonic_clock"
+        or telemetry.get("wall_semantics")
+        != "logical_run_from_first_physical_task_start_through_logical_"
+        "postprocess; input_preparation_is_excluded"
+        or type(assigned.get("threads_peak")) is not int
+        or assigned["threads_peak"] < 0
+        or type(assigned.get("ram_limit_peak_bytes")) is not int
+        or assigned["ram_limit_peak_bytes"] < 0
+    ):
+        raise BenchmarkConfigError(
+            "Failed grouped inference report has invalid logical telemetry semantics"
+        )
+
+
+def _validate_andrea_execution_measurement(measurement: Mapping[str, Any]) -> None:
+    """Validate the stable ANDREA end-to-end clock for successful or failed runs."""
+
+    wall_time = measurement.get("wall_time_seconds")
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
+    if (
+        measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "andrea_execution"
+        or isinstance(wall_time, bool)
+        or not isinstance(wall_time, (int, float))
+        or not math.isfinite(float(wall_time))
+        or float(wall_time) < 0
+        or not isinstance(assigned, Mapping)
+        or not isinstance(telemetry, Mapping)
+        or telemetry.get("wall_source") != "andrea_monotonic_clock"
+        or telemetry.get("wall_semantics")
+        != "andrea_execution_end_to_end_including_input_verification_preparation_"
+        "scheduling_merging_and_requested_output_materialization"
+    ):
+        raise BenchmarkConfigError("ANDREA report has invalid end-to-end execution telemetry")
 
 
 _ADAPTER_FAILURE_DIRECTORY = "failure_diagnostics"
@@ -1396,8 +1737,9 @@ def _publish_inference_failure_evidence(
         "execution": {
             "orchestrator_return_code": failure.orchestrator_return_code,
             "tool_exit_code": failure.tool_exit_code,
-            "tool_duration_seconds": failure.tool_duration_seconds,
             "tool_error": failure.tool_error,
+            "measurement": failure.measurement,
+            "execution_measurement": failure.execution_measurement,
         },
         "source_files": source_records,
     }
@@ -1560,8 +1902,9 @@ def _inference_spec(
     custom_definition: dict[str, Any] | None,
     tool_image: dict[str, Any],
     resources: dict[str, Any],
+    convergence_binding: ConvergenceBinding | None = None,
 ) -> dict[str, Any]:
-    return {
+    spec = {
         "schema_version": "1.0",
         "preflight_contract": "andrea_infer_network_single_run",
         "dataset_artifact": dataset["dataset_artifact"]["key"],
@@ -1576,7 +1919,12 @@ def _inference_spec(
         "custom_definition": custom_definition,
         "tool_image": tool_image,
         "resources": resources,
+        "execution_plan_fingerprint": state["execution_plan"]["fingerprint"],
+        "output_profile": state["execution_plan"]["output_profile"],
     }
+    if convergence_binding is not None:
+        spec["execution_contract"] = logical_execution_contract(convergence_binding)
+    return spec
 
 
 def _parameter_hashes(run: dict[str, Any], metadata: dict[str, Any]) -> tuple[str, str]:
@@ -1654,13 +2002,15 @@ def _execute_inference_task(
             "--output-dir",
             str(output_root),
             "--max-cores",
-            str(resources["max_cores"]),
+            str(run["resources"]["threads"]),
             "--max-ram-gb",
-            str(resources["max_ram_gb"]),
+            str(resources["memory_gib"]),
             "--planner",
             resources["planner"],
             "--planner-time-limit-seconds",
             str(resources["planner_time_limit_seconds"]),
+            "--output-profile",
+            str(state["execution_plan"]["output_profile"]),
         ]
         if custom_tools is not None:
             command.extend(["--custom-tools", str(custom_tools)])
@@ -1775,7 +2125,50 @@ def _batch_selects_dataset(batch: dict[str, Any], dataset: dict[str, Any]) -> bo
     if dataset["dataset_role"] != batch["dataset_role"]:
         return False
     selected_jobs = batch.get("generation_jobs")
-    return selected_jobs is None or dataset.get("generation_job") in selected_jobs
+    job_id = dataset.get("generation_job")
+    if selected_jobs is not None and job_id not in selected_jobs:
+        return False
+    replicate_indices = batch.get("replicate_indices")
+    if replicate_indices is None:
+        return True
+    selected_indices = replicate_indices.get(job_id)
+    return selected_indices is not None and dataset.get("replicate_index") in selected_indices
+
+
+def _convergence_bindings_for_batch(
+    run_root: Path,
+    batch: Mapping[str, Any],
+) -> dict[str, ConvergenceBinding]:
+    raw_path = batch.get("convergence_plans")
+    if raw_path is None:
+        return {}
+    if batch.get("kind") != "spathi":
+        raise BenchmarkConfigError("Only SPATHI batches may use convergence fan-out")
+    payload = load_json_object(
+        frozen_path(run_root, str(raw_path), "convergence plans"),
+        "convergence plans",
+    )
+    return index_convergence_plans(payload)
+
+
+def _dataset_execution_run(run: Mapping[str, Any], dataset: Mapping[str, Any]) -> dict[str, Any]:
+    """Bind an outcome-blind target scout to the current immutable dataset ID."""
+
+    resolved = copy.deepcopy(dict(run))
+    params = resolved.get("params")
+    if not isinstance(params, dict):
+        raise BenchmarkConfigError(f"Inference run {run.get('run_id')!r} has invalid params")
+    scope = params.get("target_scope")
+    if not isinstance(scope, dict) or scope.get("method") != "sha256_gene_id":
+        return resolved
+    dataset_id = dataset.get("dataset_id")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise BenchmarkConfigError("A hash-scoped inference run requires a dataset identity")
+    recorded = scope.get("dataset_id")
+    if recorded is not None and recorded != dataset_id:
+        raise BenchmarkConfigError("Hash-scoped run is bound to another dataset")
+    scope["dataset_id"] = dataset_id
+    return resolved
 
 
 _INFERENCE_ATTRIBUTION_FIELDS = (
@@ -1794,6 +2187,7 @@ _INFERENCE_ATTRIBUTION_FIELDS = (
     "configuration_sha256",
     "execution_sha256",
     "tool_image",
+    "resources",
 )
 
 
@@ -1873,7 +2267,7 @@ def _validate_generated_state_contract(
     expected_dataset_ids: set[str] = set()
     dataset_hits = 0
     validated_artifacts: dict[tuple[str, str], Artifact] = {}
-    generation_resources = profile["resources"]["generate_data"]
+    generation_resources = state["execution_plan"]["operations"]["generate_data"]
     for raw_benchmark in raw_benchmarks:
         if not isinstance(raw_benchmark, dict) or set(raw_benchmark) != {
             "generation_job",
@@ -1906,6 +2300,7 @@ def _validate_generated_state_contract(
                 input_root=frozen_repository_root(run_root),
                 resources=generation_resources,
             )
+            scale_stress_generation_wall_time(artifact)
         else:
             scenario = frozen_path(run_root, job["scenario"], "scenario")
             simulator_runs = frozen_path(run_root, job["simulator_runs"], "simulator runs")
@@ -2007,14 +2402,16 @@ def _validate_inference_state_contract(
             )
         actual_by_identity[identity] = actual
 
-    resources = profile["resources"]["infer_network"]
-    per_run_resources = {
-        key: value for key, value in resources.items() if key != "max_parallel_runs"
-    }
+    inference_resources = state["execution_plan"]["operations"]["inference"]
+    andrea_repo = Path(state["repositories"]["observed"]["andrea"]["path"])
     expected_identities: set[tuple[str, str, str]] = set()
     verified: dict[tuple[str, str, str], Artifact] = {}
     validated_artifacts: dict[tuple[str, str], Artifact] = {}
     inference_hits = 0
+    convergence_by_batch = {
+        str(batch["id"]): _convergence_bindings_for_batch(run_root, batch)
+        for batch in profile["inference_batches"]
+    }
     for dataset in state["datasets"]:
         for batch in profile["inference_batches"]:
             if not _batch_selects_dataset(batch, dataset):
@@ -2036,8 +2433,16 @@ def _validate_inference_state_contract(
                 if batch.get("custom_tools")
                 else None
             )
+            convergence_bindings = convergence_by_batch[str(batch["id"])]
+            requested_run_ids = {str(item["run_id"]) for item in params_payload["runs"]}
+            if convergence_bindings and set(convergence_bindings) != requested_run_ids:
+                raise BenchmarkConfigError(
+                    f"Convergence batch {batch['id']!r} differs from its logical run plan"
+                )
             for run in params_payload["runs"]:
+                logical_run = run
                 run_id = str(run["run_id"])
+                convergence_binding = convergence_bindings.get(run_id)
                 identity = (str(dataset["dataset_id"]), str(batch["id"]), run_id)
                 if identity in expected_identities:
                     raise BenchmarkConfigError(
@@ -2062,21 +2467,33 @@ def _validate_inference_state_contract(
                         **custom_definition,
                         "docker_image": state["spathi_image"]["id"],
                     }
+                run = _dataset_execution_run(run, dataset)
+                resolved_run = materialize_inference_run_resources(
+                    run,
+                    toolspec=_inference_toolspec(
+                        andrea_repo=andrea_repo,
+                        batch_kind=str(batch["kind"]),
+                        run=run,
+                        custom_definition=custom_definition,
+                    ),
+                    execution_plan=state["execution_plan"],
+                )
                 tool_image = _runtime_image_contract(
                     state=state,
                     frozen_root=frozen_root,
                     batch_kind=batch["kind"],
-                    run=run,
+                    run=resolved_run,
                 )
                 expected_spec = _inference_spec(
                     state=state,
                     dataset=dataset,
                     batch=batch,
-                    run=run,
+                    run=resolved_run,
                     metadata=metadata,
                     custom_definition=custom_definition,
                     tool_image=tool_image,
-                    resources=per_run_resources,
+                    resources=inference_resources,
+                    convergence_binding=convergence_binding,
                 )
                 artifact = _validate_state_artifact_reference(
                     store,
@@ -2115,7 +2532,17 @@ def _validate_inference_state_contract(
                     dataset_id=str(dataset["dataset_id"]),
                     expected_origin=expected_origin,
                 )
-                configuration_sha256, execution_sha256 = _parameter_hashes(run, metadata)
+                if convergence_binding is not None:
+                    validate_logical_convergence_artifact(
+                        {
+                            "convergence_binding": convergence_binding,
+                            "spec": expected_spec,
+                            "run": resolved_run,
+                        },
+                        artifact=artifact,
+                        store=store,
+                    )
+                configuration_sha256, execution_sha256 = _parameter_hashes(logical_run, metadata)
                 expected_record = {
                     "dataset_id": dataset["dataset_id"],
                     "batch_id": batch["id"],
@@ -2133,6 +2560,7 @@ def _validate_inference_state_contract(
                     "execution_sha256": execution_sha256,
                     "dataset_fingerprint": (report.get("dataset") or {}).get("fingerprint"),
                     "tool_image": tool_image,
+                    "resources": resolved_run["resources"],
                     "run_report": str(canonical_report),
                 }
                 if set(actual) != set(expected_record) | {"artifact"} or any(
@@ -2257,11 +2685,84 @@ def validate_inference_attribution_contract(
     _validate_inference_state_contract(state=state, profile_id=profile_id, run_root=run_root)
 
 
+def _counterbalanced_efficiency_development_tasks(
+    prepared: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Order a complete development panel by balanced dataset/seed blocks."""
+
+    if not prepared:
+        return prepared
+    metadata = [task.get("metadata") for task in prepared]
+    if not all(isinstance(item, Mapping) for item in metadata):
+        raise BenchmarkConfigError("Efficiency-development tasks require run metadata")
+    families = {str(item.get("family", "")) for item in metadata if isinstance(item, Mapping)}
+    if families != {"spathi_efficiency_development"}:
+        raise BenchmarkConfigError(
+            "The efficiency-development execution class cannot mix task families"
+        )
+    order_seeds = {
+        item.get("execution_order_seed") for item in metadata if isinstance(item, Mapping)
+    }
+    steps = {
+        str(item.get("efficiency_development_step", ""))
+        for item in metadata
+        if isinstance(item, Mapping)
+    }
+    if (
+        len(order_seeds) != 1
+        or len(steps) != 1
+        or not all(isinstance(seed, int) and not isinstance(seed, bool) for seed in order_seeds)
+    ):
+        raise BenchmarkConfigError(
+            "Efficiency-development tasks have inconsistent counterbalancing metadata"
+        )
+    dataset_ids = sorted({str(task["dataset"]["dataset_id"]) for task in prepared})
+    algorithm_seeds = sorted({int(task["metadata"]["algorithm_seed"]) for task in prepared})
+    labels = sorted({str(task["metadata"]["configuration_id"]) for task in prepared})
+    by_identity: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for task in prepared:
+        identity = (
+            str(task["dataset"]["dataset_id"]),
+            int(task["metadata"]["algorithm_seed"]),
+            str(task["metadata"]["configuration_id"]),
+        )
+        if identity in by_identity:
+            raise BenchmarkConfigError(
+                f"Efficiency-development execution repeats task identity {identity!r}"
+            )
+        by_identity[identity] = task
+    expected = {
+        (dataset_id, algorithm_seed, label)
+        for dataset_id in dataset_ids
+        for algorithm_seed in algorithm_seeds
+        for label in labels
+    }
+    if set(by_identity) != expected:
+        raise BenchmarkConfigError(
+            "Efficiency-development counterbalancing requires a complete "
+            "dataset-by-seed-by-configuration panel"
+        )
+    orders = counterbalanced_execution_orders(
+        dataset_ids,
+        algorithm_seeds,
+        labels,
+        execution_order_seed=int(next(iter(order_seeds))),
+    )
+    return [
+        by_identity[(dataset_id, algorithm_seed, label)]
+        for (dataset_id, algorithm_seed), order in orders.items()
+        for label in order
+    ]
+
+
 def _execute_unique_missing_tasks(
     prepared: list[dict[str, Any]],
     *,
-    max_workers: int,
+    capacity: ResourceCapacity,
+    claim: Callable[[dict[str, Any]], ResourceClaim],
     thread_name_prefix: str,
+    schedule_path: Path,
+    run_root: Path,
     execute: Callable[[dict[str, Any]], Artifact],
 ) -> tuple[int, ...]:
     """Execute one representative per missing artifact key and bind every alias.
@@ -2276,9 +2777,6 @@ def _execute_unique_missing_tasks(
     for index, task in enumerate(prepared):
         if task["artifact"] is None:
             groups.setdefault(task["key"], []).append(index)
-    if not groups:
-        return ()
-
     representatives: list[tuple[ArtifactKey, dict[str, Any]]] = []
     for key, indices in groups.items():
         representative = prepared[indices[0]]
@@ -2288,16 +2786,59 @@ def _execute_unique_missing_tasks(
             )
         representatives.append((key, representative))
 
-    artifacts: dict[ArtifactKey, Artifact] = {}
-    workers = min(max_workers, len(representatives))
-    if workers == 1:
-        for key, task in representatives:
-            artifacts[key] = execute(task)
-    else:
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=thread_name_prefix) as pool:
-            futures = {pool.submit(execute, task): key for key, task in representatives}
-            for future in as_completed(futures):
-                artifacts[futures[future]] = future.result()
+    scheduled = [
+        ScheduledTask(
+            task_id=key.value,
+            payload=(key, task),
+            claim=claim(task),
+        )
+        for key, task in representatives
+    ]
+    try:
+        result = execute_resource_schedule(
+            scheduled,
+            capacity=capacity,
+            worker=lambda item: (item[0], execute(item[1])),
+            thread_name_prefix=thread_name_prefix,
+        )
+    except ResourceScheduleError as exc:
+        failure_manifest = dict(exc.manifest)
+        failure_manifest["capacity"] = {
+            "cpu_threads": capacity.cpu_threads,
+            "memory_bytes": capacity.memory_bytes,
+            "max_concurrent_tasks": capacity.max_concurrent_tasks,
+        }
+        failure_manifest["logical_tasks"] = len(prepared)
+        failure_manifest["physical_tasks"] = len(representatives)
+        atomic_write_json(
+            schedule_path,
+            failure_manifest,
+            f"{thread_name_prefix} failed schedule",
+            boundary=run_root,
+        )
+        if exc.__cause__ is None:
+            raise
+        raise exc.__cause__ from exc
+    manifest = result.manifest()
+    manifest["utilization"] = result.utilization(capacity)
+    manifest["status"] = "complete"
+    manifest["tasks_declared"] = len(representatives)
+    manifest["tasks_completed"] = len(representatives)
+    manifest["capacity"] = {
+        "cpu_threads": capacity.cpu_threads,
+        "memory_bytes": capacity.memory_bytes,
+        "max_concurrent_tasks": capacity.max_concurrent_tasks,
+    }
+    manifest["cache_hits"] = len(prepared) - sum(len(indices) for indices in groups.values())
+    manifest["logical_tasks"] = len(prepared)
+    manifest["physical_tasks"] = len(representatives)
+    atomic_write_json(
+        schedule_path,
+        manifest,
+        f"{thread_name_prefix} schedule",
+        boundary=run_root,
+    )
+    artifacts = {task.result[0]: task.result[1] for task in result.tasks}
 
     reused_indices: list[int] = []
     for key, indices in groups.items():
@@ -2338,10 +2879,8 @@ def run_inference(
     _validate_state_andrea(state, observed_andrea)
     _validate_host_environment(state, andrea_host_environment())
     profile = frozen_profile(run_root, profile_id)
-    resources = profile["resources"]["infer_network"]
-    per_run_resources = {
-        key: value for key, value in resources.items() if key != "max_parallel_runs"
-    }
+    inference_resources = state["execution_plan"]["operations"]["inference"]
+    scheduler_capacity = state["runtime_plan"]["capacity"]
     store = _artifact_store(run_root)
     _validate_generated_state_contract(
         state=state,
@@ -2353,9 +2892,13 @@ def run_inference(
     inference_hits = 0
     prepared: list[dict[str, Any]] = []
     ensured_spathi_image = False
+    convergence_by_batch = {
+        str(batch["id"]): _convergence_bindings_for_batch(run_root, batch)
+        for batch in profile["inference_batches"]
+    }
 
     for dataset in state["datasets"]:
-        dataset_manifest, _ground_truth_manifest = _validated_dataset_paths(store, dataset)
+        dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
         for batch in profile["inference_batches"]:
             if not _batch_selects_dataset(batch, dataset):
                 continue
@@ -2375,9 +2918,17 @@ def run_inference(
                 if batch.get("custom_tools")
                 else None
             )
+            convergence_bindings = convergence_by_batch[str(batch["id"])]
+            requested_run_ids = {str(item["run_id"]) for item in params_payload["runs"]}
+            if convergence_bindings and set(convergence_bindings) != requested_run_ids:
+                raise BenchmarkConfigError(
+                    f"Convergence batch {batch['id']!r} differs from its logical run plan"
+                )
 
             for run in params_payload["runs"]:
+                logical_run = run
                 run_id = str(run["run_id"])
+                convergence_binding = convergence_bindings.get(run_id)
                 metadata = metadata_by_run[run_id]
                 custom_definition = (
                     _single_custom_definition(custom_payload, run_id)
@@ -2389,6 +2940,17 @@ def run_inference(
                         **custom_definition,
                         "docker_image": state["spathi_image"]["id"],
                     }
+                run = _dataset_execution_run(run, dataset)
+                run = materialize_inference_run_resources(
+                    run,
+                    toolspec=_inference_toolspec(
+                        andrea_repo=andrea_repo,
+                        batch_kind=str(batch["kind"]),
+                        run=run,
+                        custom_definition=custom_definition,
+                    ),
+                    execution_plan=state["execution_plan"],
+                )
                 tool_image = _runtime_image_contract(
                     state=state,
                     frozen_root=frozen_root,
@@ -2403,7 +2965,8 @@ def run_inference(
                     metadata=metadata,
                     custom_definition=custom_definition,
                     tool_image=tool_image,
-                    resources=per_run_resources,
+                    resources=inference_resources,
+                    convergence_binding=convergence_binding,
                 )
                 key = store.key_for("inference", spec)
                 artifact = store.lookup(key)
@@ -2425,8 +2988,10 @@ def run_inference(
                     {
                         "dataset": dataset,
                         "dataset_manifest": dataset_manifest,
+                        "ground_truth_manifest": ground_truth_manifest,
                         "batch": batch,
                         "run": run,
+                        "logical_run": logical_run,
                         "metadata": metadata,
                         "custom_definition": custom_definition,
                         "tool_image": tool_image,
@@ -2435,25 +3000,74 @@ def run_inference(
                         "artifact": artifact,
                         "cache_hit": cache_hit,
                         "expected_origin": expected_origin,
+                        "convergence_binding": convergence_binding,
                     }
                 )
 
-    reused_indices = _execute_unique_missing_tasks(
-        prepared,
-        max_workers=int(resources["max_parallel_runs"]),
-        thread_name_prefix="spathi-infer",
-        execute=lambda task: _execute_inference_task(
-            task,
+    if state["execution_plan"]["class_id"] == "efficiency_development_canonical":
+        if state["execution_plan"]["exclusive_inference"] is not True:
+            raise BenchmarkConfigError(
+                "Efficiency-development timing requires serial inference execution"
+            )
+        prepared = _counterbalanced_efficiency_development_tasks(prepared)
+
+    convergence_tasks = [task for task in prepared if task["convergence_binding"] is not None]
+    if convergence_tasks:
+        if len(convergence_tasks) != len(prepared):
+            raise BenchmarkConfigError(
+                "A convergence stage cannot mix fan-out and ordinary inference tasks"
+            )
+        execute_convergence_tasks(
+            convergence_tasks,
+            capacity=ResourceCapacity(
+                cpu_threads=int(scheduler_capacity["cpu_threads"]),
+                memory_bytes=int(scheduler_capacity["memory_bytes"]),
+                max_concurrent_tasks=(
+                    int(scheduler_capacity["max_concurrent_tasks"])
+                    if scheduler_capacity.get("max_concurrent_tasks") is not None
+                    else None
+                ),
+            ),
+            exclusive=bool(state["execution_plan"]["exclusive_inference"]),
+            schedule_path=run_root / "schedules/inference.json",
             store=store,
             repo_root=repo_root,
             andrea_repo=andrea_repo,
             run_root=run_root,
-            resources=per_run_resources,
-            state=state,
-            frozen_root=frozen_root,
-        ),
-    )
-    inference_hits += len(reused_indices)
+            image_id=str(state["spathi_image"]["id"]),
+        )
+    else:
+        reused_indices = _execute_unique_missing_tasks(
+            prepared,
+            capacity=ResourceCapacity(
+                cpu_threads=int(scheduler_capacity["cpu_threads"]),
+                memory_bytes=int(scheduler_capacity["memory_bytes"]),
+                max_concurrent_tasks=(
+                    int(scheduler_capacity["max_concurrent_tasks"])
+                    if scheduler_capacity.get("max_concurrent_tasks") is not None
+                    else None
+                ),
+            ),
+            claim=lambda task: ResourceClaim(
+                cpu_threads=int(task["run"]["resources"]["threads"]),
+                memory_bytes=round(float(task["run"]["resources"]["ram_gb"]) * 1024**3),
+                exclusive=bool(state["execution_plan"]["exclusive_inference"]),
+            ),
+            thread_name_prefix="spathi-infer",
+            schedule_path=run_root / "schedules/inference.json",
+            run_root=run_root,
+            execute=lambda task: _execute_inference_task(
+                task,
+                store=store,
+                repo_root=repo_root,
+                andrea_repo=andrea_repo,
+                run_root=run_root,
+                resources=inference_resources,
+                state=state,
+                frozen_root=frozen_root,
+            ),
+        )
+        inference_hits += len(reused_indices)
 
     for task in prepared:
         dataset = task["dataset"]
@@ -2472,7 +3086,7 @@ def run_inference(
             dataset_id=dataset["dataset_id"],
             expected_origin=expected_origin,
         )
-        configuration_sha256, execution_sha256 = _parameter_hashes(run, metadata)
+        configuration_sha256, execution_sha256 = _parameter_hashes(task["logical_run"], metadata)
         inference_runs.append(
             {
                 "dataset_id": dataset["dataset_id"],
@@ -2491,6 +3105,7 @@ def run_inference(
                 "execution_sha256": execution_sha256,
                 "dataset_fingerprint": (report.get("dataset") or {}).get("fingerprint"),
                 "tool_image": task["tool_image"],
+                "resources": run["resources"],
                 "run_report": str(report_path),
                 "artifact": _artifact_ref(artifact, cache_hit=bool(task["cache_hit"])),
             }
@@ -2969,8 +3584,8 @@ def evaluate(
     _validate_state_andrea(state, observed_andrea)
     _validate_host_environment(state, andrea_host_environment())
     store = _artifact_store(run_root)
-    profile = frozen_profile(run_root, profile_id)
-    max_parallel_runs = int(profile["resources"]["infer_network"]["max_parallel_runs"])
+    evaluation_resources = state["execution_plan"]["operations"]["evaluation"]
+    scheduler_capacity = state["runtime_plan"]["capacity"]
     datasets = {item["dataset_id"]: item for item in state["datasets"]}
     evaluations: list[dict[str, Any]] = []
     joint_evaluations: list[dict[str, Any]] = []
@@ -3016,8 +3631,17 @@ def evaluate(
 
     reused_indices = _execute_unique_missing_tasks(
         prepared,
-        max_workers=max_parallel_runs,
+        capacity=ResourceCapacity(
+            cpu_threads=int(scheduler_capacity["cpu_threads"]),
+            memory_bytes=int(scheduler_capacity["memory_bytes"]),
+        ),
+        claim=lambda _task: ResourceClaim(
+            cpu_threads=int(evaluation_resources["cpu_threads"]),
+            memory_bytes=int(evaluation_resources["memory_bytes"]),
+        ),
         thread_name_prefix="spathi-eval",
+        schedule_path=run_root / "schedules/evaluation.json",
+        run_root=run_root,
         execute=lambda task: _execute_evaluation_task(
             task,
             store=store,

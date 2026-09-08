@@ -3,7 +3,7 @@
 {% block title %}Scalability · SPATHI Benchmarks{% endblock %}
 {% block kicker %}COMPUTATIONAL SCALABILITY{% endblock %}
 {% block heading %}Can the frozen SPATHI policy complete across the declared scale grid?{% endblock %}
-{% block lead %}Fresh-run wall time, peak container RSS, disk use, execution volume, and completion across deterministic synthetic dimensional stressors.{% endblock %}
+{% block lead %}Preregistered target scouts, prospective all-target decisions, canonical container resource telemetry, and completion across deterministic synthetic dimensional stressors.{% endblock %}
 
 {% block content %}
   <section class="section dataset-overview-section" aria-labelledby="dataset-heading">
@@ -12,7 +12,7 @@
         <p class="section-kicker">Evidence base</p>
         <h2 id="dataset-heading">Datasets and dimensions tested</h2>
       </div>
-      <p class="section-help">Inspect every dimensional shape, seed, network mode, and policy branch before interpreting resource use.</p>
+      <p class="section-help">Inspect every dimensional shape, seed, progression lane, scout outcome, and all-target decision before interpreting resource use.</p>
     </div>
     <div id="dataset-overview" class="dataset-overview-grid"></div>
     <div id="scope-notice"></div>
@@ -34,7 +34,7 @@
         <p class="section-kicker">Failed endpoints</p>
         <h2 id="failure-heading">Attributable failure evidence</h2>
       </div>
-      <p class="section-help">A row appears here only when ANDREA produced a validated failed report for the exact requested dataset and SPATHI run. Missing or inconsistent contracts abort the workflow instead.</p>
+      <p class="section-help">A row appears here only when ANDREA produced a validated failed report for an attempted scout or all-target stage. Infrastructure and inconsistent contracts abort the workflow instead.</p>
     </div>
     <div id="failure-notice"></div>
     <div id="failure-table" class="card table-wrap"></div>
@@ -46,7 +46,7 @@
         <p class="section-kicker">Scale grid</p>
         <h2 id="shape-heading">Problem size and measured runtime</h2>
       </div>
-      <p class="section-help">The bubble chart shows cells against genes; bubble area reflects TF count. Blue intensity represents SPATHI wall time only for completed runs; failed endpoints are marked separately.</p>
+      <p class="section-help">The bubble chart shows cells against genes; bubble area reflects TF count. Blue intensity represents all-target SPATHI wall time only for completed endpoints; failed and prospectively skipped endpoints are marked separately.</p>
     </div>
     <div class="chart-grid chart-grid--two">
       <section class="card chart-card" aria-labelledby="dimensions-chart-title">
@@ -76,17 +76,17 @@
         <p class="section-kicker">Resource envelope</p>
         <h2 id="resources-heading">Memory and output footprint</h2>
       </div>
-      <p class="section-help">Peak RSS is sampled from the SPATHI container process tree. Output size covers SPATHI files inside the inference artifact.</p>
+      <p class="section-help">Peak memory comes only from ANDREA's canonical container telemetry. Output size covers SPATHI files inside each attempted stage's inference artifact.</p>
     </div>
     <div class="chart-grid chart-grid--two">
       <section class="card chart-card" aria-labelledby="memory-chart-title">
         <div class="card-heading">
           <div>
             <p class="card-kicker">Observed and estimated memory</p>
-            <h3 id="memory-chart-title">Peak RSS by dataset</h3>
+            <h3 id="memory-chart-title">Peak container memory by attempted stage</h3>
           </div>
         </div>
-        <div id="memory-chart" class="plot" role="img" aria-label="Observed peak RSS and SPATHI memory estimate by dataset"></div>
+        <div id="memory-chart" class="plot" role="img" aria-label="Canonical peak container memory and SPATHI memory estimate by attempted stage"></div>
       </section>
       <section class="card chart-card" aria-labelledby="disk-chart-title">
         <div class="card-heading">
@@ -132,7 +132,7 @@
       <div class="card-heading card-heading--actions">
         <div>
           <p class="card-kicker">Recorded outcomes</p>
-          <h3 id="dataset-table-title">Per-dataset audit table</h3>
+          <h3 id="dataset-table-title">Per-attempt audit table</h3>
         </div>
         <div id="dataset-table-actions"></div>
       </div>

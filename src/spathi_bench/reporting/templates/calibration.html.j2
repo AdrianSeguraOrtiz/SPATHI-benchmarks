@@ -3,7 +3,7 @@
 {% block title %}Calibration · SPATHI Benchmarks{% endblock %}
 {% block kicker %}CALIBRATION{% endblock %}
 {% block heading %}How the SPATHI configuration was selected{% endblock %}
-{% block lead %}Explore geometry, estimator interactions, scale transfer, convergence, runtime evidence, and stability while keeping development separate from frozen validation.{% endblock %}
+{% block lead %}Explore every prospective scout, confirmation, convergence, and validation phase while keeping development separate from frozen validation.{% endblock %}
 
 {% block content %}
   <section class="section dataset-overview-section" aria-labelledby="dataset-overview-heading">
@@ -41,11 +41,11 @@
     <div class="section-heading section-heading--split">
       <div>
         <p class="section-kicker">Explorer</p>
-        <h2 id="stages-heading">Calibration stages</h2>
+        <h2 id="stages-heading">Calibration phases</h2>
       </div>
-      <p class="section-help">Each tab preserves its candidate universe, observations, and selection criterion.</p>
+      <p class="section-help">Each tab preserves its candidate universe, fidelity, panel, target scope, observations, and selection criterion.</p>
     </div>
-    <div id="stage-tabs" class="tabs" role="tablist" aria-label="Calibration stages"></div>
+    <div id="stage-tabs" class="tabs" role="tablist" aria-label="Calibration phases"></div>
     <article id="stage-panel" class="stage-panel" role="tabpanel">
       <div id="stage-intro" class="stage-intro"></div>
 
@@ -63,11 +63,12 @@
         <section class="card chart-card" aria-labelledby="pareto-chart-title">
           <div class="card-heading">
             <div>
-              <p class="card-kicker">Efficiency</p>
+              <p class="card-kicker">Diagnostic cost</p>
               <h3 id="pareto-chart-title">Accuracy versus runtime</h3>
             </div>
-            <span class="legend-note">Pareto frontier highlighted</span>
+            <span class="legend-note">Exploratory only · Pareto frontier highlighted</span>
           </div>
+          <p class="section-help">Runtime was observed incidentally during resource-scheduled calibration and never selects a scientific parameter. Use the isolated performance study for formal timing comparisons.</p>
           <div id="pareto-chart" class="plot" role="img" aria-label="Relationship between accuracy and runtime"></div>
         </section>
       </div>

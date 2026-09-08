@@ -25,6 +25,7 @@ _REPORT_SCOPES = {
     "comparison": {"reduced", "full"},
     "dimensional_transfer": {"reduced", "full"},
     "efficiency": {"reduced", "full"},
+    "performance": {"reduced", "full"},
     "scalability": {"reduced", "full"},
 }
 
@@ -190,6 +191,7 @@ def _renderer_material(kind: str) -> dict[str, Any]:
         "comparison",
         "dimensional_transfer",
         "efficiency",
+        "performance",
         "scalability",
     }:
         raise ValueError(f"Unsupported report kind: {kind}")
@@ -261,6 +263,7 @@ def render_html(
         "comparison": "SPATHI benchmark comparison",
         "dimensional_transfer": "SPATHI dimensional accuracy transfer",
         "efficiency": "SPATHI efficiency justification",
+        "performance": "SPATHI computational performance",
         "scalability": "SPATHI computational scalability",
     }
     return template.render(

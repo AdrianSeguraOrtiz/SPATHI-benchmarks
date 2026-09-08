@@ -65,6 +65,21 @@ if (( FROM_INDEX < 0 || UNTIL_INDEX < 0 || FROM_INDEX > UNTIL_INDEX )); then
   exit 2
 fi
 
+if ! command -v flock >/dev/null 2>&1; then
+  echo "run_all.sh requires flock to protect benchmark resource measurements" >&2
+  exit 2
+fi
+BENCH_LEASE_ROOT="/tmp/spathi-benchmarks-${UID:-0}"
+mkdir -p -m 700 "$BENCH_LEASE_ROOT"
+BENCH_LEASE_PATH="$BENCH_LEASE_ROOT/spathi-benchmarks-execution-${UID:-0}.lock"
+exec 9>"$BENCH_LEASE_PATH"
+if ! flock -n 9; then
+  echo "Another SPATHI benchmark workflow owns the host execution lease" >&2
+  exit 2
+fi
+printf '{"pid":%d,"workload":"run_all:%s:%s"}\n' \
+  "$$" "$PROFILE" "$RUN_ID" >&9
+
 for index in "${!STAGES[@]}"; do
   if (( index >= FROM_INDEX && index <= UNTIL_INDEX )); then
     "$SCRIPT_ROOT/${SCRIPTS[$index]}" "$PROFILE" "$RUN_ID"

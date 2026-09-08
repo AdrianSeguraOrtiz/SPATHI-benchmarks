@@ -44,7 +44,7 @@
             "properties": {
               "namespace": {
                 "type": "string",
-                "pattern": "^(?:smoke\\.smoke|(?:reduced|full)\\.(?:development|validation|efficiency_development|efficiency_validation|test|scalability|dimensional_transfer)|full\\.efficiency_safety)$"
+                "pattern": "^(?:smoke\\.smoke|(?:reduced|full)\\.(?:development|validation|efficiency_development|efficiency_validation|test|scalability|dimensional_transfer|performance)|full\\.efficiency_safety)$"
               },
               "stream": {"const": "inference"},
               "coordinates": {
@@ -61,6 +61,25 @@
             }
           },
           "family": {"type": "string", "minLength": 1},
+          "efficiency_development_step": {
+            "enum": ["component_scout", "joint_confirmation"]
+          },
+          "efficiency_component": {
+            "enum": ["reference", "target_eligibility", "adaptive_trees", "combined"]
+          },
+          "seed_role": {"enum": ["timing", "accuracy"]},
+          "execution_order_seed": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483646
+          },
+          "calibration_fidelity": {"enum": ["scout", "confirmation", "final"]},
+          "target_scope": {
+            "oneOf": [
+              {"const": {"method": "all"}},
+              {"const": {"method": "sha256_gene_id", "size": 256, "salt": "spathi-calibration-high-tf-v1"}}
+            ]
+          },
           "notes": {"type": "array", "items": {"type": "string", "minLength": 1}}
         },
         "allOf": [

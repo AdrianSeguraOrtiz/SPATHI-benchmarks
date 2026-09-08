@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/execution-policy.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "scheduler", "classes"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queue", "admission", "failure_policy"],
+      "properties": {
+        "queue": {"const": "rolling"},
+        "admission": {"const": "declared_order_first_fit"},
+        "failure_policy": {"const": "fail_fast_no_new_admissions"}
+      }
+    },
+    "classes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z0-9][a-z0-9_-]*$"},
+      "additionalProperties": {"$ref": "#/$defs/execution_class"}
+    }
+  },
+  "$defs": {
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_cpu_threads",
+        "preferred_cpu_threads",
+        "minimum_memory_gib",
+        "preferred_memory_gib"
+      ],
+      "properties": {
+        "minimum_cpu_threads": {"type": "integer", "minimum": 1},
+        "preferred_cpu_threads": {"type": "integer", "minimum": 1},
+        "minimum_memory_gib": {"type": "number", "minimum": 1},
+        "preferred_memory_gib": {"type": "number", "minimum": 1}
+      }
+    },
+    "inference_allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_cpu_threads",
+        "preferred_cpu_threads",
+        "minimum_memory_gib",
+        "preferred_memory_gib",
+        "planner",
+        "planner_time_limit_seconds"
+      ],
+      "properties": {
+        "minimum_cpu_threads": {"type": "integer", "minimum": 1},
+        "preferred_cpu_threads": {"type": "integer", "minimum": 1},
+        "minimum_memory_gib": {"type": "number", "minimum": 1},
+        "preferred_memory_gib": {"type": "number", "minimum": 1},
+        "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
+        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "execution_class": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "generate_data",
+        "inference",
+        "evaluation",
+        "output_profile",
+        "exclusive_inference"
+      ],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "generate_data": {"$ref": "#/$defs/allocation"},
+        "inference": {"$ref": "#/$defs/inference_allocation"},
+        "evaluation": {"$ref": "#/$defs/allocation"},
+        "output_profile": {"enum": ["canonical", "full"]},
+        "exclusive_inference": {"type": "boolean"}
+      }
+    }
+  }
+}

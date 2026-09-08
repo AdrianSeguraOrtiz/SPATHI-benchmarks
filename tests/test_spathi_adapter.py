@@ -167,7 +167,7 @@ def test_adapter_accepts_bound_scalability_parameters_without_renaming(
     params_path = tmp_path / "params.json"
     params_path.write_text(json.dumps(params), encoding="utf-8")
 
-    assert adapter._validated_params(params_path) == params
+    assert adapter._validated_params(params_path) == (params, {"method": "all"})
 
 
 def test_adapter_resolves_the_frozen_policy_from_observed_group_count(
@@ -203,11 +203,57 @@ def test_adapter_resolves_the_frozen_policy_from_observed_group_count(
     path = tmp_path / "params.json"
     path.write_text(json.dumps(request), encoding="utf-8")
 
-    resolved_single = adapter._validated_params(path, group_count=1)
-    resolved_multi = adapter._validated_params(path, group_count=3)
+    resolved_single, single_scope = adapter._validated_params(path, group_count=1)
+    resolved_multi, multi_scope = adapter._validated_params(path, group_count=3)
 
     assert resolved_single == {**single, "random_seed": 8675309}
     assert resolved_multi == {**multi, "random_seed": 8675309}
+    assert single_scope == multi_scope == {"method": "all"}
+
+
+def test_high_tf_scout_hashes_only_gene_ids_and_is_order_independent(
+    adapter: types.ModuleType,
+    tmp_path: Path,
+) -> None:
+    genes = [f"G{index:04d}" for index in range(300)]
+    first = tmp_path / "first.tsv"
+    second = tmp_path / "second.tsv"
+    first.write_text(
+        "gene\tc1\tc2\n" + "".join(f"{gene}\t1\t2\n" for gene in genes),
+        encoding="utf-8",
+    )
+    second.write_text(
+        "gene\tc1\tc2\n" + "".join(f"{gene}\t999\t-3\n" for gene in reversed(genes)),
+        encoding="utf-8",
+    )
+    scope = {
+        "method": "sha256_gene_id",
+        "size": 256,
+        "salt": "spathi-calibration-high-tf-v1",
+        "dataset_id": "dataset-a",
+    }
+
+    first_targets = adapter._hashed_target_list(
+        first, tmp_path / "first-targets.txt", scope, random_seed=1729
+    )
+    second_targets = adapter._hashed_target_list(
+        second, tmp_path / "second-targets.txt", scope, random_seed=1729
+    )
+
+    assert first_targets is not None and second_targets is not None
+    assert first_targets.read_text(encoding="utf-8") == second_targets.read_text(encoding="utf-8")
+    assert len(first_targets.read_text(encoding="utf-8").splitlines()) == 256
+
+    other_scope = {**scope, "dataset_id": "dataset-b"}
+    other_targets = adapter._hashed_target_list(
+        first, tmp_path / "other-targets.txt", other_scope, random_seed=1729
+    )
+    other_seed_targets = adapter._hashed_target_list(
+        first, tmp_path / "other-seed-targets.txt", scope, random_seed=1730
+    )
+    assert other_targets is not None and other_seed_targets is not None
+    assert first_targets.read_bytes() != other_targets.read_bytes()
+    assert first_targets.read_bytes() != other_seed_targets.read_bytes()
 
 
 def test_adapter_rejects_a_policy_with_divergent_shared_parameters(
@@ -372,6 +418,7 @@ def test_run_forwards_contract_and_atomically_publishes_network(
         "expression": external_tool_inputs["expression"],
         "tf_list": external_tool_inputs["extra"] / "tf_list.txt",
         "groups": external_tool_inputs["extra"] / "groups.tsv",
+        "target_list": None,
         "threads": 2,
         "report": False,
         **frozen_spathi_params,
@@ -387,9 +434,7 @@ def test_run_forwards_contract_and_atomically_publishes_network(
     progress = json.loads(
         (external_tool_inputs["output_dir"] / "progress.json").read_text(encoding="utf-8")
     )
-    assert (
-        external_tool_inputs["output_dir"] / "progress.json"
-    ).stat().st_mode & 0o777 == 0o644
+    assert (external_tool_inputs["output_dir"] / "progress.json").stat().st_mode & 0o777 == 0o644
     assert progress == {
         "message": "Published ANDREA-compatible network.csv and SPATHI audit sidecars",
         "percent": 100,
@@ -473,9 +518,7 @@ def test_main_records_adapter_failures(
     progress = json.loads(
         (external_tool_inputs["output_dir"] / "progress.json").read_text(encoding="utf-8")
     )
-    assert (
-        external_tool_inputs["output_dir"] / "progress.json"
-    ).stat().st_mode & 0o777 == 0o644
+    assert (external_tool_inputs["output_dir"] / "progress.json").stat().st_mode & 0o777 == 0o644
     assert progress["status"] == "failed"
     assert progress["percent"] == 100
     assert "required tf_list input does not exist" in progress["message"]

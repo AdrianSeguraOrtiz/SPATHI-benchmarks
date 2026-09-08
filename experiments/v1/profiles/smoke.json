@@ -33,20 +33,7 @@
       "run_metadata": "experiments/v1/spathi/smoke-run-metadata.json"
     }
   ],
-  "resources": {
-    "generate_data": {
-      "max_parallel_tasks": 1,
-      "max_cores": 2,
-      "max_ram_gb": 8
-    },
-    "infer_network": {
-      "max_parallel_runs": 1,
-      "max_cores": 2,
-      "max_ram_gb": 8,
-      "planner": "heuristic",
-      "planner_time_limit_seconds": 30
-    }
-  },
+  "execution_class": "smoke_full",
   "planned_design": {
     "simulators": ["dyngen"],
     "replicates_per_condition": 1,

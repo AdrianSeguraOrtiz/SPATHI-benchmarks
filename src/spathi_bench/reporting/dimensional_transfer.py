@@ -11,6 +11,8 @@ from typing import Any
 
 from ..config import BenchmarkConfigError, load_json_object, validate_json
 from ..dimensional_transfer import condition_ids_for_budget, validate_transfer_panel
+from ..execution_policy import POLICY_PATH, resolve_execution_class
+from ..resource_plan import validate_runtime_plan
 from .common import (
     central_report_path,
     path_below,
@@ -324,6 +326,24 @@ def render_dimensional_transfer_report(
     export_links, export_inputs = _export_links(
         run_root=run_root, report_path=report_path, repo_root=root
     )
+    summary_reference = require_mapping(
+        require_mapping(results.get("summary_inputs"), "dimensional-transfer summary inputs").get(
+            "summary_json"
+        ),
+        "dimensional-transfer pipeline summary",
+    )
+    summary_path = repo_file(
+        root,
+        summary_reference.get("path"),
+        "dimensional-transfer pipeline summary",
+        below=run_root,
+    )
+    verify_sha256(
+        summary_path,
+        summary_reference.get("sha256"),
+        "dimensional-transfer pipeline summary",
+    )
+    pipeline_summary = load_json_object(summary_path, "dimensional-transfer pipeline summary")
 
     template_path = repo_file(root, workflow.get("template_profile"), "transfer profile")
     runtime_profile_path = repo_file(
@@ -338,6 +358,17 @@ def render_dimensional_transfer_report(
         workflow.get("runtime_profile_sha256"),
         "transfer runtime profile",
     )
+    runtime_profile = load_json_object(runtime_profile_path, "transfer runtime profile")
+    validate_json(runtime_profile, root / "schemas/profile.schema.json", "transfer runtime profile")
+    runtime_plan = validate_runtime_plan(
+        require_mapping(workflow.get("runtime_plan"), "dimensional-transfer runtime plan")
+    )
+    execution_plan = resolve_execution_class(
+        repo_root=root,
+        class_id=str(runtime_profile.get("execution_class")),
+        runtime_plan=runtime_plan,
+    )
+    policy_path = repo_file(root, POLICY_PATH.as_posix(), "execution policy")
     links = [
         {"label": "Workflow state", "path": workflow_path},
         {"label": "Dimensional-transfer results", "path": results_path},
@@ -345,6 +376,7 @@ def render_dimensional_transfer_report(
         {"label": "Template profile", "path": template_path},
         {"label": "Runtime profile", "path": runtime_profile_path},
         {"label": "Frozen production policy", "path": production_path},
+        {"label": "Execution policy", "path": policy_path},
     ]
     payload = {
         "schema_version": "1.0",
@@ -354,6 +386,12 @@ def render_dimensional_transfer_report(
             "status": "complete",
             "profile": budget,
             "evidence_role": results["evidence_role"],
+            "runtime_plan": runtime_plan,
+            "execution_plan": execution_plan,
+            "scheduling": require_mapping(
+                pipeline_summary.get("scheduling"),
+                "dimensional-transfer scheduling summary",
+            ),
             "identity": workflow["identity"],
         },
         "scope": {
@@ -412,6 +450,8 @@ def render_dimensional_transfer_report(
                 production_path,
                 template_path,
                 runtime_profile_path,
+                policy_path,
+                summary_path,
                 *export_inputs,
             ],
             manifest_name="dimensional-transfer-report.manifest.json",

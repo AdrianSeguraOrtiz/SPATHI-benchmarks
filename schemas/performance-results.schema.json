@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spathi.dev/benchmarks/performance-results.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "budget",
+    "evidence_role",
+    "claim_scope",
+    "status",
+    "design",
+    "materialization",
+    "production_config",
+    "execution_environment",
+    "protocol",
+    "summary",
+    "aggregates",
+    "measurements",
+    "warmups",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifact_type": {"const": "spathi_performance_results"},
+    "budget": {"enum": ["reduced", "full"]},
+    "evidence_role": {"enum": ["operational", "publication"]},
+    "claim_scope": {"const": "computational_performance_only"},
+    "status": {"const": "complete"},
+    "design": {"$ref": "#/$defs/reference"},
+    "materialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "schedule_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "production_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "policy_id", "policy_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "policy_id": {"$ref": "#/$defs/id"},
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "execution_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_plan", "andrea", "benchmark", "docker", "andrea_commit", "spathi_image_id"],
+      "properties": {
+        "runtime_plan": {"type": "object"},
+        "andrea": {"type": "object"},
+        "benchmark": {"type": "object"},
+        "docker": {"type": "object"},
+        "andrea_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "spathi_image_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_profile",
+        "inference_cache",
+        "concurrency",
+        "repetition_semantics",
+        "order_algorithm",
+        "order_salt",
+        "measurement_source",
+        "measurement_scope",
+        "wall_time_semantics",
+        "memory_measurement_source",
+        "memory_measurement_semantics",
+        "io_measurement",
+        "thread_counts",
+        "system_repetitions",
+        "warmups_per_condition"
+      ],
+      "properties": {
+        "output_profile": {"const": "full"},
+        "inference_cache": {"const": "disabled"},
+        "concurrency": {"const": "one_logical_execution_at_a_time"},
+        "repetition_semantics": {"const": "same_algorithm_seed_independent_system_repetitions"},
+        "order_algorithm": {"const": "sha256_rank_rotate_reverse_v1"},
+        "order_salt": {"const": "spathi-performance-counterbalance-v1"},
+        "measurement_source": {"const": "run_report.execution.measurement"},
+        "measurement_scope": {"const": "andrea_execution"},
+        "wall_time_semantics": {"const": "andrea_execution_end_to_end_including_input_verification_preparation_scheduling_merging_and_requested_output_materialization"},
+        "memory_measurement_source": {"const": "run_report.execution.measurement.peak_memory_bytes"},
+        "memory_measurement_semantics": {"const": "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"},
+        "io_measurement": {"const": "unavailable_in_andrea_v1_output_bytes_only"},
+        "thread_counts": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "system_repetitions": {"type": "integer", "minimum": 1},
+        "warmups_per_condition": {"const": 1}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "measured_runs_requested",
+        "measured_runs_completed",
+        "measured_runs_failed",
+        "oom_runs",
+        "all_measured_runs_completed",
+        "equivalence_conditions",
+        "equivalence_confirmed",
+        "equivalence_failed",
+        "equivalence_unavailable",
+        "equivalence"
+      ],
+      "properties": {
+        "measured_runs_requested": {"type": "integer", "minimum": 1},
+        "measured_runs_completed": {"type": "integer", "minimum": 0},
+        "measured_runs_failed": {"type": "integer", "minimum": 0},
+        "oom_runs": {"type": "integer", "minimum": 0},
+        "all_measured_runs_completed": {"type": "boolean"},
+        "equivalence_conditions": {"type": "integer", "minimum": 1},
+        "equivalence_confirmed": {"type": "integer", "minimum": 0},
+        "equivalence_failed": {"type": "integer", "minimum": 0},
+        "equivalence_unavailable": {"type": "integer", "minimum": 0},
+        "equivalence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/equivalence"}
+        }
+      }
+    },
+    "aggregates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/aggregate"}
+    },
+    "measurements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/measurement_row"}
+    },
+    "warmups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/measurement_row"}
+    },
+    "notes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_number": {"type": ["number", "null"], "minimum": 0},
+    "nullable_integer": {"type": ["integer", "null"], "minimum": 0},
+    "nullable_boolean": {"type": ["boolean", "null"]},
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "generation_job_id", "replicate_index", "size_class", "seed", "cells", "genes"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "generation_job_id": {"$ref": "#/$defs/id"},
+        "replicate_index": {"type": "integer", "minimum": 1},
+        "size_class": {"enum": ["small", "medium"]},
+        "seed": {"type": ["integer", "null"], "minimum": 1},
+        "cells": {"type": "integer", "minimum": 1},
+        "genes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "io": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "read_bytes", "write_bytes", "reason"],
+      "properties": {
+        "status": {"const": "unavailable"},
+        "read_bytes": {"type": "null"},
+        "write_bytes": {"type": "null"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "measurement_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "task_id",
+        "sequence_index",
+        "phase",
+        "dataset",
+        "configuration_id",
+        "tool_id",
+        "origin",
+        "threads",
+        "ram_gb",
+        "cpuset_cpus",
+        "system_repetition",
+        "algorithm_seed",
+        "status",
+        "tool_status",
+        "command_return_code",
+        "measurement",
+        "io",
+        "oom_observed",
+        "network_sha256",
+        "run_report",
+        "output"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "task_id": {"$ref": "#/$defs/id"},
+        "sequence_index": {"type": "integer", "minimum": 1},
+        "phase": {"enum": ["warmup", "measurement"]},
+        "dataset": {"$ref": "#/$defs/dataset"},
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "tool_id": {"$ref": "#/$defs/id"},
+        "origin": {"enum": ["catalog", "spathi_production_policy"]},
+        "threads": {"type": "integer", "minimum": 1},
+        "ram_gb": {"type": "number", "exclusiveMinimum": 0},
+        "cpuset_cpus": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0}
+        },
+        "system_repetition": {"type": "integer", "minimum": 0},
+        "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "status": {"enum": ["completed", "failed"]},
+        "tool_status": {"type": "string", "minLength": 1},
+        "command_return_code": {"type": "integer", "minimum": 0},
+        "measurement": {
+          "type": "object",
+          "required": ["schema_version", "scope", "wall_time_seconds", "cpu_time_seconds", "peak_memory_bytes", "output_bytes", "assigned_resources", "telemetry"],
+          "properties": {
+            "schema_version": {"const": "1.0"},
+            "scope": {"const": "andrea_execution"},
+            "wall_time_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "cpu_time_seconds": {"$ref": "#/$defs/nullable_number"},
+            "peak_memory_bytes": {
+              "$ref": "#/$defs/nullable_integer",
+              "description": "ANDREA execution-level overlap upper bound derived from physical-container cgroup peaks; excludes the ANDREA host process."
+            },
+            "output_bytes": {"type": "integer", "minimum": 0},
+            "assigned_resources": {"type": "object"},
+            "telemetry": {
+              "type": "object",
+              "required": ["status", "memory_source", "memory_semantics"],
+              "properties": {
+                "status": {"const": "complete"},
+                "memory_source": {"const": "child_container_cgroup_peaks"},
+                "memory_semantics": {"const": "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"}
+              }
+            }
+          }
+        },
+        "io": {"$ref": "#/$defs/io"},
+        "oom_observed": {"type": "boolean"},
+        "network_sha256": {
+          "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+        },
+        "run_report": {"$ref": "#/$defs/reference"},
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "tree_bytes"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "tree_bytes": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "size_class",
+        "configuration_id",
+        "tool_id",
+        "threads",
+        "repetitions_requested",
+        "repetitions_completed",
+        "wall_time_median_seconds",
+        "wall_time_min_seconds",
+        "wall_time_max_seconds",
+        "cpu_time_median_seconds",
+        "container_peak_overlap_upper_bound_max_bytes",
+        "output_bytes_median",
+        "speedup_vs_one_thread",
+        "parallel_efficiency",
+        "scaling_metrics_status",
+        "network_equivalent_within_condition",
+        "oom_count"
+      ],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "size_class": {"enum": ["small", "medium"]},
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "tool_id": {"$ref": "#/$defs/id"},
+        "threads": {"type": "integer", "minimum": 1},
+        "repetitions_requested": {"type": "integer", "minimum": 1},
+        "repetitions_completed": {"type": "integer", "minimum": 0},
+        "wall_time_median_seconds": {"$ref": "#/$defs/nullable_number"},
+        "wall_time_min_seconds": {"$ref": "#/$defs/nullable_number"},
+        "wall_time_max_seconds": {"$ref": "#/$defs/nullable_number"},
+        "cpu_time_median_seconds": {"$ref": "#/$defs/nullable_number"},
+        "container_peak_overlap_upper_bound_max_bytes": {
+          "$ref": "#/$defs/nullable_integer",
+          "description": "Maximum across repetitions of ANDREA's overlap upper bound from physical-container cgroup peaks; excludes the ANDREA host process."
+        },
+        "output_bytes_median": {"$ref": "#/$defs/nullable_number"},
+        "speedup_vs_one_thread": {"$ref": "#/$defs/nullable_number"},
+        "parallel_efficiency": {"$ref": "#/$defs/nullable_number"},
+        "scaling_metrics_status": {
+          "enum": [
+            "published",
+            "withheld_semantic_drift",
+            "withheld_incomplete_execution",
+            "withheld_missing_one_thread_baseline"
+          ]
+        },
+        "network_equivalent_within_condition": {"$ref": "#/$defs/nullable_boolean"},
+        "oom_count": {"type": "integer", "minimum": 0}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"scaling_metrics_status": {"const": "published"}},
+            "required": ["scaling_metrics_status"]
+          },
+          "then": {
+            "properties": {
+              "speedup_vs_one_thread": {"type": "number", "minimum": 0},
+              "parallel_efficiency": {"type": "number", "minimum": 0}
+            }
+          },
+          "else": {
+            "properties": {
+              "speedup_vs_one_thread": {"type": "null"},
+              "parallel_efficiency": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "equivalence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "configuration_id", "runs_expected", "runs_completed", "equivalent_across_threads_and_repetitions", "distinct_networks"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "configuration_id": {"$ref": "#/$defs/id"},
+        "runs_expected": {"type": "integer", "minimum": 1},
+        "runs_completed": {"type": "integer", "minimum": 0},
+        "equivalent_across_threads_and_repetitions": {"$ref": "#/$defs/nullable_boolean"},
+        "distinct_networks": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

@@ -40,6 +40,8 @@ from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_calibration_report, render_comparison_report
 from .reporting.common import central_report_path
+from .resource_plan import detect_host_capacity, load_or_create_runtime_plan
+from .resource_scheduler import host_execution_lease
 from .runtime import (
     andrea_host_environment,
     benchmark_host_environment,
@@ -50,13 +52,17 @@ from .state import run_lock
 from .statistics import analyze_statistics
 from .summarize import summarize
 
-CALIBRATION_STAGES = (
-    "geometry",
-    "estimator",
-    "interaction",
-    "estimator_scale_transfer",
-    "convergence",
-    "validation",
+CALIBRATION_PHASES = (
+    ("geometry", "scout"),
+    ("geometry", "confirmation"),
+    ("estimator", "scout"),
+    ("estimator", "confirmation"),
+    ("interaction", "scout"),
+    ("interaction", "confirmation"),
+    ("estimator_scale_transfer", "scout"),
+    ("estimator_scale_transfer", "confirmation"),
+    ("convergence", "final"),
+    ("validation", "final"),
 )
 CALIBRATION_BUDGETS = ("reduced", "full")
 _WORKFLOW_ID = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -328,6 +334,11 @@ def run_profile_pipeline(
     andrea_repo: Path,
     spathi_repo: Path,
     statistics: bool,
+    runtime_plan: dict[str, Any] | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
     """Run or resume every official ANDREA-compatible stage for one profile."""
 
@@ -342,6 +353,11 @@ def run_profile_pipeline(
             andrea_repo=andrea_repo,
             spathi_repo=spathi_repo,
             profile_file=profile_file,
+            runtime_plan=runtime_plan,
+            max_cores=max_cores,
+            max_ram_gb=max_ram_gb,
+            reserve_cores=reserve_cores,
+            reserve_ram_gb=reserve_ram_gb,
         )
         build_spathi_image(**common, spathi_repo=spathi_repo)
         generate_data(**common, andrea_repo=andrea_repo)
@@ -406,8 +422,12 @@ def run_calibration_workflow(
     work_root: Path,
     calibration_budget: str = "full",
     run_id: str | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
-    """Run or resume the complete bounded six-stage SPATHI calibration."""
+    """Run or resume the prospective multi-fidelity SPATHI calibration."""
 
     if calibration_budget not in CALIBRATION_BUDGETS:
         raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
@@ -416,13 +436,25 @@ def run_calibration_workflow(
     flow_id = _flow_id(identity, run_id)
     workflow_root = work / "v1/workflows/calibration" / calibration_budget / flow_id
     state_path = workflow_root / "workflow.json"
-    with run_lock(workflow_root):
+    runtime_plan = load_or_create_runtime_plan(
+        workflow_root / "runtime-plan.json",
+        boundary=workflow_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=work),
+    )
+    with host_execution_lease(workload=f"calibration:{flow_id}"), run_lock(workflow_root):
         state = _adopt_workflow(
             state_path,
             workflow_type="calibration",
             flow_id=flow_id,
             identity=identity,
-            extra={"calibration_budget": calibration_budget},
+            extra={
+                "calibration_budget": calibration_budget,
+                "runtime_plan": runtime_plan,
+            },
         )
         if state["status"] == "running":
             atomic_write_json(
@@ -432,17 +464,19 @@ def run_calibration_workflow(
                 boundary=work,
             )
             parent_ranking: Path | None = None
-            for stage_id in CALIBRATION_STAGES:
-                profile_id = stage_profile_id(stage_id, calibration_budget)
-                stage_root = workflow_root / "stages" / stage_id
+            for stage_id, fidelity in CALIBRATION_PHASES:
+                phase_id = f"{stage_id}__{fidelity}"
+                profile_id = stage_profile_id(stage_id, calibration_budget, fidelity)
+                stage_root = workflow_root / "stages" / phase_id
                 bundle = stage_root / "requests"
                 profile_file = stage_root / f"{profile_id}.json"
                 ranking = stage_root / "ranking.json"
-                run_root = work / "v1" / profile_id / f"{flow_id}-{stage_id}"
+                run_root = work / "v1" / profile_id / f"{flow_id}-{phase_id}"
                 materialize_calibration_stage(
                     repo_root=root,
                     stage_id=stage_id,
                     calibration_budget=calibration_budget,
+                    fidelity=fidelity,
                     parent_ranking_path=parent_ranking,
                     output_dir=bundle,
                     profile_output=profile_file,
@@ -455,16 +489,20 @@ def run_calibration_workflow(
                     andrea_repo=andrea_repo,
                     spathi_repo=spathi_repo,
                     statistics=False,
+                    runtime_plan=runtime_plan,
                 )
                 rank_calibration_stage(
                     repo_root=root,
                     stage_id=stage_id,
                     calibration_budget=calibration_budget,
+                    fidelity=fidelity,
                     manifest_path=bundle / "calibration-manifest.json",
                     summary_path=run_root / "reports/summary.json",
                     output_path=ranking,
                 )
-                state["stages"][stage_id] = {
+                state["stages"][phase_id] = {
+                    "stage_id": stage_id,
+                    "fidelity": fidelity,
                     "profile_id": profile_id,
                     "profile": str(profile_file.relative_to(root)),
                     "run_root": str(run_root.relative_to(root)),
@@ -533,6 +571,10 @@ def run_comparison_workflow(
     work_root: Path,
     profile: str = "full",
     efficiency_run_id: str | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
     """Run or resume one selected-SPATHI comparison with all declared baselines."""
 
@@ -551,7 +593,16 @@ def run_comparison_workflow(
     workflow_root = work / "v1/workflows/comparison" / profile / flow_id
     state_path = workflow_root / "workflow.json"
     profile_id = f"{profile}-v1"
-    with run_lock(workflow_root):
+    runtime_plan = load_or_create_runtime_plan(
+        workflow_root / "runtime-plan.json",
+        boundary=workflow_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=work),
+    )
+    with host_execution_lease(workload=f"comparison:{flow_id}"), run_lock(workflow_root):
         state = _adopt_workflow(
             state_path,
             workflow_type="comparison",
@@ -563,6 +614,7 @@ def run_comparison_workflow(
                 "efficiency_flow_id": efficiency_id,
                 "production_config": str(production_config.relative_to(root)),
                 "production_config_sha256": sha256_file(production_config),
+                "runtime_plan": runtime_plan,
             },
         )
         if state["status"] == "running":
@@ -591,6 +643,7 @@ def run_comparison_workflow(
                 andrea_repo=andrea_repo,
                 spathi_repo=spathi_repo,
                 statistics=True,
+                runtime_plan=runtime_plan,
             )
             report_path, _manifest_path = _report_paths(
                 version_root=work / "v1",

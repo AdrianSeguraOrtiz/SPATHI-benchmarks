@@ -552,8 +552,14 @@
     const meta = query("#workflow-meta");
     clear(meta);
     const identity = (workflow && workflow.identity) || {};
+    const runtimeCapacity = workflow && workflow.runtime_plan && workflow.runtime_plan.capacity;
+    const inferenceSchedule = workflow && workflow.scheduling && workflow.scheduling.inference;
+    const inferenceUtilization = inferenceSchedule && inferenceSchedule.utilization;
     const values = [
       [reportType === "calibration" ? "Workflow" : "Profile", workflow && (workflow.flow_id || workflow.profile_id)],
+      ["CPU budget", runtimeCapacity && `${formatInteger(runtimeCapacity.cpu_threads)} threads`],
+      ["RAM budget", runtimeCapacity && bytes(runtimeCapacity.memory_bytes)],
+      ["Inference CPU use", inferenceUtilization && `${formatNumber(100 * inferenceUtilization.cpu_capacity_utilization, { maximumFractionDigits: 1 })}%`],
       ["SPATHI", identity.spathi_commit || (workflow && workflow.spathi_commit)],
       ["ANDREA", identity.andrea_commit || (workflow && workflow.andrea_commit)],
       ["Benchmark", identity.benchmark_commit || (workflow && workflow.benchmark_commit)],

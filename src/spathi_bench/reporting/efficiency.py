@@ -12,6 +12,7 @@ from ..artifacts import sha256_file
 from ..config import BenchmarkConfigError, load_json_object, validate_json
 from ..design_sensitivity import load_design_sensitivity_contract
 from ..efficiency_safety import validate_safety_plan
+from ..resource_plan import validate_runtime_plan
 from ..state import STATE_SCHEMA_VERSION
 from .common import (
     central_report_path,
@@ -686,6 +687,9 @@ def render_efficiency_report(
             "status": "complete",
             "profile": profile,
             "analysis_role": results["analysis_role"],
+            "runtime_plan": validate_runtime_plan(
+                require_mapping(workflow.get("runtime_plan"), "efficiency runtime plan")
+            ),
             "identity": workflow["identity"],
         },
         "datasets": datasets,

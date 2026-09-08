@@ -20,6 +20,7 @@ RUNTIME_MEMBERS = (
     "work/materialized/tools-params.json",
     "work/materialized/custom-tools.json",
     "work/materialized/run-metadata.json",
+    "work/materialized/convergence-plans.json",
 )
 
 
@@ -48,6 +49,8 @@ def _runtime_profile() -> dict[str, Any]:
         "purpose": "calibration",
         "calibration_budget": "full",
         "calibration_stage": "convergence",
+        "calibration_fidelity": "final",
+        "execution_class": "bulk_canonical",
         "description": "Runtime-derived calibration profile fixture.",
         "generation_jobs": [
             {
@@ -68,22 +71,9 @@ def _runtime_profile() -> dict[str, Any]:
                 "tools_params": RUNTIME_MEMBERS[0],
                 "custom_tools": RUNTIME_MEMBERS[1],
                 "run_metadata": RUNTIME_MEMBERS[2],
+                "convergence_plans": RUNTIME_MEMBERS[3],
             }
         ],
-        "resources": {
-            "generate_data": {
-                "max_parallel_tasks": 1,
-                "max_cores": 1,
-                "max_ram_gb": 1,
-            },
-            "infer_network": {
-                "max_parallel_runs": 1,
-                "max_cores": 1,
-                "max_ram_gb": 1,
-                "planner": "heuristic",
-                "planner_time_limit_seconds": 1,
-            },
-        },
         "planned_design": {
             "simulators": ["dyngen"],
             "replicates_per_condition": 1,
@@ -123,6 +113,11 @@ def _repository(
         (SOURCE_REPOSITORY / "schemas/profile.schema.json").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
+    execution_schema = root / "schemas/execution-policy.schema.json"
+    execution_schema.write_text(
+        (SOURCE_REPOSITORY / "schemas/execution-policy.schema.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     _write_json(root, "repos.lock.json", {"schema_version": "1.0"})
     build_input = root / "containers/spathi/Dockerfile"
     build_input.parent.mkdir(parents=True)
@@ -146,6 +141,12 @@ def _repository(
         },
     )
     _write_json(root, "experiments/v1/spathi/search-space.json", {})
+    execution_policy = root / "experiments/v1/execution/policy.json"
+    execution_policy.parent.mkdir(parents=True, exist_ok=True)
+    execution_policy.write_text(
+        (SOURCE_REPOSITORY / "experiments/v1/execution/policy.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     _write_json(root, "experiments/v1/seeds/seed-plan.json", {"schema_version": "1.0"})
     inputs: dict[str, Any] = {}
     if scientific_runtime_input:

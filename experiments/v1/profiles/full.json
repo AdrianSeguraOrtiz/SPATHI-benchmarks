@@ -103,20 +103,7 @@
     }
   ],
   "inference_batches": [],
-  "resources": {
-    "generate_data": {
-      "max_parallel_tasks": 2,
-      "max_cores": 8,
-      "max_ram_gb": 48
-    },
-    "infer_network": {
-      "max_parallel_runs": 2,
-      "max_cores": 4,
-      "max_ram_gb": 24,
-      "planner": "auto",
-      "planner_time_limit_seconds": 300
-    }
-  },
+  "execution_class": "bulk_full",
   "planned_design": {
     "simulators": ["dyngen", "scmultisim", "sergio", "boolode", "genespider2"],
     "replicates_per_condition": 5,

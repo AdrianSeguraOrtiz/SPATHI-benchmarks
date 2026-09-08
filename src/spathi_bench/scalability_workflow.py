@@ -13,11 +13,8 @@ import copy
 import math
 import os
 import platform
-import subprocess
-import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from time import perf_counter
 from typing import Any
 
 from .artifacts import Artifact, ArtifactKey, ArtifactStore, canonical_json_sha256, sha256_file
@@ -29,39 +26,56 @@ from .config import (
     validate_json,
     validate_profile_references,
 )
+from .execution_policy import resolve_execution_class
 from .pipeline import (
     InferenceExecutionFailure,
     build_spathi_image,
     generate_data,
     preflight,
     run_inference,
+    scale_stress_generation_wall_time,
 )
 from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_scalability_report
+from .resource_plan import detect_host_capacity, load_or_create_runtime_plan
+from .resource_scheduler import host_execution_lease
 from .runtime import (
     andrea_host_environment,
     benchmark_host_environment,
     docker_runtime_environment,
 )
 from .safe_io import path_below_no_symlinks, write_idempotent_json
+from .scalability_boundary import (
+    ScalabilityDecision,
+    decide_scalability_attempt,
+    load_scalability_boundary,
+    target_scout_scope,
+)
 from .seeds import derive_plan_seed, load_seed_plan
-from .state import load_state, run_lock, status_at_least, write_state
+from .state import load_state, run_lock, write_state
+from .tool_contract import spathi_runtime_resources
 
 _IDENTITY_INPUTS = (
+    "experiments/v1/execution/policy.json",
     "experiments/v1/seeds/seed-plan.json",
+    "experiments/v1/spathi/scalability-boundary.json",
     "images.lock.json",
     "repos.lock.json",
     "schemas/scale-stress-panel.schema.json",
+    "schemas/execution-policy.schema.json",
     "schemas/profile.schema.json",
     "schemas/scalability-results.schema.json",
+    "schemas/scalability-boundary.schema.json",
     "schemas/spathi-production-config.schema.json",
     "src/spathi_bench/scale_stress.py",
     "src/spathi_bench/pipeline.py",
+    "src/spathi_bench/execution_policy.py",
     "src/spathi_bench/production_policy.py",
     "src/spathi_bench/provenance.py",
     "src/spathi_bench/scalability_workflow.py",
+    "src/spathi_bench/scalability_boundary.py",
     "src/spathi_bench/report_publication.py",
     "src/spathi_bench/safe_io.py",
     "src/spathi_bench/reporting/assets/scalability.js",
@@ -69,8 +83,14 @@ _IDENTITY_INPUTS = (
     "src/spathi_bench/reporting/templates/scalability.html.j2",
     "src/spathi_bench/runtime.py",
 )
-_RSS_SAMPLE_INTERVAL_SECONDS = 0.1
 _MEASUREMENT_STATE_FIELD = "scalability_measurement"
+_ANDREA_EXECUTION_WALL_SEMANTICS = (
+    "andrea_execution_end_to_end_including_input_verification_preparation_"
+    "scheduling_merging_and_requested_output_materialization"
+)
+_ANDREA_PHYSICAL_WALL_SEMANTICS = (
+    "physical_task_end_to_end_including_container_launch_and_exit_collection"
+)
 
 
 def _host_resources() -> dict[str, Any]:
@@ -213,10 +233,12 @@ def _algorithm_seed(repo_root: Path, *, budget: str, dataset_id: str) -> tuple[i
     return seed, derivation
 
 
-def _runtime_profile_id(budget: str, dataset_id: str) -> str:
-    profile_id = f"scalability_{budget}_{dataset_id}"
+def _runtime_profile_id(budget: str, dataset_id: str, stage: str) -> str:
+    if stage not in {"scout", "all_targets"}:
+        raise BenchmarkConfigError("Scalability stage must be scout or all_targets")
+    profile_id = f"scalability_{budget}_{dataset_id}_{stage}"
     if len(profile_id) > 120:
-        profile_id = f"scalability_{budget}_{canonical_json_sha256(dataset_id)[:20]}"
+        profile_id = f"scalability_{budget}_{canonical_json_sha256(dataset_id)[:20]}_{stage}"
     return profile_id
 
 
@@ -229,6 +251,9 @@ def materialize_scalability_dataset(
     production: Mapping[str, Any],
     panel: Mapping[str, Any],
     dataset: Mapping[str, Any],
+    stage: str,
+    target_scope: Mapping[str, Any],
+    timeout_seconds: float,
     output_dir: Path,
 ) -> dict[str, Path | str | int | dict[str, Any]]:
     """Materialize one runtime profile so resources remain attributable per shape."""
@@ -236,6 +261,20 @@ def materialize_scalability_dataset(
     root = repo_root.resolve()
     if budget not in {"reduced", "full"}:
         raise BenchmarkConfigError("Scalability budget must be 'reduced' or 'full'")
+    if stage not in {"scout", "all_targets"}:
+        raise BenchmarkConfigError("Scalability stage must be scout or all_targets")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(float(timeout_seconds))
+        or float(timeout_seconds) <= 0
+    ):
+        raise BenchmarkConfigError("Scalability timeout_seconds must be finite and positive")
+    if stage == "scout":
+        if target_scope.get("method") != "sha256_gene_id":
+            raise BenchmarkConfigError("Scalability scout requires a frozen hash target scope")
+    elif dict(target_scope) != {"method": "all"}:
+        raise BenchmarkConfigError("All-target scalability stage requires target_scope=all")
     expected_template_id = f"scalability-{budget}"
     if (
         template_profile.get("id") != expected_template_id
@@ -288,7 +327,7 @@ def materialize_scalability_dataset(
         boundary=root,
     )
     seed, seed_derivation = _algorithm_seed(root, budget=budget, dataset_id=dataset_id)
-    run_id = f"spathi_scalability_{dataset_id}"
+    run_id = f"spathi_scalability_{dataset_id}_{stage}"
     tools_params = {
         "runs": [
             {
@@ -297,8 +336,10 @@ def materialize_scalability_dataset(
                 "params": {
                     "group_policy": copy.deepcopy(dict(policy["group_policy"])),
                     "random_seed": seed,
+                    "target_scope": copy.deepcopy(dict(target_scope)),
                 },
                 "execution": {"mode": "group_native"},
+                "resources": {"timeout_seconds": float(timeout_seconds)},
             }
         ]
     }
@@ -306,11 +347,12 @@ def materialize_scalability_dataset(
         "tools": [
             {
                 "run_id": run_id,
-                "name": f"SPATHI production policy on {dataset_id}",
+                "name": f"SPATHI production policy on {dataset_id} ({stage})",
                 "docker_image": load_image_lock(root)["images"]["spathi"]["tag"],
                 "execution_mode": "group_native",
                 "extra_inputs": ["groups", "tf_list"],
                 "outputs": {"directed": True, "sign": "none"},
+                "runtime_resources": spathi_runtime_resources(),
             }
         ]
     }
@@ -325,7 +367,10 @@ def materialize_scalability_dataset(
                 "algorithm_seed_parameter": "random_seed",
                 "seed_derivation": seed_derivation,
                 "family": "spathi",
-                "notes": ["Frozen production policy; computational scale stress only."],
+                "notes": [
+                    "Frozen production policy; computational scale stress only.",
+                    f"Preregistered scalability stage: {stage}.",
+                ],
             }
         ],
     }
@@ -338,15 +383,18 @@ def materialize_scalability_dataset(
     metadata_path = write_idempotent_json(
         runtime_dir / "run-metadata.json", metadata, "run metadata", boundary=root
     )
+    # Scout and all-target runs consume one immutable dataset artifact.  The
+    # inference stage remains distinct, but generation identity must not include
+    # the stage or the largest matrices would be generated and stored twice.
     generation_job_id = f"generate_{dataset_id}"
-    profile_id = _runtime_profile_id(budget, dataset_id)
+    profile_id = _runtime_profile_id(budget, dataset_id, stage)
     profile = copy.deepcopy(dict(template_profile))
     profile.update(
         {
             "id": profile_id,
             "description": (
-                f"Runtime scale-stress profile for {dataset_id}; executes only the frozen "
-                "production SPATHI policy."
+                f"Runtime scale-stress profile for {dataset_id} ({stage}); executes only "
+                "the frozen production SPATHI policy."
             ),
             "production_config": _relative(root, production_config_path, "production config"),
             "generation_jobs": [
@@ -360,7 +408,7 @@ def materialize_scalability_dataset(
             ],
             "inference_batches": [
                 {
-                    "id": f"infer_{dataset_id}",
+                    "id": f"infer_{dataset_id}_{stage}",
                     "kind": "spathi",
                     "dataset_role": "scalability",
                     "generation_jobs": [generation_job_id],
@@ -387,133 +435,9 @@ def materialize_scalability_dataset(
         "run_id": run_id,
         "algorithm_seed": seed,
         "seed_derivation": seed_derivation,
+        "stage": stage,
+        "target_scope": copy.deepcopy(dict(target_scope)),
     }
-
-
-def _run_command(arguments: Sequence[str], *, timeout: float = 5.0) -> str:
-    completed = subprocess.run(
-        list(arguments),
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    return completed.stdout.strip() if completed.returncode == 0 else ""
-
-
-def _rss_from_process_table(root_pids: Sequence[int], raw_table: str) -> int:
-    """Sum RSS across each container process tree from a stable ``ps`` snapshot."""
-
-    rows: dict[int, tuple[int, int]] = {}
-    children: dict[int, list[int]] = {}
-    for line in raw_table.splitlines():
-        fields = line.split()
-        if len(fields) != 3:
-            continue
-        try:
-            pid, parent, rss_kib = (int(field) for field in fields)
-        except ValueError:
-            continue
-        if pid < 1 or parent < 0 or rss_kib < 0:
-            continue
-        rows[pid] = (parent, rss_kib)
-        children.setdefault(parent, []).append(pid)
-    pending = list(root_pids)
-    observed: set[int] = set()
-    total_kib = 0
-    while pending:
-        pid = pending.pop()
-        if pid in observed:
-            continue
-        observed.add(pid)
-        record = rows.get(pid)
-        if record is not None:
-            total_kib += record[1]
-        pending.extend(children.get(pid, ()))
-    return total_kib * 1024
-
-
-class _PeakRssSampler:
-    """Measure peak host RSS of the unambiguous SPATHI container process tree."""
-
-    def __init__(self, image_id: str) -> None:
-        self.image_id = image_id
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._samples: list[int] = []
-        self._error: BaseException | None = None
-
-    def _container_ids(self) -> tuple[str, ...]:
-        raw = _run_command(
-            [
-                "docker",
-                "ps",
-                "--no-trunc",
-                "--filter",
-                f"ancestor={self.image_id}",
-                "--format",
-                "{{.ID}}",
-            ]
-        )
-        return tuple(item for item in raw.splitlines() if item)
-
-    def start(self) -> None:
-        existing = self._container_ids()
-        if existing:
-            raise BenchmarkConfigError(
-                "Cannot attribute scalability RSS while another SPATHI container is running"
-            )
-        self._thread = threading.Thread(
-            target=self._sample,
-            name="spathi-scalability-rss",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def _sample(self) -> None:
-        try:
-            while not self._stop.is_set():
-                container_ids = self._container_ids()
-                if len(container_ids) > 1:
-                    raise BenchmarkConfigError(
-                        "Several SPATHI containers are running; peak RSS is not attributable"
-                    )
-                roots: list[int] = []
-                for container_id in container_ids:
-                    raw_pid = _run_command(
-                        ["docker", "inspect", "--format", "{{.State.Pid}}", container_id]
-                    )
-                    try:
-                        pid = int(raw_pid)
-                    except ValueError:
-                        continue
-                    if pid > 0:
-                        roots.append(pid)
-                if roots:
-                    table = _run_command(["ps", "-e", "-o", "pid=,ppid=,rss="])
-                    rss = _rss_from_process_table(roots, table)
-                    if rss > 0:
-                        self._samples.append(rss)
-                self._stop.wait(_RSS_SAMPLE_INTERVAL_SECONDS)
-        except BaseException as exc:  # surfaced by finish()
-            self._error = exc
-
-    def finish(self, *, require_samples: bool) -> tuple[int, int]:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=10)
-            if self._thread.is_alive():
-                raise BenchmarkConfigError("SPATHI RSS sampler did not terminate")
-        if self._error is not None:
-            raise BenchmarkConfigError(f"Cannot measure SPATHI peak RSS: {self._error}")
-        if not self._samples:
-            if require_samples:
-                raise BenchmarkConfigError(
-                    "No SPATHI RSS sample was captured. A cached inference cannot establish "
-                    "fresh scalability evidence; remove its inference artifact and resume."
-                )
-            return 0, 0
-        return max(self._samples), len(self._samples)
 
 
 def _artifact_from_reference(
@@ -585,24 +509,259 @@ def _required_time(mapping: Mapping[str, Any], key: str, label: str) -> float:
     return float(value)
 
 
-def _expected_dimensions(dataset_spec: Mapping[str, Any]) -> dict[str, int]:
+def _optional_nonnegative_number(value: Any, label: str) -> float | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or float(value) < 0
+    ):
+        raise BenchmarkConfigError(f"{label} must be null or a finite number >= 0")
+    return float(value)
+
+
+def _optional_nonnegative_integer(value: Any, label: str) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise BenchmarkConfigError(f"{label} must be null or an integer >= 0")
+    return value
+
+
+def _validated_andrea_measurement(
+    measurement: Mapping[str, Any],
+    *,
+    resources: Mapping[str, Any],
+    require_complete: bool,
+) -> dict[str, Any]:
+    """Validate and retain ANDREA's container-level resource telemetry."""
+
+    if (
+        measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "physical_task"
+        or "container_wall_time_seconds" not in measurement
+    ):
+        raise BenchmarkConfigError("Scalability requires one physical-task ANDREA measurement")
+    wall_time = _optional_nonnegative_number(
+        measurement.get("wall_time_seconds"), "ANDREA tool wall time"
+    )
+    cpu_time = _optional_nonnegative_number(
+        measurement.get("cpu_time_seconds"), "ANDREA tool CPU time"
+    )
+    peak_memory = _optional_nonnegative_integer(
+        measurement.get("peak_memory_bytes"), "ANDREA peak memory"
+    )
+    output_bytes = _optional_nonnegative_integer(
+        measurement.get("output_bytes"), "ANDREA output bytes"
+    )
+    container_wall_time = _optional_nonnegative_number(
+        measurement.get("container_wall_time_seconds"), "ANDREA container wall time"
+    )
+    if wall_time is None or output_bytes is None:
+        raise BenchmarkConfigError("ANDREA measurement omits wall time or output bytes")
+
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
+    if not isinstance(assigned, Mapping) or not isinstance(telemetry, Mapping):
+        raise BenchmarkConfigError("ANDREA measurement lacks resource or telemetry accounting")
+    if not {
+        "wall_source",
+        "wall_semantics",
+        "container_wall_source",
+        "oom_kill_events",
+        "memory_limit_events",
+    }.issubset(telemetry):
+        raise BenchmarkConfigError("ANDREA measurement lacks canonical telemetry fields")
+    expected_cpuset = list(resources["cpuset_cpus"])
+    configured = assigned.get("cpuset_cpus_configured")
+    effective = assigned.get("cpuset_cpus_effective")
+    if (
+        assigned.get("threads") != resources["cpu_threads"]
+        or assigned.get("ram_limit_bytes") != resources["memory_bytes"]
+        or assigned.get("cpuset_cpus_requested") != expected_cpuset
+        or configured not in ([*expected_cpuset], None)
+        or effective not in ([*expected_cpuset], None)
+        or (require_complete and (configured != expected_cpuset or effective != expected_cpuset))
+    ):
+        raise BenchmarkConfigError(
+            "ANDREA telemetry differs from the frozen scalability allocation"
+        )
+    telemetry_status = telemetry.get("status")
+    if telemetry_status not in {"complete", "partial", "unavailable", "not_started"}:
+        raise BenchmarkConfigError("ANDREA telemetry has an invalid status")
+    wall_started = telemetry_status != "not_started"
+    if (
+        telemetry.get("wall_source") != ("andrea_monotonic_clock" if wall_started else None)
+        or telemetry.get("wall_semantics")
+        != (_ANDREA_PHYSICAL_WALL_SEMANTICS if wall_started else "not_started")
+        or telemetry.get("container_wall_source")
+        != ("docker_state_timestamps" if container_wall_time is not None else None)
+        or telemetry.get("memory_semantics")
+        not in {
+            "container_cgroup_peak",
+            "sampled_container_memory_lower_bound",
+            "unavailable",
+        }
+    ):
+        raise BenchmarkConfigError("ANDREA physical-task telemetry semantics are invalid")
+    for field in ("oom_events", "oom_kill_events", "memory_limit_events"):
+        _optional_nonnegative_integer(telemetry.get(field), f"ANDREA telemetry {field}")
+    if require_complete and (
+        peak_memory is None or cpu_time is None or telemetry_status != "complete"
+    ):
+        raise BenchmarkConfigError(
+            "A completed scalability endpoint requires CPU and peak-memory telemetry"
+        )
+    return copy.deepcopy(dict(measurement))
+
+
+def _validated_andrea_execution_measurement(
+    report: Mapping[str, Any],
+    *,
+    resources: Mapping[str, Any],
+    require_complete: bool,
+) -> dict[str, Any]:
+    """Validate ANDREA's canonical end-to-end clock and resource attribution."""
+
+    execution = report.get("execution")
+    measurement = execution.get("measurement") if isinstance(execution, Mapping) else None
+    if not isinstance(measurement, Mapping):
+        raise BenchmarkConfigError("ANDREA report lacks end-to-end execution telemetry")
+    wall_time = _optional_nonnegative_number(
+        measurement.get("wall_time_seconds"), "ANDREA execution wall time"
+    )
+    cpu_time = _optional_nonnegative_number(
+        measurement.get("cpu_time_seconds"), "ANDREA execution CPU time"
+    )
+    peak_memory = _optional_nonnegative_integer(
+        measurement.get("peak_memory_bytes"), "ANDREA execution peak memory"
+    )
+    output_bytes = _optional_nonnegative_integer(
+        measurement.get("output_bytes"), "ANDREA execution output bytes"
+    )
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
+    expected_cpuset = [list(resources["cpuset_cpus"])]
+    if (
+        measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "andrea_execution"
+        or wall_time is None
+        or output_bytes is None
+        or not isinstance(assigned, Mapping)
+        or not isinstance(telemetry, Mapping)
+        or telemetry.get("wall_source") != "andrea_monotonic_clock"
+        or telemetry.get("wall_semantics") != _ANDREA_EXECUTION_WALL_SEMANTICS
+        or telemetry.get("cpu_semantics")
+        != "sum_of_physical_container_cpu_excludes_andrea_host_process"
+    ):
+        raise BenchmarkConfigError("ANDREA end-to-end execution telemetry is invalid")
+    threads_peak = assigned.get("threads_peak")
+    ram_peak = assigned.get("ram_limit_peak_bytes")
+    requested_sets = assigned.get("cpuset_cpus_requested_sets")
+    effective_sets = assigned.get("cpuset_cpus_effective_sets")
+    if (
+        type(threads_peak) is not int
+        or not 0 <= threads_peak <= resources["cpu_threads"]
+        or type(ram_peak) is not int
+        or not 0 <= ram_peak <= resources["memory_bytes"]
+        or requested_sets not in ([], expected_cpuset)
+        or effective_sets not in ([], expected_cpuset)
+        or telemetry.get("status") not in {"complete", "partial", "unavailable"}
+        or telemetry.get("memory_semantics")
+        not in {
+            "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process",
+            "unavailable_when_any_child_peak_or_interval_is_unavailable",
+        }
+    ):
+        raise BenchmarkConfigError("ANDREA end-to-end resource attribution is invalid")
+    if require_complete and (
+        wall_time <= 0
+        or cpu_time is None
+        or peak_memory is None
+        or peak_memory < 1
+        or output_bytes < 1
+        or threads_peak != resources["cpu_threads"]
+        or ram_peak != resources["memory_bytes"]
+        or requested_sets != expected_cpuset
+        or effective_sets != expected_cpuset
+        or telemetry.get("status") != "complete"
+        or telemetry.get("memory_source") != "child_container_cgroup_peaks"
+        or telemetry.get("memory_semantics")
+        != "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"
+    ):
+        raise BenchmarkConfigError("Completed ANDREA execution telemetry is incomplete")
+    return copy.deepcopy(dict(measurement))
+
+
+def _expected_dimensions(dataset_spec: Mapping[str, Any], *, target_count: int) -> dict[str, int]:
     return {
         "cells": sum(int(group["cells"]) for group in dataset_spec["groups"]),
         "genes": int(dataset_spec["genes"]),
         "groups": len(dataset_spec["groups"]),
         "transcription_factors": int(dataset_spec["tfs"]),
-        "targets": int(dataset_spec["genes"]),
+        "targets": target_count,
     }
 
 
 def _execution_limits(resources: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "max_parallel_runs": int(resources["max_parallel_runs"]),
-        "max_cores": int(resources["max_cores"]),
-        "max_ram_gb": float(resources["max_ram_gb"]),
+        "cpu_threads": int(resources["cpu_threads"]),
+        "memory_bytes": int(resources["memory_bytes"]),
+        "memory_gib": float(resources["memory_gib"]),
+        "cpuset_cpus": list(resources["cpuset_cpus"]),
         "planner": str(resources["planner"]),
         "planner_time_limit_seconds": float(resources["planner_time_limit_seconds"]),
-        "inference_wall_time_limit_seconds": None,
+        "output_profile": str(resources["output_profile"]),
+        "exclusive": bool(resources["exclusive"]),
+        "execution_plan_fingerprint": str(resources["execution_plan_fingerprint"]),
+        "timeout_seconds": float(resources["timeout_seconds"]),
+    }
+
+
+def _target_count(dataset_spec: Mapping[str, Any], target_scope: Mapping[str, Any]) -> int:
+    if target_scope.get("method") == "all":
+        return int(dataset_spec["genes"])
+    size = target_scope.get("size")
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+        raise BenchmarkConfigError("Scalability hash target scope has an invalid size")
+    if size > int(dataset_spec["genes"]):
+        raise BenchmarkConfigError("Scalability scout exceeds the dataset gene count")
+    return size
+
+
+def _measurement_resources(execution_plan: Mapping[str, Any]) -> dict[str, Any]:
+    operations = execution_plan.get("operations")
+    inference = operations.get("inference") if isinstance(operations, Mapping) else None
+    if not isinstance(inference, Mapping):
+        raise BenchmarkConfigError("Scalability execution plan has no inference allocation")
+    detected = execution_plan.get("detected")
+    allowed = detected.get("allowed_cpus") if isinstance(detected, Mapping) else None
+    allocation_order = (
+        detected.get("cpu_allocation_order") if isinstance(detected, Mapping) else None
+    )
+    if (
+        not isinstance(allowed, list)
+        or not isinstance(allocation_order, list)
+        or any(
+            not isinstance(cpu, int) or isinstance(cpu, bool) or cpu < 0
+            for cpu in (*allowed, *allocation_order)
+        )
+        or allowed != sorted(set(allowed))
+        or sorted(allocation_order) != allowed
+        or len(set(allocation_order)) != len(allocation_order)
+        or len(allocation_order) < int(inference["cpu_threads"])
+    ):
+        raise BenchmarkConfigError(
+            "Scalability execution plan has no canonical CPU allocation order"
+        )
+    return {
+        **dict(inference),
+        "cpuset_cpus": sorted(allocation_order[: int(inference["cpu_threads"])]),
+        "output_profile": execution_plan["output_profile"],
+        "exclusive": execution_plan["exclusive_inference"],
+        "execution_plan_fingerprint": execution_plan["fingerprint"],
     }
 
 
@@ -657,15 +816,16 @@ def _failure_kind(failure: InferenceExecutionFailure) -> str:
     return "tool_error"
 
 
-def _failed_generation_evidence(
+def _generation_evidence(
     *,
     repo_root: Path,
     runtime_state: Mapping[str, Any],
     dataset_spec: Mapping[str, Any],
-    generation_wall_time_seconds: float,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    if runtime_state.get("status") != "generated":
-        raise BenchmarkConfigError("Failed scalability evidence requires generated pipeline state")
+    if runtime_state.get("status") not in {"generated", "inferred"}:
+        raise BenchmarkConfigError(
+            "Scalability evidence requires generated or inferred pipeline state"
+        )
     datasets = runtime_state.get("datasets")
     if not isinstance(datasets, list) or len(datasets) != 1:
         raise BenchmarkConfigError("Per-shape scalability run must contain exactly one dataset")
@@ -681,8 +841,7 @@ def _failed_generation_evidence(
         f"datasets/{dataset_id}/expression.tsv",
         "expression",
     )
-    if not math.isfinite(float(generation_wall_time_seconds)) or generation_wall_time_seconds < 0:
-        raise BenchmarkConfigError("Generation wall time must be finite and non-negative")
+    generation_wall_time_seconds = scale_stress_generation_wall_time(dataset_artifact)
     return (
         {
             "wall_time_seconds": float(generation_wall_time_seconds),
@@ -699,45 +858,47 @@ def collect_failed_scalability_measurement(
     repo_root: Path,
     runtime_state: Mapping[str, Any],
     dataset_spec: Mapping[str, Any],
+    stage: str,
+    target_scope: Mapping[str, Any],
     run_id: str,
     algorithm_seed: int,
     seed_derivation: Mapping[str, Any],
     resources: Mapping[str, Any],
-    generation_wall_time_seconds: float,
-    inference_wall_time_seconds: float,
-    peak_rss_bytes: int,
-    rss_samples: int,
     failure: InferenceExecutionFailure,
 ) -> dict[str, Any]:
     """Record an attributable failed SPATHI run as scale evidence."""
 
     dataset_id = str(dataset_spec["id"])
+    expected_target_count = _target_count(dataset_spec, target_scope)
     if failure.dataset_id != dataset_id or failure.run_id != run_id:
         raise BenchmarkConfigError("Failed inference attribution differs from the scale request")
-    if (
-        not math.isfinite(float(inference_wall_time_seconds))
-        or inference_wall_time_seconds < 0
-        or peak_rss_bytes < 0
-        or rss_samples < 0
-        or (peak_rss_bytes == 0) != (rss_samples == 0)
-    ):
-        raise BenchmarkConfigError("Failed inference resource measurements are inconsistent")
-    generation, dataset_artifact = _failed_generation_evidence(
+    andrea_measurement = _validated_andrea_measurement(
+        failure.measurement,
+        resources=resources,
+        require_complete=False,
+    )
+    andrea_execution_measurement = _validated_andrea_execution_measurement(
+        {"execution": {"measurement": failure.execution_measurement}},
+        resources=resources,
+        require_complete=False,
+    )
+    generation, dataset_artifact = _generation_evidence(
         repo_root=repo_root,
         runtime_state=runtime_state,
         dataset_spec=dataset_spec,
-        generation_wall_time_seconds=generation_wall_time_seconds,
     )
     message = failure.tool_error.strip()[-4096:]
     return {
         "dataset_id": dataset_id,
+        "stage": stage,
+        "target_scope": copy.deepcopy(dict(target_scope)),
         "status": "failed",
         "network_mode": dataset_spec["network_mode"],
         "policy_branch": "single_group" if len(dataset_spec["groups"]) == 1 else "multi_group",
         "generation_seed": dataset_spec["seed"],
         "algorithm_seed": algorithm_seed,
         "seed_derivation": dict(seed_derivation),
-        "dimensions": _expected_dimensions(dataset_spec),
+        "dimensions": _expected_dimensions(dataset_spec, target_count=expected_target_count),
         "execution_limits": _execution_limits(resources),
         "generation": generation,
         "failure": {
@@ -748,10 +909,8 @@ def collect_failed_scalability_measurement(
             "tool_exit_code": failure.tool_exit_code,
         },
         "observations": {
-            "harness_wall_time_seconds": float(inference_wall_time_seconds),
-            "tool_wall_time_seconds": failure.tool_duration_seconds,
-            "peak_rss_bytes": peak_rss_bytes if peak_rss_bytes else None,
-            "rss_samples": rss_samples,
+            "andrea_measurement": andrea_measurement,
+            "andrea_execution_measurement": andrea_execution_measurement,
         },
         "diagnostics": {
             "command_log": _file_reference(
@@ -769,6 +928,8 @@ def validate_failed_scalability_measurement(
     repo_root: Path,
     runtime_state: Mapping[str, Any],
     dataset_spec: Mapping[str, Any],
+    stage: str,
+    target_scope: Mapping[str, Any],
     algorithm_seed: int,
     seed_derivation: Mapping[str, Any],
     resources: Mapping[str, Any],
@@ -781,23 +942,25 @@ def validate_failed_scalability_measurement(
     generation = recorded.get("generation")
     if not isinstance(generation, Mapping):
         raise BenchmarkConfigError("Failed scalability measurement has no generation evidence")
-    observed_generation, dataset_artifact = _failed_generation_evidence(
+    observed_generation, dataset_artifact = _generation_evidence(
         repo_root=repo_root,
         runtime_state=runtime_state,
         dataset_spec=dataset_spec,
-        generation_wall_time_seconds=_required_time(
-            generation, "wall_time_seconds", "failed generation"
-        ),
     )
     expected_common = {
         "dataset_id": str(dataset_spec["id"]),
+        "stage": stage,
+        "target_scope": copy.deepcopy(dict(target_scope)),
         "status": "failed",
         "network_mode": dataset_spec["network_mode"],
         "policy_branch": "single_group" if len(dataset_spec["groups"]) == 1 else "multi_group",
         "generation_seed": dataset_spec["seed"],
         "algorithm_seed": algorithm_seed,
         "seed_derivation": dict(seed_derivation),
-        "dimensions": _expected_dimensions(dataset_spec),
+        "dimensions": _expected_dimensions(
+            dataset_spec,
+            target_count=_target_count(dataset_spec, target_scope),
+        ),
         "execution_limits": _execution_limits(resources),
         "generation": observed_generation,
         "dataset_artifact": dataset_artifact,
@@ -816,6 +979,37 @@ def validate_failed_scalability_measurement(
     log_path = repo_root / str(log_reference.get("path", ""))
     if _file_reference(repo_root, log_path, "failed inference command log") != log_reference:
         raise BenchmarkConfigError("Failed inference command log changed after publication")
+    observations = recorded.get("observations")
+    if not isinstance(observations, Mapping):
+        raise BenchmarkConfigError("Failed scalability measurement has no observations")
+    raw_measurement = observations.get("andrea_measurement")
+    if not isinstance(raw_measurement, Mapping):
+        raise BenchmarkConfigError("Failed scalability measurement has no ANDREA telemetry")
+    if (
+        _validated_andrea_measurement(
+            raw_measurement,
+            resources=resources,
+            require_complete=False,
+        )
+        != raw_measurement
+    ):
+        raise BenchmarkConfigError("Failed scalability ANDREA telemetry is not canonical")
+    raw_execution_measurement = observations.get("andrea_execution_measurement")
+    if not isinstance(raw_execution_measurement, Mapping):
+        raise BenchmarkConfigError(
+            "Failed scalability measurement has no ANDREA execution telemetry"
+        )
+    if (
+        _validated_andrea_execution_measurement(
+            {"execution": {"measurement": raw_execution_measurement}},
+            resources=resources,
+            require_complete=False,
+        )
+        != raw_execution_measurement
+    ):
+        raise BenchmarkConfigError(
+            "Failed scalability ANDREA execution telemetry is not canonical"
+        )
     return dict(recorded)
 
 
@@ -824,14 +1018,12 @@ def collect_scalability_measurement(
     repo_root: Path,
     runtime_state: Mapping[str, Any],
     dataset_spec: Mapping[str, Any],
+    stage: str,
+    target_scope: Mapping[str, Any],
     run_id: str,
     algorithm_seed: int,
     seed_derivation: Mapping[str, Any],
     resources: Mapping[str, Any],
-    generation_wall_time_seconds: float,
-    inference_wall_time_seconds: float,
-    peak_rss_bytes: int,
-    rss_samples: int,
 ) -> dict[str, Any]:
     """Validate one completed run and reduce its audit artifacts to resource evidence."""
 
@@ -861,11 +1053,16 @@ def collect_scalability_measurement(
     inference_artifact = _artifact_from_reference(
         repo_root, runtime_state, inference_record["artifact"]
     )
-    _expression_relative, expression_path = _single_manifest_member(
-        dataset_artifact,
-        f"datasets/{dataset_id}/expression.tsv",
-        "expression",
+    generation, generation_artifact = _generation_evidence(
+        repo_root=repo_root,
+        runtime_state=runtime_state,
+        dataset_spec=dataset_spec,
     )
+    if generation_artifact != {
+        "kind": dataset_artifact.key.kind,
+        "digest": dataset_artifact.key.digest,
+    }:
+        raise BenchmarkConfigError("Scalability generation evidence changed artifacts")
     metadata_relative, metadata_path = _single_manifest_member(
         inference_artifact,
         f"tools/{run_id}/io/out/run_metadata.json",
@@ -878,8 +1075,23 @@ def collect_scalability_measurement(
     report = load_json_object(report_path, "ANDREA inference report")
     if metadata.get("status") != "complete":
         raise BenchmarkConfigError("SPATHI run metadata is not complete")
-    if report.get("status") != "executed":
-        raise BenchmarkConfigError("ANDREA inference report is not executed")
+    if (
+        report.get("status") != "executed"
+        or report.get("output_profile") != resources["output_profile"]
+    ):
+        raise BenchmarkConfigError(
+            "ANDREA inference report is not executed with the frozen output profile"
+        )
+    report_results = (report.get("tools") or {}).get("results")
+    result = report_results.get(run_id) if isinstance(report_results, Mapping) else None
+    raw_measurement = result.get("measurement") if isinstance(result, Mapping) else None
+    if not isinstance(raw_measurement, Mapping):
+        raise BenchmarkConfigError("ANDREA inference report lacks run telemetry")
+    andrea_measurement = _validated_andrea_measurement(
+        raw_measurement,
+        resources=resources,
+        require_complete=True,
+    )
     dimensions = metadata.get("input_dimensions")
     models = metadata.get("models")
     effective = metadata.get("effective_parameters")
@@ -904,7 +1116,10 @@ def collect_scalability_measurement(
         key: _required_int(dimensions, key, "input_dimensions")
         for key in ("cells", "genes", "groups", "transcription_factors", "targets")
     }
-    expected_dimensions = _expected_dimensions(dataset_spec)
+    expected_dimensions = _expected_dimensions(
+        dataset_spec,
+        target_count=_target_count(dataset_spec, target_scope),
+    )
     if observed_dimensions != expected_dimensions:
         raise BenchmarkConfigError(
             f"SPATHI dimensions differ from the scale request: {observed_dimensions} != "
@@ -933,20 +1148,21 @@ def collect_scalability_measurement(
     )
     if models_completed != models_requested or models_trained > models_completed or models_failed:
         raise BenchmarkConfigError("SPATHI model completion accounting is not publishable")
-    report_execution = report.get("execution")
-    if not isinstance(report_execution, Mapping):
-        raise BenchmarkConfigError("ANDREA report lacks execution accounting")
-    andrea_seconds = _required_time(report_execution, "elapsed_seconds", "execution")
+    execution_measurement = _validated_andrea_execution_measurement(
+        report,
+        resources=resources,
+        require_complete=True,
+    )
     spathi_seconds = _required_time(phases, "total", "phase_times_seconds")
     cache_hit = bool(inference_record["artifact"].get("cache_hit"))
     if cache_hit:
         raise BenchmarkConfigError("Fresh scalability resource evidence cannot come from cache")
-    if peak_rss_bytes < 1 or rss_samples < 1:
-        raise BenchmarkConfigError("Scalability evidence requires observed peak RSS samples")
     output_prefix = metadata_relative.removesuffix("run_metadata.json")
     policy_branch = "single_group" if observed_dimensions["groups"] == 1 else "multi_group"
     return {
         "dataset_id": dataset_id,
+        "stage": stage,
+        "target_scope": copy.deepcopy(dict(target_scope)),
         "status": "completed",
         "network_mode": dataset_spec["network_mode"],
         "policy_branch": policy_branch,
@@ -955,18 +1171,11 @@ def collect_scalability_measurement(
         "seed_derivation": dict(seed_derivation),
         "dimensions": observed_dimensions,
         "execution_limits": _execution_limits(resources),
-        "generation": {
-            "wall_time_seconds": float(generation_wall_time_seconds),
-            "cache_hit": bool(dataset_record["dataset_artifact"].get("cache_hit")),
-            "dataset_artifact_bytes": _tree_bytes(dataset_artifact),
-            "expression_bytes": expression_path.stat().st_size,
-        },
+        "generation": generation,
         "inference": {
-            "andrea_wall_time_seconds": andrea_seconds,
             "spathi_wall_time_seconds": spathi_seconds,
-            "harness_wall_time_seconds": float(inference_wall_time_seconds),
-            "peak_rss_bytes": peak_rss_bytes,
-            "rss_samples": rss_samples,
+            "andrea_measurement": andrea_measurement,
+            "andrea_execution_measurement": execution_measurement,
             "cache_hit": False,
             "inference_artifact_bytes": _tree_bytes(inference_artifact),
             "spathi_output_bytes": _tree_bytes(inference_artifact, output_prefix),
@@ -1011,7 +1220,11 @@ def _run_one_dataset(
     production: Mapping[str, Any],
     panel: Mapping[str, Any],
     dataset: Mapping[str, Any],
+    stage: str,
+    target_scope: Mapping[str, Any],
     workflow_root: Path,
+    runtime_plan: dict[str, Any],
+    resources: Mapping[str, Any],
 ) -> dict[str, Any]:
     dataset_id = str(dataset["id"])
     materialization = materialize_scalability_dataset(
@@ -1022,13 +1235,16 @@ def _run_one_dataset(
         production=production,
         panel=panel,
         dataset=dataset,
-        output_dir=workflow_root / "materialized" / dataset_id,
+        stage=stage,
+        target_scope=target_scope,
+        timeout_seconds=float(resources["timeout_seconds"]),
+        output_dir=workflow_root / "materialized" / dataset_id / stage,
     )
     profile_id = str(materialization["profile_id"])
     profile_path = Path(materialization["profile_path"])
     run_root = work_root / "v1" / profile_id / flow_id
-    measurement_path = workflow_root / "measurements" / f"{dataset_id}.json"
-    inference_resources = template_profile["resources"]["infer_network"]
+    measurement_path = workflow_root / "measurements" / dataset_id / f"{stage}.json"
+    inference_resources = dict(resources)
     runtime_state_path = run_root / "state.json"
     measurement_present = measurement_path.exists() or measurement_path.is_symlink()
     runtime_state = load_state(run_root, profile_id) if runtime_state_path.is_file() else None
@@ -1048,22 +1264,20 @@ def _run_one_dataset(
                 repo_root=repo_root,
                 runtime_state=runtime_state,
                 dataset_spec=dataset,
+                stage=stage,
+                target_scope=target_scope,
                 run_id=str(materialization["run_id"]),
                 algorithm_seed=int(materialization["algorithm_seed"]),
                 seed_derivation=materialization["seed_derivation"],
                 resources=inference_resources,
-                generation_wall_time_seconds=float(recorded["generation"]["wall_time_seconds"]),
-                inference_wall_time_seconds=float(
-                    recorded["inference"]["harness_wall_time_seconds"]
-                ),
-                peak_rss_bytes=int(recorded["inference"]["peak_rss_bytes"]),
-                rss_samples=int(recorded["inference"]["rss_samples"]),
             )
         elif recorded.get("status") == "failed":
             observed = validate_failed_scalability_measurement(
                 repo_root=repo_root,
                 runtime_state=runtime_state,
                 dataset_spec=dataset,
+                stage=stage,
+                target_scope=target_scope,
                 algorithm_seed=int(materialization["algorithm_seed"]),
                 seed_derivation=materialization["seed_derivation"],
                 resources=inference_resources,
@@ -1095,41 +1309,24 @@ def _run_one_dataset(
             andrea_repo=andrea_repo,
             spathi_repo=spathi_repo,
             profile_file=profile_path,
+            runtime_plan=runtime_plan,
         )
         build_spathi_image(**common, spathi_repo=spathi_repo)
-        generation_started = perf_counter()
         generate_data(**common, andrea_repo=andrea_repo)
-        generation_seconds = perf_counter() - generation_started
-        generated_state = load_state(run_root, profile_id)
-        if status_at_least(generated_state, "inferred"):
-            raise BenchmarkConfigError(
-                f"{dataset_id} inference completed without its RSS measurement; "
-                "remove this dataset run and resume"
-            )
-        image = generated_state.get("spathi_image")
-        if not isinstance(image, Mapping) or not isinstance(image.get("id"), str):
-            raise BenchmarkConfigError("Scalability run has no SPATHI image identity")
-        sampler = _PeakRssSampler(str(image["id"]))
-        sampler.start()
-        inference_started = perf_counter()
         try:
             run_inference(**common, andrea_repo=andrea_repo)
         except InferenceExecutionFailure as failure:
-            inference_seconds = perf_counter() - inference_started
-            peak_rss, rss_samples = sampler.finish(require_samples=False)
             failed_state = load_state(run_root, profile_id)
             measurement = collect_failed_scalability_measurement(
                 repo_root=repo_root,
                 runtime_state=failed_state,
                 dataset_spec=dataset,
+                stage=stage,
+                target_scope=target_scope,
                 run_id=str(materialization["run_id"]),
                 algorithm_seed=int(materialization["algorithm_seed"]),
                 seed_derivation=materialization["seed_derivation"],
                 resources=inference_resources,
-                generation_wall_time_seconds=generation_seconds,
-                inference_wall_time_seconds=inference_seconds,
-                peak_rss_bytes=peak_rss,
-                rss_samples=rss_samples,
                 failure=failure,
             )
             _publish_scalability_measurement(
@@ -1142,24 +1339,17 @@ def _run_one_dataset(
                 dataset_id=dataset_id,
             )
             return measurement
-        except BaseException:
-            sampler.finish(require_samples=False)
-            raise
-        inference_seconds = perf_counter() - inference_started
-        peak_rss, rss_samples = sampler.finish(require_samples=True)
         inferred_state = load_state(run_root, profile_id)
         measurement = collect_scalability_measurement(
             repo_root=repo_root,
             runtime_state=inferred_state,
             dataset_spec=dataset,
+            stage=stage,
+            target_scope=target_scope,
             run_id=str(materialization["run_id"]),
             algorithm_seed=int(materialization["algorithm_seed"]),
             seed_derivation=materialization["seed_derivation"],
             resources=inference_resources,
-            generation_wall_time_seconds=generation_seconds,
-            inference_wall_time_seconds=inference_seconds,
-            peak_rss_bytes=peak_rss,
-            rss_samples=rss_samples,
         )
         _publish_scalability_measurement(
             repo_root=repo_root,
@@ -1171,6 +1361,129 @@ def _run_one_dataset(
             dataset_id=dataset_id,
         )
     return measurement
+
+
+def _attempt_resource_result(
+    attempt: Mapping[str, Any],
+    *,
+    full_target_count: int,
+    scout_target_count: int,
+) -> dict[str, Any]:
+    """Reduce one attempt to the only fields permitted to drive a boundary decision."""
+
+    if attempt.get("status") == "completed":
+        resource_measurement = attempt["inference"]["andrea_measurement"]
+        clock_measurement = attempt["inference"]["andrea_execution_measurement"]
+        status = "completed"
+    elif attempt.get("status") == "failed":
+        resource_measurement = attempt["observations"]["andrea_measurement"]
+        clock_measurement = attempt["observations"]["andrea_execution_measurement"]
+        status = attempt["failure"]["failure_kind"]
+        if status == "infrastructure_error":
+            raise BenchmarkConfigError(
+                f"Infrastructure failure while running {attempt['dataset_id']} "
+                f"({attempt['stage']}); scalability evidence cannot continue"
+            )
+    else:
+        raise BenchmarkConfigError("A scalability attempt has an invalid status")
+    return {
+        "dataset_id": str(attempt["dataset_id"]),
+        "stage": str(attempt["stage"]),
+        "status": status,
+        "elapsed_seconds": clock_measurement.get("wall_time_seconds"),
+        "peak_memory_bytes": resource_measurement.get("peak_memory_bytes"),
+        "target_count": full_target_count,
+        "scout_target_count": scout_target_count,
+    }
+
+
+def _skipped_resource_result(decision: ScalabilityDecision) -> dict[str, Any]:
+    return {
+        "dataset_id": decision.dataset_id,
+        "stage": decision.stage,
+        "status": "not_attempted_after_preregistered_resource_boundary",
+        "elapsed_seconds": None,
+        "peak_memory_bytes": None,
+        "target_count": None,
+        "scout_target_count": None,
+    }
+
+
+def _lane_for_dataset(
+    contract: Mapping[str, Any], *, budget: str, dataset_id: str
+) -> tuple[str, list[str]]:
+    lanes = [
+        lane
+        for lane in contract["panels"][budget]["lanes"]
+        if dataset_id in lane["ordered_dataset_ids"]
+    ]
+    if not lanes:
+        raise BenchmarkConfigError(f"No scalability lane contains {dataset_id!r}")
+    return str(lanes[0]["id"]), [str(lane["id"]) for lane in lanes]
+
+
+def _lane_prefix(
+    contract: Mapping[str, Any],
+    *,
+    budget: str,
+    lane_id: str,
+    dataset_id: str,
+    stage: str,
+    outcomes: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    lanes = {lane["id"]: lane for lane in contract["panels"][budget]["lanes"]}
+    ordered = lanes[lane_id]["ordered_dataset_ids"]
+    expected = [
+        (candidate, candidate_stage)
+        for candidate in ordered
+        for candidate_stage in ("scout", "all_targets")
+    ]
+    requested = (dataset_id, stage)
+    prefix: list[Mapping[str, Any]] = []
+    for identity in expected[: expected.index(requested)]:
+        if identity not in outcomes:
+            raise BenchmarkConfigError(
+                f"Missing preregistered scalability outcome {identity!r} in lane {lane_id!r}"
+            )
+        prefix.append(outcomes[identity])
+    return prefix
+
+
+def _dataset_result(
+    *,
+    dataset: Mapping[str, Any],
+    algorithm_seed: int,
+    seed_derivation: Mapping[str, Any],
+    lane_ids: Sequence[str],
+    scout_decision: ScalabilityDecision,
+    all_targets_decision: ScalabilityDecision,
+    scout: Mapping[str, Any] | None,
+    all_targets: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if all_targets is not None:
+        status = str(all_targets["status"])
+    else:
+        status = "not_attempted_after_preregistered_resource_boundary"
+    return {
+        "dataset_id": str(dataset["id"]),
+        "status": status,
+        "network_mode": str(dataset["network_mode"]),
+        "policy_branch": "single_group" if len(dataset["groups"]) == 1 else "multi_group",
+        "generation_seed": int(dataset["seed"]),
+        "algorithm_seed": algorithm_seed,
+        "seed_derivation": copy.deepcopy(dict(seed_derivation)),
+        "dimensions": _expected_dimensions(
+            dataset,
+            target_count=int(dataset["genes"]),
+        ),
+        "lane_ids": list(lane_ids),
+        "decisions": {
+            "scout": scout_decision.to_dict(),
+            "all_targets": all_targets_decision.to_dict(),
+        },
+        "scout": copy.deepcopy(dict(scout)) if scout is not None else None,
+        "all_targets": (copy.deepcopy(dict(all_targets)) if all_targets is not None else None),
+    }
 
 
 def _result_document(
@@ -1185,26 +1498,43 @@ def _result_document(
     host_resources: Mapping[str, Any],
     resources: Mapping[str, Any],
     expression_preparation: Mapping[str, Any],
-    measurements: Sequence[Mapping[str, Any]],
+    boundary_path: Path,
+    boundary: Mapping[str, Any],
+    datasets: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    completed_rows = [item for item in measurements if item.get("status") == "completed"]
-    failed_rows = [item for item in measurements if item.get("status") == "failed"]
-    if len(completed_rows) + len(failed_rows) != len(measurements):
-        raise BenchmarkConfigError("Scalability measurements contain an invalid status")
+    completed_rows = [item for item in datasets if item.get("status") == "completed"]
+    failed_rows = [item for item in datasets if item.get("status") == "failed"]
+    skipped_rows = [
+        item
+        for item in datasets
+        if item.get("status") == "not_attempted_after_preregistered_resource_boundary"
+    ]
+    if len(completed_rows) + len(failed_rows) + len(skipped_rows) != len(datasets):
+        raise BenchmarkConfigError("Scalability datasets contain an invalid endpoint status")
+    attempts = [
+        attempt
+        for item in datasets
+        for attempt in (item.get("scout"), item.get("all_targets"))
+        if isinstance(attempt, Mapping)
+    ]
+    completed_attempts = [item for item in attempts if item.get("status") == "completed"]
+    failed_attempts = [item for item in attempts if item.get("status") == "failed"]
     observed_peaks = [
-        int(value)
-        for item in measurements
-        for value in (
-            item["inference"]["peak_rss_bytes"]
+        int(measurement["peak_memory_bytes"])
+        for item in attempts
+        for measurement in (
+            item["inference"]["andrea_measurement"]
             if item.get("status") == "completed"
-            else item["observations"].get("peak_rss_bytes"),
+            else item["observations"]["andrea_measurement"],
         )
-        if value is not None
+        if measurement.get("peak_memory_bytes") is not None
     ]
     failure_kinds = {
-        kind: sum(1 for item in failed_rows if item["failure"]["failure_kind"] == kind)
+        kind: sum(1 for item in failed_attempts if item["failure"]["failure_kind"] == kind)
         for kind in ("oom", "timeout", "tool_error", "infrastructure_error")
     }
+    if failure_kinds["infrastructure_error"]:
+        raise BenchmarkConfigError("Infrastructure failures cannot be published as scale evidence")
     return {
         "schema_version": "1.0",
         "artifact_type": "spathi_scalability_results",
@@ -1213,6 +1543,22 @@ def _result_document(
         "claim_scope": "computational_scale_stress_only",
         "status": "complete",
         "expression_preparation": dict(expression_preparation),
+        "resource_boundary": {
+            "path": _relative(repo_root, boundary_path, "scalability boundary"),
+            "sha256": sha256_file(boundary_path),
+            "id": boundary["id"],
+            "target_scout_size": boundary["target_scout"]["sizes"][budget],
+            "wall_time_measurement": boundary["resource_boundary"]["wall_time_measurement"],
+            "prospective_wall_time_limit_seconds": boundary["resource_boundary"][
+                "wall_time_limit_seconds"
+            ][budget],
+            "maximum_projected_wall_time_fraction": boundary["resource_boundary"][
+                "maximum_projected_wall_time_fraction"
+            ],
+            "maximum_observed_memory_fraction": boundary["resource_boundary"][
+                "maximum_observed_memory_fraction"
+            ],
+        },
         "profile": {
             "path": _relative(repo_root, template_path, "scalability profile"),
             "sha256": sha256_file(template_path),
@@ -1236,46 +1582,64 @@ def _result_document(
                 "docker_runtime_environment_fingerprint"
             ],
             **dict(host_resources),
-            "max_cores": int(resources["max_cores"]),
-            "max_ram_gb": float(resources["max_ram_gb"]),
-            "rss_measurement_method": "linux_ps_process_tree_rss_sum",
-            "rss_sample_interval_seconds": _RSS_SAMPLE_INTERVAL_SECONDS,
+            "cpu_threads": int(resources["cpu_threads"]),
+            "memory_bytes": int(resources["memory_bytes"]),
+            "memory_gib": float(resources["memory_gib"]),
+            "cpuset_cpus": list(resources["cpuset_cpus"]),
+            "planner": str(resources["planner"]),
+            "planner_time_limit_seconds": float(resources["planner_time_limit_seconds"]),
+            "output_profile": str(resources["output_profile"]),
+            "exclusive_inference": bool(resources["exclusive"]),
+            "execution_plan_fingerprint": str(resources["execution_plan_fingerprint"]),
+            "measurement_contract": "andrea_container_telemetry_v1",
         },
         "summary": {
-            "datasets_requested": len(measurements),
+            "datasets_requested": len(datasets),
             "datasets_completed": len(completed_rows),
             "datasets_failed": len(failed_rows),
-            "all_completed": not failed_rows,
+            "datasets_not_attempted": len(skipped_rows),
+            "all_completed": len(completed_rows) == len(datasets),
+            "scouts_attempted": sum(item.get("scout") is not None for item in datasets),
+            "scouts_completed": sum(
+                (item.get("scout") or {}).get("status") == "completed" for item in datasets
+            ),
+            "all_targets_attempted": sum(item.get("all_targets") is not None for item in datasets),
+            "all_targets_completed": len(completed_rows),
             "failure_kinds": failure_kinds,
             "total_generation_wall_time_seconds": sum(
-                float(item["generation"]["wall_time_seconds"]) for item in measurements
+                float(item["scout"]["generation"]["wall_time_seconds"])
+                for item in datasets
+                if item.get("scout") is not None
             ),
             "total_inference_wall_time_seconds": sum(
                 float(
-                    item["inference"]["harness_wall_time_seconds"]
+                    item["inference"]["andrea_execution_measurement"]["wall_time_seconds"]
                     if item.get("status") == "completed"
-                    else item["observations"]["harness_wall_time_seconds"]
+                    else item["observations"]["andrea_execution_measurement"][
+                        "wall_time_seconds"
+                    ]
                 )
-                for item in measurements
+                for item in attempts
             ),
-            "datasets_with_peak_rss": len(observed_peaks),
-            "maximum_peak_rss_bytes": max(observed_peaks, default=0),
+            "attempts_with_peak_memory": len(observed_peaks),
+            "maximum_peak_memory_bytes": max(observed_peaks, default=0),
             "total_spathi_output_bytes": sum(
-                int(item["inference"]["spathi_output_bytes"]) for item in completed_rows
+                int(item["inference"]["spathi_output_bytes"]) for item in completed_attempts
             ),
             "total_trees_fitted": sum(
-                int(item["inference"]["trees_fitted"]) for item in completed_rows
+                int(item["inference"]["trees_fitted"]) for item in completed_attempts
             ),
         },
-        "datasets": [dict(item) for item in measurements],
+        "datasets": [dict(item) for item in datasets],
         "notes": [
             "The rounded synthetic grid characterizes computational scale, not biological realism.",
             "Expression supplied to SPATHI is library-size normalized to 10000 across every "
             "generated gene and then log1p transformed under the public preparation contract.",
             "Accuracy claims remain restricted to the independent simulator comparison phase.",
-            "Peak RSS is sampled from the SPATHI container process tree on the recorded host.",
-            "A failed endpoint is retained only when ANDREA produced a validated report for the exact requested dataset and SPATHI run.",
-            "Failed endpoints are feasibility evidence, not successful completions; contract or identity corruption aborts publication.",
+            "CPU time, peak memory, output size, CPU affinity and OOM evidence come from ANDREA's per-container telemetry contract.",
+            "Each endpoint starts with a preregistered outcome-blind hash scout; only canonical end-to-end ANDREA execution wall time and the physical container peak-memory measurement may decide whether all targets are attempted.",
+            "A skipped endpoint is recorded exactly as not_attempted_after_preregistered_resource_boundary and is never conflated with a failed or completed run.",
+            "Infrastructure, contract, identity, or telemetry corruption aborts the workflow instead of becoming scalability evidence.",
         ],
     }
 
@@ -1288,6 +1652,10 @@ def run_scalability_workflow(
     work_root: Path,
     profile: str,
     efficiency_run_id: str | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
     """Run or resume one operational or publication computational scale study."""
 
@@ -1316,6 +1684,8 @@ def run_scalability_workflow(
     )
     panel = load_json_object(request_path, "scale-stress scalability panel")
     validate_json(panel, root / "schemas/scale-stress-panel.schema.json", "scale-stress panel")
+    boundary_path = root / "experiments/v1/spathi/scalability-boundary.json"
+    boundary = load_scalability_boundary(root)
     host_resources = _host_resources()
     benchmark = observe_benchmark_repository(root, require_clean=True)
     identity = canonical_json_sha256(
@@ -1339,30 +1709,156 @@ def run_scalability_workflow(
     flow_id = identity[:20]
     workflow_root = work / "v1/workflows/scalability" / profile / flow_id
     workflow_path = workflow_root / "workflow.json"
-    with run_lock(workflow_root):
-        measurements = [
-            _run_one_dataset(
-                repo_root=root,
-                andrea_repo=andrea_repo,
-                spathi_repo=spathi_repo,
-                work_root=work,
+    runtime_plan = load_or_create_runtime_plan(
+        workflow_root / "runtime-plan.json",
+        boundary=workflow_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=work),
+    )
+    execution_plan = resolve_execution_class(
+        repo_root=root,
+        class_id=str(template["execution_class"]),
+        runtime_plan=runtime_plan,
+    )
+    inference_resources = _measurement_resources(execution_plan)
+    inference_resources["timeout_seconds"] = float(
+        boundary["resource_boundary"]["wall_time_limit_seconds"][profile]
+    )
+    with host_execution_lease(workload=f"scalability:{flow_id}"), run_lock(workflow_root):
+        outcomes: dict[tuple[str, str], Mapping[str, Any]] = {}
+        dataset_results: list[dict[str, Any]] = []
+        attempted_runs: list[tuple[str, str]] = []
+        for dataset in panel["datasets"]:
+            dataset_id = str(dataset["id"])
+            lane_id, lane_ids = _lane_for_dataset(
+                boundary,
                 budget=profile,
-                flow_id=flow_id,
-                template_profile=template,
-                production_path=production_path,
-                production=production,
-                panel=panel,
-                dataset=dataset,
-                workflow_root=workflow_root,
+                dataset_id=dataset_id,
             )
-            for dataset in panel["datasets"]
-        ]
+            scout_scope = target_scout_scope(
+                boundary,
+                budget=profile,
+                dataset_id=dataset_id,
+            )
+            scout_count = int(scout_scope["size"])
+            full_target_count = int(dataset["genes"])
+            seed, seed_derivation = _algorithm_seed(
+                root,
+                budget=profile,
+                dataset_id=dataset_id,
+            )
+            scout_decision = decide_scalability_attempt(
+                boundary,
+                budget=profile,
+                lane_id=lane_id,
+                dataset_id=dataset_id,
+                stage="scout",
+                prior_results=_lane_prefix(
+                    boundary,
+                    budget=profile,
+                    lane_id=lane_id,
+                    dataset_id=dataset_id,
+                    stage="scout",
+                    outcomes=outcomes,
+                ),
+                allocation_memory_bytes=int(inference_resources["memory_bytes"]),
+            )
+            scout: Mapping[str, Any] | None = None
+            if scout_decision.decision == "attempt":
+                scout = _run_one_dataset(
+                    repo_root=root,
+                    andrea_repo=andrea_repo,
+                    spathi_repo=spathi_repo,
+                    work_root=work,
+                    budget=profile,
+                    flow_id=flow_id,
+                    template_profile=template,
+                    production_path=production_path,
+                    production=production,
+                    panel=panel,
+                    dataset=dataset,
+                    stage="scout",
+                    target_scope=scout_scope,
+                    workflow_root=workflow_root,
+                    runtime_plan=runtime_plan,
+                    resources=inference_resources,
+                )
+                attempted_runs.append((dataset_id, "scout"))
+                outcomes[(dataset_id, "scout")] = _attempt_resource_result(
+                    scout,
+                    full_target_count=full_target_count,
+                    scout_target_count=scout_count,
+                )
+            else:
+                outcomes[(dataset_id, "scout")] = _skipped_resource_result(scout_decision)
+
+            all_targets_decision = decide_scalability_attempt(
+                boundary,
+                budget=profile,
+                lane_id=lane_id,
+                dataset_id=dataset_id,
+                stage="all_targets",
+                prior_results=_lane_prefix(
+                    boundary,
+                    budget=profile,
+                    lane_id=lane_id,
+                    dataset_id=dataset_id,
+                    stage="all_targets",
+                    outcomes=outcomes,
+                ),
+                allocation_memory_bytes=int(inference_resources["memory_bytes"]),
+            )
+            all_targets: Mapping[str, Any] | None = None
+            if all_targets_decision.decision == "attempt":
+                all_targets = _run_one_dataset(
+                    repo_root=root,
+                    andrea_repo=andrea_repo,
+                    spathi_repo=spathi_repo,
+                    work_root=work,
+                    budget=profile,
+                    flow_id=flow_id,
+                    template_profile=template,
+                    production_path=production_path,
+                    production=production,
+                    panel=panel,
+                    dataset=dataset,
+                    stage="all_targets",
+                    target_scope={"method": "all"},
+                    workflow_root=workflow_root,
+                    runtime_plan=runtime_plan,
+                    resources=inference_resources,
+                )
+                attempted_runs.append((dataset_id, "all_targets"))
+                outcomes[(dataset_id, "all_targets")] = _attempt_resource_result(
+                    all_targets,
+                    full_target_count=full_target_count,
+                    scout_target_count=scout_count,
+                )
+            else:
+                outcomes[(dataset_id, "all_targets")] = _skipped_resource_result(
+                    all_targets_decision
+                )
+            dataset_results.append(
+                _dataset_result(
+                    dataset=dataset,
+                    algorithm_seed=seed,
+                    seed_derivation=seed_derivation,
+                    lane_ids=lane_ids,
+                    scout_decision=scout_decision,
+                    all_targets_decision=all_targets_decision,
+                    scout=scout,
+                    all_targets=all_targets,
+                )
+            )
         runtime_states = [
             load_state(
-                work / "v1" / _runtime_profile_id(profile, str(item["dataset_id"])) / flow_id,
-                _runtime_profile_id(profile, str(item["dataset_id"])),
+                work / "v1" / _runtime_profile_id(profile, dataset_id, stage) / flow_id,
+                _runtime_profile_id(profile, dataset_id, stage),
             )
-            for item in measurements
+            for dataset_id, stage in attempted_runs
         ]
         image_ids = {state["spathi_image"]["id"] for state in runtime_states}
         if len(image_ids) != 1:
@@ -1398,9 +1894,11 @@ def run_scalability_workflow(
                 "docker_runtime_environment_fingerprint": docker_environment,
             },
             host_resources=host_resources,
-            resources=template["resources"]["infer_network"],
+            resources=inference_resources,
             expression_preparation=panel["expression_preparation"],
-            measurements=measurements,
+            boundary_path=boundary_path,
+            boundary=boundary,
+            datasets=dataset_results,
         )
         validate_json(
             results,
@@ -1421,6 +1919,7 @@ def run_scalability_workflow(
             "flow_id": flow_id,
             "identity": {"fingerprint": identity},
             "status": "publishing",
+            "runtime_plan": runtime_plan,
             "production_config": _relative(root, production_path, "production config"),
             "production_config_sha256": sha256_file(production_path),
             "results": _relative(root, results_path, "scalability results"),
@@ -1428,17 +1927,15 @@ def run_scalability_workflow(
             "interactive_report": _relative(root, report_path, "scalability report"),
             "dataset_runs": [
                 {
-                    "dataset_id": item["dataset_id"],
+                    "dataset_id": dataset_id,
+                    "stage": stage,
                     "run_root": _relative(
                         root,
-                        work
-                        / "v1"
-                        / _runtime_profile_id(profile, str(item["dataset_id"]))
-                        / flow_id,
+                        work / "v1" / _runtime_profile_id(profile, dataset_id, stage) / flow_id,
                         "scalability run",
                     ),
                 }
-                for item in measurements
+                for dataset_id, stage in attempted_runs
             ],
         }
         state, report = publish_workflow_report(

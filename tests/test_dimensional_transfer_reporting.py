@@ -25,6 +25,31 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def _runtime_plan() -> dict[str, Any]:
+    unsigned = {
+        "schema_version": "1.0",
+        "detected": {
+            "allowed_cpus": list(range(8)),
+            "cpu_allocation_order": list(range(8)),
+            "effective_cpu_threads": 8,
+            "effective_memory_bytes": 32 * 1024**3,
+            "source": "report-test",
+        },
+        "request": {
+            "max_cores": 8,
+            "max_ram_gb": 32.0,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 0.0,
+        },
+        "capacity": {
+            "cpu_threads": 8,
+            "memory_bytes": 32 * 1024**3,
+            "memory_gib": 32.0,
+        },
+    }
+    return {**unsigned, "fingerprint": canonical_json_sha256(unsigned)}
+
+
 def _results_and_panel(budget: str = "reduced") -> tuple[dict[str, Any], dict[str, Any]]:
     panel = json.loads(
         (
@@ -238,20 +263,32 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
         REPO_ROOT / "experiments/v1/profiles/dimensional-transfer-reduced.json",
         template_path,
     )
+    shutil.copytree(
+        REPO_ROOT / "experiments/v1/execution",
+        root / "experiments/v1/execution",
+    )
 
     version = root / "work/v1"
     flow_id = "dimensional-renderer-fixture"
     workflow_root = version / "workflows/dimensional_transfer/reduced" / flow_id
     workflow_path = workflow_root / "workflow.json"
-    runtime_profile_path = _write_json(
-        workflow_root / "materialized/profile.json",
-        {"schema_version": "1.0", "id": "dimensional-transfer-reduced-runtime"},
+    runtime_profile = json.loads(template_path.read_text(encoding="utf-8"))
+    runtime_profile.update(
+        {
+            "id": "dimensional-transfer-reduced-runtime",
+            "description": "Runtime dimensional-transfer report fixture.",
+            "inference_batches": [],
+        }
     )
+    runtime_profile_path = _write_json(workflow_root / "materialized/profile.json", runtime_profile)
     run_root = version / "dimensional-transfer-reduced-runtime" / flow_id
     metrics_path = run_root / "reports/metrics.csv"
     metrics_path.parent.mkdir(parents=True)
     metrics_path.write_text("fixture\n", encoding="utf-8")
-    summary_path = _write_json(run_root / "reports/summary.json", {"status": "complete"})
+    summary_path = _write_json(
+        run_root / "reports/summary.json",
+        {"status": "complete", "scheduling": {}},
+    )
     exports_path = _write_json(
         run_root / "exports/export-manifest.json",
         {"status": "complete", "bundles": []},
@@ -409,6 +446,7 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
         "profile": "reduced",
         "flow_id": flow_id,
         "identity": {"fingerprint": "d" * 64},
+        "runtime_plan": _runtime_plan(),
         "status": "publishing",
         "production_config": production_path.relative_to(root).as_posix(),
         "production_config_sha256": sha256_file(production_path),

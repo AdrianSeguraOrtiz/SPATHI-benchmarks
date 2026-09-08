@@ -7,6 +7,7 @@
     addStatCards,
     append,
     boot,
+    bytes,
     createTable,
     csvButton,
     element,
@@ -138,12 +139,14 @@
     ], rows);
   }
 
-  function renderEndpointAdmission(feasibility) {
-    const resources = feasibility.resource_ceiling;
+  function renderEndpointAdmission(feasibility, workflow) {
+    const runtime = workflow.runtime_plan;
+    const execution = workflow.execution_plan;
+    const inference = execution.operations.inference;
     addStatCards(query("#admission-summary"), [
-      { label: "CPU ceiling", value: `${formatInteger(resources.max_cores)} logical cores`, detail: "Global v1 execution contract" },
-      { label: "RAM ceiling", value: `${formatInteger(resources.max_ram_gb)} GB`, detail: "Global v1 execution contract" },
-      { label: "Execution", value: resources.serial_execution ? "Serial" : "Concurrent", detail: "Resource attribution mode" },
+      { label: "Assigned CPU", value: `${formatInteger(inference.cpu_threads)} threads`, detail: `${formatInteger(runtime.detected.effective_cpu_threads)} effective on this host` },
+      { label: "Assigned RAM", value: bytes(inference.memory_bytes), detail: `${bytes(runtime.detected.effective_memory_bytes)} effectively available` },
+      { label: "Execution", value: execution.exclusive_inference ? "Isolated" : "Rolling queue", detail: humanize(feasibility.execution_policy) },
     ]);
     append(
       query("#endpoint-admission"),
@@ -225,7 +228,7 @@
     renderExactDiagnostic(data.exact_production_diagnostic);
     renderRuntime(data.conditions);
     renderDatasets(data.datasets);
-    renderEndpointAdmission(data.feasibility);
+    renderEndpointAdmission(data.feasibility, data.workflow);
     renderPolicy(data);
     renderLinks(query("#report-links"), data.links, "Artifacts and reusable ANDREA ZIPs");
   });

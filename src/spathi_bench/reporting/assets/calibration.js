@@ -2,7 +2,13 @@
   "use strict";
 
   const R = window.SpathiReport;
-  const STAGE_ORDER = ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"];
+  const PHASE_ORDER = [
+    "geometry__scout", "geometry__confirmation",
+    "estimator__scout", "estimator__confirmation",
+    "interaction__scout", "interaction__confirmation",
+    "estimator_scale_transfer__scout", "estimator_scale_transfer__confirmation",
+    "convergence__final", "validation__final",
+  ];
   const REPORT_KEYS = [
     "schema_version", "report_type", "workflow", "integrity", "objective",
     "dataset_partition", "datasets", "selected", "stages", "links", "report",
@@ -17,12 +23,15 @@
     "search_space_sha256", "calibration_budget", "fingerprint",
   ];
   const INTEGRITY_KEYS = [
-    "stage_order", "all_stages_ranked", "test_data_accessed_before_freeze",
+    "phase_order", "all_stages_ranked", "test_data_accessed_before_freeze",
     "single_spathi_commit", "selection_frozen",
   ];
   const STAGE_KEYS = [
-    "id", "order", "purpose", "dataset_role", "primary_metric", "strategy",
-    "advance_limit", "candidates", "observations", "varying_parameters",
+    "id", "stage_id", "fidelity", "order", "purpose", "dataset_role",
+    "primary_metric", "strategy", "advance_limit", "candidate_source",
+    "dataset_selector", "algorithm_seed_indices", "target_scope",
+    "expected_physical_fits", "expected_logical_results",
+    "candidates", "observations", "varying_parameters",
     "compared_parameters", "selected_ids", "winner", "test_data_accessed",
     "memory_available",
   ];
@@ -256,13 +265,37 @@
   function validateStage(stage, index) {
     const path = `stages[${index}]`;
     requireExactKeys(stage, path, STAGE_KEYS);
-    requireLiteral(stage.id, STAGE_ORDER[index], `${path}.id`);
+    requireLiteral(stage.id, PHASE_ORDER[index], `${path}.id`);
+    requireString(stage.stage_id, `${path}.stage_id`);
+    if (!stage.id.startsWith(`${stage.stage_id}__`)) {
+      contractError(`${path}.stage_id`, "must identify its phase prefix");
+    }
+    if (!["scout", "confirmation", "final"].includes(stage.fidelity)) {
+      contractError(`${path}.fidelity`, "must be scout, confirmation or final");
+    }
     requireLiteral(stage.order, index + 1, `${path}.order`);
     requireString(stage.purpose, `${path}.purpose`);
-    requireLiteral(stage.dataset_role, stage.id === "validation" ? "validation" : "development", `${path}.dataset_role`);
+    requireLiteral(stage.dataset_role, stage.stage_id === "validation" ? "validation" : "development", `${path}.dataset_role`);
     requireLiteral(stage.primary_metric, "aupr_directed", `${path}.primary_metric`);
     requireString(stage.strategy, `${path}.strategy`);
     requireInteger(stage.advance_limit, `${path}.advance_limit`);
+    requireString(stage.candidate_source, `${path}.candidate_source`);
+    if (stage.dataset_selector !== null) {
+      const selector = requireExactKeys(
+        stage.dataset_selector,
+        `${path}.dataset_selector`,
+        ["condition_ids", "replicate_indices"],
+      );
+      requireArray(selector.condition_ids, `${path}.dataset_selector.condition_ids`)
+        .forEach((value, valueIndex) => requireString(value, `${path}.dataset_selector.condition_ids[${valueIndex}]`));
+      requireArray(selector.replicate_indices, `${path}.dataset_selector.replicate_indices`)
+        .forEach((value, valueIndex) => requireInteger(value, `${path}.dataset_selector.replicate_indices[${valueIndex}]`));
+    }
+    requireArray(stage.algorithm_seed_indices, `${path}.algorithm_seed_indices`)
+      .forEach((value, valueIndex) => requireInteger(value, `${path}.algorithm_seed_indices[${valueIndex}]`));
+    requireObject(stage.target_scope, `${path}.target_scope`);
+    requireInteger(stage.expected_physical_fits, `${path}.expected_physical_fits`);
+    requireInteger(stage.expected_logical_results, `${path}.expected_logical_results`);
     const candidates = requireArray(stage.candidates, `${path}.candidates`);
     if (!candidates.length) contractError(`${path}.candidates`, "must not be empty");
     candidates.forEach((candidate, candidateIndex) => {
@@ -302,7 +335,7 @@
         contractError(path, `contains an observation for unknown configuration ${row.configuration_id}`);
       }
     });
-    if (stage.id === "validation") {
+    if (stage.stage_id === "validation") {
       const winner = requireExactKeys(stage.winner, `${path}.winner`, ["candidate_id", "configuration_sha256", "hierarchical_score"]);
       requireString(winner.candidate_id, `${path}.winner.candidate_id`);
       requireString(winner.configuration_sha256, `${path}.winner.configuration_sha256`);
@@ -362,9 +395,9 @@
     requireLiteral(identity.calibration_budget, workflow.calibration_budget, "workflow.identity.calibration_budget");
 
     const integrity = requireExactKeys(data.integrity, "integrity", INTEGRITY_KEYS);
-    const stageOrder = requireArray(integrity.stage_order, "integrity.stage_order");
-    if (JSON.stringify(stageOrder) !== JSON.stringify(STAGE_ORDER)) {
-      contractError("integrity.stage_order", `must equal ${STAGE_ORDER.join(", ")}`);
+    const phaseOrder = requireArray(integrity.phase_order, "integrity.phase_order");
+    if (JSON.stringify(phaseOrder) !== JSON.stringify(PHASE_ORDER)) {
+      contractError("integrity.phase_order", `must equal ${PHASE_ORDER.join(", ")}`);
     }
     requireLiteral(integrity.all_stages_ranked, true, "integrity.all_stages_ranked");
     requireLiteral(integrity.test_data_accessed_before_freeze, false, "integrity.test_data_accessed_before_freeze");
@@ -386,12 +419,12 @@
       requireString(link.href, `${path}.href`);
     });
     const stages = requireArray(data.stages, "stages");
-    if (stages.length !== STAGE_ORDER.length) {
-      contractError("stages", `must contain exactly ${STAGE_ORDER.length} stages`);
+    if (stages.length !== PHASE_ORDER.length) {
+      contractError("stages", `must contain exactly ${PHASE_ORDER.length} phases`);
     }
     stages.forEach(validateStage);
 
-    const validation = stages[STAGE_ORDER.length - 1];
+    const validation = stages[PHASE_ORDER.length - 1];
     const policy = data.selected.selected_policy;
     const evidence = data.selected.selection_evidence;
     const validationSelected = validation.candidates.filter((candidate) => candidate.selected);
@@ -432,6 +465,8 @@
   function buildStage(stage) {
     const model = {
       id: stage.id,
+      stageId: stage.stage_id,
+      fidelity: stage.fidelity,
       status: "ranked",
       datasetRole: stage.dataset_role,
       primaryMetric: stage.primary_metric,
@@ -442,6 +477,12 @@
       varyingParameters: stage.varying_parameters,
       selectedIds: stage.selected_ids,
       memoryAvailable: stage.memory_available,
+      candidateSource: stage.candidate_source,
+      datasetSelector: stage.dataset_selector,
+      seedIndices: stage.algorithm_seed_indices,
+      targetScope: stage.target_scope,
+      physicalFits: stage.expected_physical_fits,
+      logicalResults: stage.expected_logical_results,
       parameterCompetition: stage.compared_parameters.map((entry) => ({
         key: entry.name,
         label: R.humanize(entry.name),
@@ -516,7 +557,7 @@
     const totalCandidates = stages.reduce((sum, stage) => sum + stage.candidates.length, 0);
     const totalObservations = stages.reduce((sum, stage) => sum + stage.observations.length, 0);
     R.addStatCards(R.query("#overview-cards"), [
-      { label: "Completed stages", value: `${stages.length}/${STAGE_ORDER.length}`, detail: stages.map((stage) => R.humanize(stage.id)).join(" · ") },
+      { label: "Completed phases", value: `${stages.length}/${PHASE_ORDER.length}`, detail: stages.map((stage) => R.humanize(stage.id)).join(" · ") },
       { label: "Evaluated candidates", value: R.formatInteger(totalCandidates), detail: "Sum of each stage's search space" },
       { label: "Observations", value: R.formatInteger(totalObservations), detail: "Recorded datasets and algorithm seeds" },
       { label: "Primary metric", value: R.humanize(evidence.primary_metric), detail: "Canonical hierarchical selection criterion" },
@@ -545,7 +586,7 @@
 
     const hero = R.element("article", { className: "selection-hero" });
     hero.appendChild(R.badge(parts.selected.status));
-    const validationStage = stages[STAGE_ORDER.length - 1];
+    const validationStage = stages[PHASE_ORDER.length - 1];
     const selectedCandidate = validationStage.candidates.find((item) => item.id === candidate.id);
     hero.appendChild(R.element("h3", {
       text: selectedCandidate.displayLabel,
@@ -579,10 +620,15 @@
       `${stage.candidates.length} candidates`,
       `${stage.observations.length} observations`,
       `${R.humanize(stage.datasetRole)} partition`,
+      `${stage.physicalFits} physical fits`,
+      `${stage.logicalResults} logical results`,
     ].join(" · ");
     copy.appendChild(R.element("p", { text: details }));
     copy.appendChild(R.element("p", { text: stage.purpose }));
     copy.appendChild(R.element("p", { text: `Strategy: ${R.humanize(stage.strategy)}` }));
+    copy.appendChild(R.element("p", {
+      text: `Candidate source: ${R.humanize(stage.candidateSource)} · Algorithm seed indices: ${stage.seedIndices.join(", ")} · Target scope: ${stage.targetScope.method === "all" ? "all targets" : `${stage.targetScope.size} targets selected by ${R.humanize(stage.targetScope.method)}`}`,
+    }));
     const competition = R.element("div", { className: "parameter-competition" });
     competition.appendChild(R.element("span", {
       className: "parameter-competition__heading",
@@ -652,7 +698,7 @@
     const target = R.query("#pareto-chart");
     const title = R.query("#pareto-chart-title");
     const note = title.closest(".card").querySelector(".legend-note");
-    const convergence = stage.id === "convergence"
+    const convergence = stage.stageId === "convergence"
       ? stage.candidates.filter((candidate) => Number.isFinite(R.number(candidate.parameters.n_estimators, NaN)) && Number.isFinite(candidate.score))
       : [];
     if (convergence.length) {

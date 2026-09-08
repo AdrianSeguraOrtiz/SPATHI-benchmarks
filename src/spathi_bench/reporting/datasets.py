@@ -106,30 +106,6 @@ def _artifact_member(
         raise BenchmarkConfigError(f"{label} is not a declared member of {artifact.key}") from exc
 
 
-def combine_dataset_overviews(overviews: list[dict[str, Any]]) -> dict[str, Any]:
-    """Combine disjoint role-specific panels into one deterministic report overview."""
-
-    rows: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for overview in overviews:
-        for raw_row in require_array(overview.get("rows"), "dataset overview rows"):
-            row = require_mapping(raw_row, "dataset overview row")
-            key = (str(row.get("dataset_role")), str(row.get("dataset_id")))
-            if key in seen:
-                raise BenchmarkConfigError(f"Duplicate dataset across report panels: {key}")
-            seen.add(key)
-            rows.append(row)
-    rows.sort(
-        key=lambda item: (
-            item["dataset_role"],
-            item["simulator_id"],
-            str(item["condition_id"]),
-            item["dataset_id"],
-        )
-    )
-    return _overview_from_rows(rows)
-
-
 def build_dataset_overview(
     *,
     repo_root: Path,

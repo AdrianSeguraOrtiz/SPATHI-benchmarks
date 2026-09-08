@@ -291,6 +291,55 @@ def validate_summary_reports(state: dict[str, Any], run_root: Path) -> tuple[Pat
     return metrics, summary
 
 
+def _scheduler_evidence(run_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Bind rolling-queue utilization manifests into the canonical summary."""
+
+    result: dict[str, Any] = {}
+    capacity = state.get("runtime_plan", {}).get("capacity")
+    if not isinstance(capacity, dict):
+        raise BenchmarkConfigError("Run state has no scheduler capacity")
+    for phase in ("inference", "evaluation"):
+        path = path_below_no_symlinks(
+            run_root / "schedules" / f"{phase}.json",
+            run_root,
+            f"{phase} resource schedule",
+            require_file=True,
+        )
+        manifest = load_json_object(path, f"{phase} resource schedule")
+        utilization = manifest.get("utilization")
+        if (
+            manifest.get("schema_version") != "1.0"
+            or manifest.get("status") != "complete"
+            or manifest.get("capacity")
+            != {
+                "cpu_threads": capacity.get("cpu_threads"),
+                "memory_bytes": capacity.get("memory_bytes"),
+                "max_concurrent_tasks": None,
+            }
+            or not isinstance(utilization, dict)
+        ):
+            raise BenchmarkConfigError(f"{phase.title()} resource schedule is invalid")
+        for name in ("cpu_capacity_utilization", "memory_capacity_utilization"):
+            value = utilization.get(name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or not 0 <= float(value) <= 1
+            ):
+                raise BenchmarkConfigError(f"{phase.title()} resource schedule has invalid {name}")
+        result[phase] = {
+            "path": path.relative_to(run_root).as_posix(),
+            "sha256": sha256_file(path),
+            "logical_tasks": manifest.get("logical_tasks"),
+            "physical_tasks": manifest.get("physical_tasks"),
+            "cache_hits": manifest.get("cache_hits"),
+            "wall_seconds": manifest.get("wall_seconds"),
+            "utilization": utilization,
+        }
+    return result
+
+
 def _calibration_panel_contract(
     *,
     state: dict[str, Any],
@@ -657,9 +706,28 @@ def summarize(
         tool_result = (tools.get("results") or {}).get(evaluation["run_id"], {})
         if not isinstance(tool_result, dict):
             raise BenchmarkConfigError("Inference run report contains invalid tool result metadata")
-        wall_time_seconds = tool_result.get("duration_seconds")
-        if not isinstance(wall_time_seconds, (int, float)) or isinstance(wall_time_seconds, bool):
-            wall_time_seconds = None
+        measurement = tool_result.get("measurement")
+        if (
+            not isinstance(measurement, dict)
+            or measurement.get("schema_version") != "1.0"
+            or measurement.get("scope") not in {"physical_task", "logical_run"}
+        ):
+            raise BenchmarkConfigError("Inference run report omits canonical resource telemetry")
+        wall_time_seconds = measurement.get("wall_time_seconds")
+        peak_memory_bytes = measurement.get("peak_memory_bytes")
+        if (
+            not isinstance(wall_time_seconds, (int, float))
+            or isinstance(wall_time_seconds, bool)
+            or not math.isfinite(float(wall_time_seconds))
+            or float(wall_time_seconds) < 0
+        ):
+            raise BenchmarkConfigError("Inference telemetry has invalid wall time")
+        if peak_memory_bytes is not None and (
+            not isinstance(peak_memory_bytes, int)
+            or isinstance(peak_memory_bytes, bool)
+            or peak_memory_bytes < 0
+        ):
+            raise BenchmarkConfigError("Inference telemetry has invalid peak memory")
         metrics = report.get("metrics")
         if not isinstance(metrics, list) or not all(isinstance(item, dict) for item in metrics):
             raise BenchmarkConfigError("evaluation_report.json metrics must be an array of objects")
@@ -717,8 +785,10 @@ def summarize(
                 "algorithm_seed_parameter": evaluation["algorithm_seed_parameter"],
                 "execution_sha256": evaluation["execution_sha256"],
                 "tool_image": evaluation["tool_image"],
-                "wall_time_seconds": wall_time_seconds,
-                "peak_memory_mb": None,
+                "wall_time_seconds": float(wall_time_seconds),
+                "peak_memory_mb": (
+                    None if peak_memory_bytes is None else peak_memory_bytes / 1024**2
+                ),
                 **semantic_provenance,
                 "inference_artifact": evaluation["inference_artifact"]["key"],
                 "evaluation_artifact": evaluation["artifact"]["key"],
@@ -887,6 +957,7 @@ def summarize(
                     "calibration_panel": calibration_panel,
                     "calibration_rows": calibration_rows,
                     "cache": state["cache"],
+                    "scheduling": _scheduler_evidence(safe_run_root, state),
                     "notes": notes,
                 },
                 indent=2,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 import spathi_bench.reporting.scalability as scalability_reporting
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.execution_policy import resolve_execution_class
 from spathi_bench.reporting.common import central_report_path, render_html
 from spathi_bench.reporting.scalability import render_scalability_report
 
@@ -22,9 +24,162 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def _runtime_plan(*, memory_gib: float = 32.0) -> dict[str, Any]:
+    unsigned = {
+        "schema_version": "1.0",
+        "detected": {
+            "allowed_cpus": list(range(8)),
+            "cpu_allocation_order": list(range(8)),
+            "effective_cpu_threads": 8,
+            "effective_memory_bytes": round(memory_gib * 1024**3),
+            "source": "scalability-report-test",
+        },
+        "request": {
+            "max_cores": 8,
+            "max_ram_gb": memory_gib,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 0.0,
+        },
+        "capacity": {
+            "cpu_threads": 8,
+            "memory_bytes": round(memory_gib * 1024**3),
+            "memory_gib": memory_gib,
+        },
+    }
+    return {**unsigned, "fingerprint": canonical_json_sha256(unsigned)}
+
+
+def _execution_limits(execution_plan: dict[str, Any]) -> dict[str, Any]:
+    inference = execution_plan["operations"]["inference"]
+    threads = inference["cpu_threads"]
+    return {
+        **inference,
+        "cpuset_cpus": execution_plan["detected"]["cpu_allocation_order"][:threads],
+        "output_profile": execution_plan["output_profile"],
+        "exclusive": execution_plan["exclusive_inference"],
+        "execution_plan_fingerprint": execution_plan["fingerprint"],
+        "timeout_seconds": 43_200.0,
+    }
+
+
+def _andrea_measurement(
+    limits: dict[str, Any],
+    *,
+    peak_memory_bytes: int | None,
+    telemetry_status: str = "complete",
+) -> dict[str, Any]:
+    cpuset = list(limits["cpuset_cpus"])
+    return {
+        "schema_version": "1.0",
+        "scope": "physical_task",
+        "wall_time_seconds": 4.2,
+        "container_wall_time_seconds": 4.0,
+        "cpu_time_seconds": 8.1 if peak_memory_bytes is not None else None,
+        "peak_memory_bytes": peak_memory_bytes,
+        "output_bytes": 700,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:05Z",
+        "task_started_monotonic_ns": 1,
+        "task_finished_monotonic_ns": 4_200_000_001,
+        "container_started_at_utc": "2026-01-01T00:00:00Z",
+        "container_finished_at_utc": "2026-01-01T00:00:05Z",
+        "assigned_resources": {
+            "threads": limits["cpu_threads"],
+            "ram_limit_bytes": limits["memory_bytes"],
+            "cpuset_cpus_requested": cpuset,
+            "cpuset_cpus_configured": cpuset,
+            "cpuset_cpus_effective": cpuset,
+            "cpu_quota_cores_effective": float(limits["cpu_threads"]),
+            "ram_limit_bytes_effective": limits["memory_bytes"],
+        },
+        "telemetry": {
+            "status": telemetry_status,
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "physical_task_end_to_end_including_container_launch_and_exit_collection"
+            ),
+            "container_wall_source": "docker_state_timestamps",
+            "cpu_source": "test",
+            "memory_source": "test" if peak_memory_bytes is not None else None,
+            "memory_semantics": (
+                "container_cgroup_peak" if peak_memory_bytes is not None else "unavailable"
+            ),
+            "io_source": None,
+            "io_semantics": "unavailable",
+            "throttled_time_seconds": 0.0,
+            "oom_events": 0,
+            "oom_kill_events": 0,
+            "memory_limit_events": 0,
+            "oom_killed": peak_memory_bytes is None,
+        },
+    }
+
+
+def _andrea_execution_measurement(
+    limits: dict[str, Any],
+    *,
+    wall_time_seconds: float,
+) -> dict[str, Any]:
+    cpuset = [list(limits["cpuset_cpus"])]
+    return {
+        "schema_version": "1.0",
+        "scope": "andrea_execution",
+        "wall_time_seconds": wall_time_seconds,
+        "child_wall_time_sum_seconds": max(0.0, wall_time_seconds - 0.5),
+        "postprocess_wall_time_seconds": 0.5,
+        "cpu_time_seconds": wall_time_seconds * 2,
+        "peak_memory_bytes": 2_000,
+        "output_bytes": 700,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:05Z",
+        "task_started_monotonic_ns": 1,
+        "task_finished_monotonic_ns": max(2, round(wall_time_seconds * 1_000_000_000)),
+        "assigned_resources": {
+            "threads_peak": limits["cpu_threads"],
+            "ram_limit_peak_bytes": limits["memory_bytes"],
+            "cpuset_cpus_requested_sets": cpuset,
+            "cpuset_cpus_effective_sets": cpuset,
+        },
+        "telemetry": {
+            "status": "complete",
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "andrea_execution_end_to_end_including_input_verification_preparation_"
+                "scheduling_merging_and_requested_output_materialization"
+            ),
+            "cpu_source": "sum_of_child_container_cpu",
+            "cpu_semantics": "sum_of_physical_container_cpu_excludes_andrea_host_process",
+            "memory_source": "child_container_cgroup_peaks",
+            "memory_semantics": (
+                "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"
+            ),
+            "io_source": None,
+            "io_semantics": "unavailable",
+        },
+    }
+
+
 def _report_payload() -> dict[str, Any]:
+    limits = {
+        "cpu_threads": 4,
+        "memory_bytes": 4 * 1024**3,
+        "memory_gib": 4.0,
+        "cpuset_cpus": [0, 1, 2, 3],
+        "planner": "heuristic",
+        "planner_time_limit_seconds": 60.0,
+        "output_profile": "canonical",
+        "exclusive": True,
+        "execution_plan_fingerprint": "e" * 64,
+        "timeout_seconds": 43_200.0,
+    }
     row = {
         "dataset_id": "scale_stress_fixture",
+        "stage": "all_targets",
+        "target_scope": {"method": "all"},
         "status": "completed",
         "network_mode": "dynamic",
         "policy_branch": "multi_group",
@@ -37,14 +192,7 @@ def _report_payload() -> dict[str, Any]:
             "transcription_factors": 50,
             "targets": 500,
         },
-        "execution_limits": {
-            "max_parallel_runs": 1,
-            "max_cores": 4,
-            "max_ram_gb": 4.0,
-            "planner": "heuristic",
-            "planner_time_limit_seconds": 60.0,
-            "inference_wall_time_limit_seconds": None,
-        },
+        "execution_limits": limits,
         "generation": {
             "wall_time_seconds": 1.0,
             "dataset_artifact_bytes": 1_000,
@@ -52,9 +200,11 @@ def _report_payload() -> dict[str, Any]:
         },
         "inference": {
             "spathi_wall_time_seconds": 4.0,
-            "andrea_wall_time_seconds": 4.2,
-            "harness_wall_time_seconds": 4.5,
-            "peak_rss_bytes": 2_000,
+            "andrea_measurement": _andrea_measurement(limits, peak_memory_bytes=2_000),
+            "andrea_execution_measurement": _andrea_execution_measurement(
+                limits,
+                wall_time_seconds=4.2,
+            ),
             "estimated_peak_heap_with_rough_trees_bytes": 1_800,
             "spathi_output_bytes": 700,
             "inference_artifact_bytes": 1_200,
@@ -66,7 +216,6 @@ def _report_payload() -> dict[str, Any]:
             "trees_fitted": 98_000,
             "threads_effective": 4,
             "threads_available": 8,
-            "rss_samples": 9,
         },
     }
     group_policy = {
@@ -81,6 +230,18 @@ def _report_payload() -> dict[str, Any]:
             },
         }
     }
+    scout = copy.deepcopy(row)
+    scout["stage"] = "scout"
+    scout["target_scope"] = {
+        "method": "sha256_gene_id",
+        "size": 64,
+        "salt": "spathi-scalability-scout-v1",
+        "dataset_id": row["dataset_id"],
+    }
+    scout["dimensions"]["targets"] = 64
+    scout["inference"]["targets_requested"] = 64
+    scout["inference"]["targets_eligible"] = 64
+    scout["inference"]["targets_ineligible"] = 0
     return {
         "schema_version": "1.0",
         "report_type": "scalability",
@@ -89,17 +250,30 @@ def _report_payload() -> dict[str, Any]:
             "status": "complete",
             "profile": "reduced",
             "evidence_role": "operational",
+            "runtime_plan": _runtime_plan(memory_gib=4.0),
             "identity": {"fingerprint": "f" * 64},
         },
         "scope": {
             "claim": "computational_scale_stress_only",
             "interpretation": "Never render </script><script>alert(1)</script> as markup.",
+            "resource_boundary": {
+                "target_scout_size": 64,
+                "wall_time_measurement": "andrea_execution.wall_time_seconds",
+                "prospective_wall_time_limit_seconds": 43_200,
+                "maximum_projected_wall_time_fraction": 0.8,
+                "maximum_observed_memory_fraction": 0.8,
+            },
         },
         "summary": {
             "datasets_requested": 1,
             "datasets_completed": 1,
             "datasets_failed": 0,
+            "datasets_not_attempted": 0,
             "all_completed": True,
+            "scouts_attempted": 1,
+            "scouts_completed": 1,
+            "all_targets_attempted": 1,
+            "all_targets_completed": 1,
             "failure_kinds": {
                 "oom": 0,
                 "timeout": 0,
@@ -107,8 +281,8 @@ def _report_payload() -> dict[str, Any]:
                 "infrastructure_error": 0,
             },
             "total_inference_wall_time_seconds": 4.5,
-            "datasets_with_peak_rss": 1,
-            "maximum_peak_rss_bytes": 2_000,
+            "attempts_with_peak_memory": 2,
+            "maximum_peak_memory_bytes": 2_000,
             "total_spathi_output_bytes": 700,
             "total_trees_fitted": 98_000,
         },
@@ -122,7 +296,30 @@ def _report_payload() -> dict[str, Any]:
                 "transcription_factors": {"minimum": 50, "maximum": 50},
                 "targets": {"minimum": 500, "maximum": 500},
             },
-            "rows": [row],
+            "rows": [
+                {
+                    "dataset_id": row["dataset_id"],
+                    "status": "completed",
+                    "network_mode": row["network_mode"],
+                    "policy_branch": row["policy_branch"],
+                    "generation_seed": row["generation_seed"],
+                    "algorithm_seed": row["algorithm_seed"],
+                    "dimensions": row["dimensions"],
+                    "lane_ids": ["fixture_lane"],
+                    "decisions": {
+                        "scout": {
+                            "decision": "attempt",
+                            "reason": "first_preregistered_scout",
+                        },
+                        "all_targets": {
+                            "decision": "attempt",
+                            "reason": "within_preregistered_resource_boundary",
+                        },
+                    },
+                    "scout": scout,
+                    "all_targets": row,
+                }
+            ],
         },
         "production": {
             "budget": "reduced",
@@ -143,10 +340,16 @@ def _report_payload() -> dict[str, Any]:
             "cpu_model": "test CPU",
             "logical_cpus": 8,
             "host_memory_bytes": 8 * 1024**3,
-            "max_cores": 4,
-            "max_ram_gb": 4,
-            "rss_measurement_method": "linux_ps_process_tree_rss_sum",
-            "rss_sample_interval_seconds": 0.1,
+            "cpu_threads": 4,
+            "memory_bytes": 4 * 1024**3,
+            "memory_gib": 4.0,
+            "cpuset_cpus": [0, 1, 2, 3],
+            "planner": "heuristic",
+            "planner_time_limit_seconds": 60.0,
+            "output_profile": "canonical",
+            "exclusive_inference": True,
+            "execution_plan_fingerprint": "e" * 64,
+            "measurement_contract": "andrea_container_telemetry_v1",
             "spathi_image_id": "sha256:image",
             "andrea_environment_fingerprint": "2" * 64,
             "benchmark_environment_fingerprint": "3" * 64,
@@ -176,8 +379,12 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "schemas/scale-stress-panel.schema.json",
         "schemas/profile.schema.json",
         "schemas/scalability-results.schema.json",
+        "schemas/scalability-boundary.schema.json",
         "schemas/spathi-production-config.schema.json",
+        "schemas/execution-policy.schema.json",
+        "experiments/v1/execution/policy.json",
         "experiments/v1/profiles/scalability-reduced.json",
+        "experiments/v1/spathi/scalability-boundary.json",
         "experiments/v1/simulations/scale_stress/scale-reduced.json",
     ):
         destination = root / relative
@@ -185,6 +392,13 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         shutil.copyfile(REPO_ROOT / relative, destination)
 
     version = root / "work/v1"
+    runtime_plan = _runtime_plan()
+    execution_plan = resolve_execution_class(
+        repo_root=root,
+        class_id="scale_canonical",
+        runtime_plan=runtime_plan,
+    )
+    limits = _execution_limits(execution_plan)
     evidence: dict[str, dict[str, str]] = {}
     for name in (
         "calibration_selection",
@@ -269,14 +483,7 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "transcription_factors": dataset["tfs"],
                     "targets": dataset["genes"],
                 },
-                "execution_limits": {
-                    "max_parallel_runs": 1,
-                    "max_cores": 8,
-                    "max_ram_gb": 32.0,
-                    "planner": "heuristic",
-                    "planner_time_limit_seconds": 60.0,
-                    "inference_wall_time_limit_seconds": None,
-                },
+                "execution_limits": limits,
                 "generation": {
                     "wall_time_seconds": float(index),
                     "cache_hit": False,
@@ -284,11 +491,15 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "expression_bytes": 800 * index,
                 },
                 "inference": {
-                    "andrea_wall_time_seconds": 4.0 * index,
                     "spathi_wall_time_seconds": 3.0 * index,
-                    "harness_wall_time_seconds": 5.0 * index,
-                    "peak_rss_bytes": 2_000 * index,
-                    "rss_samples": 4,
+                    "andrea_measurement": _andrea_measurement(
+                        limits,
+                        peak_memory_bytes=2_000 * index,
+                    ),
+                    "andrea_execution_measurement": _andrea_execution_measurement(
+                        limits,
+                        wall_time_seconds=4.0 * index,
+                    ),
                     "cache_hit": False,
                     "inference_artifact_bytes": 1_500 * index,
                     "spathi_output_bytes": 900 * index,
@@ -314,7 +525,75 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
             }
         )
 
+    attempts: list[dict[str, Any]] = []
+    dataset_rows: list[dict[str, Any]] = []
+    for index, all_targets in enumerate(rows):
+        all_targets["stage"] = "all_targets"
+        all_targets["target_scope"] = {"method": "all"}
+        scout = copy.deepcopy(all_targets)
+        scout["stage"] = "scout"
+        scout["target_scope"] = {
+            "method": "sha256_gene_id",
+            "size": 64,
+            "salt": "spathi-scalability-scout-v1",
+            "dataset_id": scout["dataset_id"],
+        }
+        scout["dimensions"]["targets"] = 64
+        groups = scout["dimensions"]["groups"]
+        scout["inference"].update(
+            {
+                "targets_requested": 64,
+                "targets_eligible": 64,
+                "targets_ineligible": 0,
+                "models_requested": 64 * groups,
+                "models_completed": 64 * groups,
+                "models_trained": 64 * groups,
+                "trees_fitted": 64 * groups * 100,
+            }
+        )
+        lane_id = "reduced_progression"
+        evidence_id = rows[index - 1]["dataset_id"] if index else None
+        dataset_rows.append(
+            {
+                "dataset_id": all_targets["dataset_id"],
+                "status": "completed",
+                "network_mode": all_targets["network_mode"],
+                "policy_branch": all_targets["policy_branch"],
+                "generation_seed": all_targets["generation_seed"],
+                "algorithm_seed": all_targets["algorithm_seed"],
+                "seed_derivation": all_targets["seed_derivation"],
+                "dimensions": copy.deepcopy(all_targets["dimensions"]),
+                "lane_ids": [lane_id],
+                "decisions": {
+                    "scout": {
+                        "dataset_id": all_targets["dataset_id"],
+                        "lane_id": lane_id,
+                        "stage": "scout",
+                        "decision": "attempt",
+                        "reason": (
+                            "first_preregistered_scout"
+                            if index == 0
+                            else "within_preregistered_resource_boundary"
+                        ),
+                        "evidence_dataset_id": evidence_id,
+                    },
+                    "all_targets": {
+                        "dataset_id": all_targets["dataset_id"],
+                        "lane_id": lane_id,
+                        "stage": "all_targets",
+                        "decision": "attempt",
+                        "reason": "within_preregistered_resource_boundary",
+                        "evidence_dataset_id": all_targets["dataset_id"],
+                    },
+                },
+                "scout": scout,
+                "all_targets": all_targets,
+            }
+        )
+        attempts.extend((scout, all_targets))
+
     profile_path = root / "experiments/v1/profiles/scalability-reduced.json"
+    boundary_path = root / "experiments/v1/spathi/scalability-boundary.json"
     results = {
         "schema_version": "1.0",
         "artifact_type": "spathi_scalability_results",
@@ -328,6 +607,16 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
             "target_sum": 10000.0,
             "library_size_scope": "all_generated_genes_before_any_filtering",
             "formula": "log1p(target_sum * raw_value / per_cell_library_size)",
+        },
+        "resource_boundary": {
+            "path": boundary_path.relative_to(root).as_posix(),
+            "sha256": sha256_file(boundary_path),
+            "id": "spathi_scalability_boundary_v1",
+            "target_scout_size": 64,
+            "wall_time_measurement": "andrea_execution.wall_time_seconds",
+            "prospective_wall_time_limit_seconds": 43_200,
+            "maximum_projected_wall_time_fraction": 0.8,
+            "maximum_observed_memory_fraction": 0.8,
         },
         "profile": {
             "path": profile_path.relative_to(root).as_posix(),
@@ -353,16 +642,27 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
             "cpu_model": "test CPU",
             "logical_cpus": 8,
             "host_memory_bytes": 8 * 1024**3,
-            "max_cores": 8,
-            "max_ram_gb": 32,
-            "rss_measurement_method": "linux_ps_process_tree_rss_sum",
-            "rss_sample_interval_seconds": 0.1,
+            "cpu_threads": limits["cpu_threads"],
+            "memory_bytes": limits["memory_bytes"],
+            "memory_gib": limits["memory_gib"],
+            "cpuset_cpus": limits["cpuset_cpus"],
+            "planner": limits["planner"],
+            "planner_time_limit_seconds": limits["planner_time_limit_seconds"],
+            "output_profile": limits["output_profile"],
+            "exclusive_inference": limits["exclusive"],
+            "execution_plan_fingerprint": limits["execution_plan_fingerprint"],
+            "measurement_contract": "andrea_container_telemetry_v1",
         },
         "summary": {
-            "datasets_requested": len(rows),
-            "datasets_completed": len(rows),
+            "datasets_requested": len(dataset_rows),
+            "datasets_completed": len(dataset_rows),
             "datasets_failed": 0,
+            "datasets_not_attempted": 0,
             "all_completed": True,
+            "scouts_attempted": len(dataset_rows),
+            "scouts_completed": len(dataset_rows),
+            "all_targets_attempted": len(dataset_rows),
+            "all_targets_completed": len(dataset_rows),
             "failure_kinds": {
                 "oom": 0,
                 "timeout": 0,
@@ -370,19 +670,24 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
                 "infrastructure_error": 0,
             },
             "total_generation_wall_time_seconds": sum(
-                row["generation"]["wall_time_seconds"] for row in rows
+                row["scout"]["generation"]["wall_time_seconds"]
+                for row in dataset_rows
+                if row["scout"] is not None
             ),
             "total_inference_wall_time_seconds": sum(
-                row["inference"]["harness_wall_time_seconds"] for row in rows
+                row["inference"]["andrea_execution_measurement"]["wall_time_seconds"]
+                for row in attempts
             ),
-            "maximum_peak_rss_bytes": max(row["inference"]["peak_rss_bytes"] for row in rows),
-            "datasets_with_peak_rss": len(rows),
+            "maximum_peak_memory_bytes": max(
+                row["inference"]["andrea_measurement"]["peak_memory_bytes"] for row in attempts
+            ),
+            "attempts_with_peak_memory": len(attempts),
             "total_spathi_output_bytes": sum(
-                row["inference"]["spathi_output_bytes"] for row in rows
+                row["inference"]["spathi_output_bytes"] for row in attempts
             ),
-            "total_trees_fitted": sum(row["inference"]["trees_fitted"] for row in rows),
+            "total_trees_fitted": sum(row["inference"]["trees_fitted"] for row in attempts),
         },
-        "datasets": rows,
+        "datasets": dataset_rows,
         "notes": [
             "The panel represents synthetic dimensions only and makes no biological claim.",
             "Accuracy is evaluated in the independent comparison phase.",
@@ -397,6 +702,7 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "profile": "reduced",
         "flow_id": "scale-fixture",
         "identity": {"fingerprint": "5" * 64},
+        "runtime_plan": runtime_plan,
         "status": "publishing",
         "production_config": production_path.relative_to(root).as_posix(),
         "production_config_sha256": sha256_file(production_path),
@@ -437,11 +743,13 @@ def test_scalability_report_remains_visible_with_a_validated_failed_endpoint(
     root, version, workflow_root = _complete_report_fixture(tmp_path)
     results_path = workflow_root / "scalability-results.json"
     results = json.loads(results_path.read_text(encoding="utf-8"))
-    failed = results["datasets"][-1]
+    endpoint = results["datasets"][-1]
+    failed = endpoint["all_targets"]
     inference = failed.pop("inference")
     failed.pop("inference_artifact")
     failed.pop("run_metadata")
     failed["status"] = "failed"
+    endpoint["status"] = "failed"
     failed["failure"] = {
         "failure_kind": "oom",
         "stage": "inference",
@@ -450,10 +758,12 @@ def test_scalability_report_remains_visible_with_a_validated_failed_endpoint(
         "tool_exit_code": 137,
     }
     failed["observations"] = {
-        "harness_wall_time_seconds": inference["harness_wall_time_seconds"],
-        "tool_wall_time_seconds": inference["spathi_wall_time_seconds"],
-        "peak_rss_bytes": inference["peak_rss_bytes"],
-        "rss_samples": inference["rss_samples"],
+        "andrea_measurement": _andrea_measurement(
+            failed["execution_limits"],
+            peak_memory_bytes=None,
+            telemetry_status="partial",
+        ),
+        "andrea_execution_measurement": inference["andrea_execution_measurement"],
     }
     log_path = version / "scalability-failures" / f"{failed['dataset_id']}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -473,11 +783,18 @@ def test_scalability_report_remains_visible_with_a_validated_failed_endpoint(
         },
         "tool_log_tail": "Container was OOMKilled",
     }
-    completed = [row for row in results["datasets"] if row["status"] == "completed"]
+    attempts = [
+        attempt
+        for row in results["datasets"]
+        for attempt in (row["scout"], row["all_targets"])
+        if attempt is not None
+    ]
+    completed = [row for row in attempts if row["status"] == "completed"]
     results["summary"].update(
         {
-            "datasets_completed": len(completed),
+            "datasets_completed": len(results["datasets"]) - 1,
             "datasets_failed": 1,
+            "all_targets_completed": len(results["datasets"]) - 1,
             "all_completed": False,
             "failure_kinds": {
                 "oom": 1,
@@ -486,13 +803,13 @@ def test_scalability_report_remains_visible_with_a_validated_failed_endpoint(
                 "infrastructure_error": 0,
             },
             "total_inference_wall_time_seconds": sum(
-                row["inference"]["harness_wall_time_seconds"] for row in completed
+                row["inference"]["andrea_execution_measurement"]["wall_time_seconds"]
+                for row in completed
             )
-            + failed["observations"]["harness_wall_time_seconds"],
-            "datasets_with_peak_rss": len(completed) + 1,
-            "maximum_peak_rss_bytes": max(
-                [row["inference"]["peak_rss_bytes"] for row in completed]
-                + [failed["observations"]["peak_rss_bytes"]]
+            + failed["observations"]["andrea_execution_measurement"]["wall_time_seconds"],
+            "attempts_with_peak_memory": len(completed),
+            "maximum_peak_memory_bytes": max(
+                row["inference"]["andrea_measurement"]["peak_memory_bytes"] for row in completed
             ),
             "total_spathi_output_bytes": sum(
                 row["inference"]["spathi_output_bytes"] for row in completed
@@ -514,10 +831,10 @@ def test_scalability_report_remains_visible_with_a_validated_failed_endpoint(
 
     html = (root / bundle["html"]["path"]).read_text(encoding="utf-8")
     assert "Attributable failure evidence" in html
-    assert "Scale study complete with failed endpoints" in html
+    assert "Scale study complete with incomplete all-target endpoints" in html
     assert "Container was OOMKilled" in html
     assert "Tool log tail" in html
-    assert "Inference limit" in html
+    assert "Prospective wall limit" in html
     assert "Frozen SPATHI configuration" in html
     manifest = json.loads((root / bundle["manifest"]["path"]).read_text(encoding="utf-8"))
     assert any(item["path"] == log_path.relative_to(root).as_posix() for item in manifest["inputs"])

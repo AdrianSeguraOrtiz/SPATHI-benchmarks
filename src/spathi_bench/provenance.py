@@ -180,6 +180,7 @@ def _snapshot_source_records(
         "repos.lock.json",
         "images.lock.json",
         profile_relative,
+        "experiments/v1/execution/policy.json",
         "experiments/v1/spathi/search-space.json",
         "experiments/v1/seeds/seed-plan.json",
     }
@@ -247,6 +248,9 @@ def _snapshot_source_records(
         if batch.get("custom_tools"):
             relative_paths.add(batch["custom_tools"])
             derived_batch_paths.append(batch["custom_tools"])
+        if batch.get("convergence_plans"):
+            relative_paths.add(batch["convergence_plans"])
+            derived_batch_paths.append(batch["convergence_plans"])
         if batch.get("calibration_manifest"):
             relative_paths.add(batch["calibration_manifest"])
             derived_batch_paths.append(batch["calibration_manifest"])

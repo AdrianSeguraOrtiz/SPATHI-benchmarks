@@ -50,6 +50,7 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
     assert set(image_lock["images"]["spathi"]["build_inputs"]) == {
         "containers/spathi/Dockerfile",
         "containers/spathi/constraints.txt",
+        "containers/spathi/run_convergence.py",
         "containers/spathi/run_tool.py",
     }
     profile_ids = {profile["id"] for profile in profiles}

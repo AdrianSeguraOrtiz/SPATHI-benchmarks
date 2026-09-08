@@ -10,6 +10,7 @@ from typing import Any
 
 from ..artifacts import sha256_file
 from ..config import BenchmarkConfigError, load_json_object
+from ..resource_plan import validate_runtime_plan
 from ..state import STATE_SCHEMA_VERSION
 from .common import (
     central_report_path,
@@ -476,6 +477,12 @@ def render_comparison_report(
             "efficiency_flow_id": efficiency_flow_id,
             "analysis_roles": analysis_roles,
             "comparison_roles": comparison_roles,
+            "runtime_plan": validate_runtime_plan(
+                require_mapping(workflow.get("runtime_plan"), "comparison runtime plan")
+            ),
+            "scheduling": require_mapping(
+                summary.get("scheduling"), "comparison scheduling summary"
+            ),
             "identity": workflow["identity"],
         },
         "summary": summary,

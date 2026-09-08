@@ -4,7 +4,7 @@
   "status": "planned",
   "purpose": "selection",
   "calibration_budget": "full",
-  "description": "Full validation-only comparison of at most three predeclared SPATHI finalists on seed-disjoint dyngen and scMultiSim panels.",
+  "description": "Full validation-only comparison of exactly two predeclared SPATHI finalists on seed-disjoint dyngen and scMultiSim panels.",
   "generation_jobs": [
     {
       "id": "dyngen_validation_linear_baseline",
@@ -72,20 +72,7 @@
     }
   ],
   "inference_batches": [],
-  "resources": {
-    "generate_data": {
-      "max_parallel_tasks": 2,
-      "max_cores": 8,
-      "max_ram_gb": 32
-    },
-    "infer_network": {
-      "max_parallel_runs": 2,
-      "max_cores": 4,
-      "max_ram_gb": 16,
-      "planner": "heuristic",
-      "planner_time_limit_seconds": 60
-    }
-  },
+  "execution_class": "bulk_full",
   "planned_design": {
     "simulators": ["dyngen", "scmultisim"],
     "replicates_per_condition": 3,

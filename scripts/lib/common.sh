@@ -39,6 +39,13 @@ bench_command() {
     "$BENCH_PYTHON" -m spathi_bench.cli "$@"
 }
 
+bench_resource_help() {
+  echo "  --max-cores N             Cap the effective CPU budget detected at runtime."
+  echo "  --max-ram-gb N            Cap the effective RAM budget detected at runtime."
+  echo "  --reserve-cores N         Keep logical CPUs outside the experiment queue."
+  echo "  --reserve-ram-gb N        Keep RAM outside the experiment queue."
+}
+
 bench_cli() {
   bench_command "$@" \
     --repo-root "$BENCH_REPO_ROOT" \

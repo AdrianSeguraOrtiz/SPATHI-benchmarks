@@ -14,6 +14,7 @@ from .config import BenchmarkConfigError
 from .dimensional_transfer_workflow import run_dimensional_transfer_workflow
 from .doctor import run_doctor
 from .efficiency_workflow import run_efficiency_workflow
+from .performance_workflow import run_performance_workflow
 from .pipeline import (
     build_spathi_image,
     evaluate,
@@ -56,6 +57,30 @@ def _add_common(
         parser.add_argument("--spathi-repo", type=_path, required=True)
 
 
+def _add_resource_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--max-cores",
+        type=int,
+        help="optional ceiling; defaults to the effective host/cgroup CPU capacity",
+    )
+    parser.add_argument(
+        "--max-ram-gb",
+        type=float,
+        help="optional ceiling; defaults to the effective currently available RAM",
+    )
+    parser.add_argument("--reserve-cores", type=int, default=0)
+    parser.add_argument("--reserve-ram-gb", type=float, default=0.0)
+
+
+def _resource_options(args: argparse.Namespace) -> dict[str, int | float | None]:
+    return {
+        "max_cores": args.max_cores,
+        "max_ram_gb": args.max_ram_gb,
+        "reserve_cores": args.reserve_cores,
+        "reserve_ram_gb": args.reserve_ram_gb,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spathi-bench", description=__doc__)
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -80,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_parser.add_argument("--work-root", type=_path)
     calibrate_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
     calibrate_parser.add_argument("--run-id")
+    _add_resource_options(calibrate_parser)
     calibrate_parser.add_argument(
         "--report-only",
         action="store_true",
@@ -96,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--work-root", type=_path)
     compare_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
     compare_parser.add_argument("--efficiency-run-id")
+    _add_resource_options(compare_parser)
     compare_parser.add_argument(
         "--report-only",
         action="store_true",
@@ -112,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     efficiency.add_argument("--work-root", type=_path)
     efficiency.add_argument("--profile", choices=("reduced", "full"), default="full")
     efficiency.add_argument("--calibration-run-id")
+    _add_resource_options(efficiency)
 
     scalability = subparsers.add_parser(
         "scalability",
@@ -123,6 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     scalability.add_argument("--work-root", type=_path)
     scalability.add_argument("--profile", choices=("reduced", "full"), default="full")
     scalability.add_argument("--efficiency-run-id")
+    _add_resource_options(scalability)
 
     dimensional_transfer = subparsers.add_parser(
         "dimensional-transfer",
@@ -134,6 +163,19 @@ def build_parser() -> argparse.ArgumentParser:
     dimensional_transfer.add_argument("--work-root", type=_path)
     dimensional_transfer.add_argument("--profile", choices=("reduced", "full"), default="full")
     dimensional_transfer.add_argument("--efficiency-run-id")
+    _add_resource_options(dimensional_transfer)
+
+    performance = subparsers.add_parser(
+        "performance",
+        help="measure isolated tool runtime, memory, outputs, and parallel scaling",
+    )
+    performance.add_argument("--repo-root", type=_path, required=True)
+    performance.add_argument("--andrea-repo", type=_path, required=True)
+    performance.add_argument("--spathi-repo", type=_path, required=True)
+    performance.add_argument("--work-root", type=_path)
+    performance.add_argument("--profile", choices=("reduced", "full"), default="full")
+    performance.add_argument("--efficiency-run-id")
+    _add_resource_options(performance)
 
     audit = subparsers.add_parser(
         "audit-reproducibility",
@@ -149,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
         spathi_repository=True,
     )
     preflight_parser.add_argument("--profile-file", type=_path)
+    _add_resource_options(preflight_parser)
 
     build_parser = subparsers.add_parser("build-image", help="build the pinned SPATHI image")
     _add_common(build_parser)
@@ -216,6 +259,7 @@ def _dispatch(
             work_root=args.work_root or args.repo_root / "work",
             calibration_budget=args.profile,
             run_id=args.run_id,
+            **_resource_options(args),
         )
     if args.command == "compare":
         if args.report_only:
@@ -232,6 +276,7 @@ def _dispatch(
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
             efficiency_run_id=args.efficiency_run_id,
+            **_resource_options(args),
         )
     if args.command == "justify-efficiency":
         return "SPATHI efficiency study completed", run_efficiency_workflow(
@@ -241,6 +286,7 @@ def _dispatch(
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
             calibration_run_id=args.calibration_run_id,
+            **_resource_options(args),
         )
     if args.command == "scalability":
         return "SPATHI scalability study completed", run_scalability_workflow(
@@ -250,6 +296,7 @@ def _dispatch(
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
             efficiency_run_id=args.efficiency_run_id,
+            **_resource_options(args),
         )
     if args.command == "dimensional-transfer":
         return "SPATHI dimensional transfer completed", run_dimensional_transfer_workflow(
@@ -259,6 +306,17 @@ def _dispatch(
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
             efficiency_run_id=args.efficiency_run_id,
+            **_resource_options(args),
+        )
+    if args.command == "performance":
+        return "SPATHI performance study completed", run_performance_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
+            efficiency_run_id=args.efficiency_run_id,
+            **_resource_options(args),
         )
     if args.command == "audit-reproducibility":
         return "Reproducibility audit written", write_reproducibility_audit(
@@ -276,6 +334,7 @@ def _dispatch(
             andrea_repo=args.andrea_repo,
             spathi_repo=args.spathi_repo,
             profile_file=args.profile_file,
+            **_resource_options(args),
         )
         return "Preflight passed", path
     if args.command == "build-image":
@@ -333,6 +392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "justify-efficiency",
             "scalability",
             "dimensional-transfer",
+            "performance",
             "audit-reproducibility",
         }:
             message, result = _dispatch(args)

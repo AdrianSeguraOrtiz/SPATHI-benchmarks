@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -351,6 +352,60 @@ def _resolve_generation_job_selector(
     return frozenset(selected_jobs)
 
 
+def _validate_replicate_index_selector(
+    repo_root: Path,
+    *,
+    owner: str,
+    batch: Mapping[str, Any],
+    generation_jobs_by_id: Mapping[str, Mapping[str, Any]],
+    selected_jobs: frozenset[str],
+) -> None:
+    """Validate the one-based replicate subset requested for an inference batch."""
+
+    raw_selector = batch.get("replicate_indices")
+    if raw_selector is None:
+        return
+    if not isinstance(raw_selector, Mapping) or not raw_selector:
+        raise BenchmarkConfigError(f"{owner} replicate_indices must be a non-empty object")
+    if set(raw_selector) != set(selected_jobs):
+        raise BenchmarkConfigError(
+            f"{owner} replicate_indices must cover exactly its selected generation jobs"
+        )
+    for job_id, raw_indices in raw_selector.items():
+        if (
+            not isinstance(raw_indices, list)
+            or not raw_indices
+            or any(type(index) is not int or index < 1 for index in raw_indices)
+            or raw_indices != sorted(set(raw_indices))
+        ):
+            raise BenchmarkConfigError(
+                f"{owner} replicate indices for {job_id!r} must be sorted, unique, "
+                "one-based positive integers"
+            )
+        job = generation_jobs_by_id[job_id]
+        runs_path = job.get("simulator_runs")
+        if not isinstance(runs_path, str):
+            raise BenchmarkConfigError(
+                f"{owner} cannot select replicate indices from generator job {job_id!r}"
+            )
+        runs = load_json_object(
+            resolve_repo_path(repo_root, runs_path, f"{owner} simulator runs"),
+            f"{owner} simulator runs",
+        ).get("runs")
+        if not isinstance(runs, list) or len(runs) != 1 or not isinstance(runs[0], Mapping):
+            raise BenchmarkConfigError(
+                f"{owner} replicate selection requires one simulator run in job {job_id!r}"
+            )
+        replicate_count = runs[0].get("replicates")
+        if type(replicate_count) is not int or replicate_count < 1:
+            raise BenchmarkConfigError(f"{owner} job {job_id!r} has an invalid replicate count")
+        if raw_indices[-1] > replicate_count:
+            raise BenchmarkConfigError(
+                f"{owner} selects replicate {raw_indices[-1]} from {job_id!r}, "
+                f"which only declares {replicate_count}"
+            )
+
+
 def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> None:
     generation_ids = [job["id"] for job in profile["generation_jobs"]]
     if len(set(generation_ids)) != len(generation_ids):
@@ -358,15 +413,23 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
     generation_roles_by_id = {
         str(job["id"]): str(job["dataset_role"]) for job in profile["generation_jobs"]
     }
+    generation_jobs_by_id = {str(job["id"]): job for job in profile["generation_jobs"]}
     batch_ids = [batch["id"] for batch in profile["inference_batches"]]
     if len(set(batch_ids)) != len(batch_ids):
         raise BenchmarkConfigError("Profile contains duplicate inference batch IDs")
     for batch in profile["inference_batches"]:
-        _resolve_generation_job_selector(
+        selected_jobs = _resolve_generation_job_selector(
             owner=f"Inference batch {batch['id']}",
             selected_jobs=batch.get("generation_jobs"),
             allowed_roles={str(batch["dataset_role"])},
             generation_roles_by_id=generation_roles_by_id,
+        )
+        _validate_replicate_index_selector(
+            repo_root,
+            owner=f"Inference batch {batch['id']}",
+            batch=batch,
+            generation_jobs_by_id=generation_jobs_by_id,
+            selected_jobs=selected_jobs,
         )
     for comparison in profile["statistics"]["comparisons"]:
         _resolve_generation_job_selector(
@@ -388,6 +451,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         "efficiency_safety": {"efficiency_safety"},
         "scalability": {"scalability"},
         "dimensional_transfer": {"dimensional_transfer"},
+        "performance": {"performance"},
     }[str(profile["purpose"])]
     if generation_roles != expected_roles:
         raise BenchmarkConfigError(
@@ -401,6 +465,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         "benchmark",
         "scalability",
         "dimensional_transfer",
+        "performance",
     }:
         raise BenchmarkConfigError(f"Profile {profile['id']} cannot declare a production policy")
     if profile["purpose"] in {"regression", "benchmark"} or raw_production is not None:
@@ -450,6 +515,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         "efficiency_safety",
         "scalability",
         "dimensional_transfer",
+        "performance",
     }:
         if statistics["status"] != "not_applicable" or statistics["comparisons"]:
             raise BenchmarkConfigError(
@@ -666,6 +732,44 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 seed_parameter = item["algorithm_seed_parameter"]
                 if seed_parameter is not None:
                     params.pop(seed_parameter)
+                target_scope = params.pop("target_scope", None)
+                if batch["dataset_role"] == "scalability":
+                    expected_scout_size = 64 if production["budget"] == "reduced" else 128
+                    scalability_dataset_ids: set[str] = set()
+                    for generation_job_id in batch_generation_jobs:
+                        generator_request = generation_jobs_by_id[generation_job_id].get(
+                            "generator_request"
+                        )
+                        if not isinstance(generator_request, str):
+                            raise BenchmarkConfigError(
+                                f"Scalability batch {batch['id']} has no generator request"
+                            )
+                        request = load_json_object(
+                            resolve_repo_path(
+                                repo_root,
+                                generator_request,
+                                f"{batch['id']} scalability generator request",
+                            )
+                        )
+                        scalability_dataset_ids.update(
+                            str(dataset["id"]) for dataset in request["datasets"]
+                        )
+                    valid_hash_scope = (
+                        isinstance(target_scope, dict)
+                        and target_scope.get("method") == "sha256_gene_id"
+                        and target_scope.get("size") == expected_scout_size
+                        and target_scope.get("salt") == "spathi-scalability-scout-v1"
+                        and target_scope.get("dataset_id") in scalability_dataset_ids
+                        and set(target_scope) == {"method", "size", "salt", "dataset_id"}
+                    )
+                    if target_scope != {"method": "all"} and not valid_hash_scope:
+                        raise BenchmarkConfigError(
+                            f"Scalability batch {batch['id']} has an invalid target scope"
+                        )
+                elif target_scope is not None:
+                    raise BenchmarkConfigError(
+                        f"Production batch {batch['id']} cannot override its target scope"
+                    )
                 if params != {"group_policy": group_policy}:
                     raise BenchmarkConfigError(
                         f"Production batch {batch['id']} parameters differ from the frozen policy"
@@ -728,7 +832,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 repo_root / "schemas" / "calibration-manifest.schema.json",
                 f"{batch['id']} calibration manifest",
             )
-            from .calibration import validate_calibration_manifest
+            from .calibration import candidate_from_dict, validate_calibration_manifest
 
             search = load_json_object(
                 repo_root / "experiments/v1/spathi/search-space.json",
@@ -756,6 +860,10 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 raise BenchmarkConfigError(
                     f"{batch['id']} calibration manifest has the wrong profile stage"
                 )
+            if manifest.get("fidelity") != profile.get("calibration_fidelity"):
+                raise BenchmarkConfigError(
+                    f"{batch['id']} calibration manifest has the wrong profile fidelity"
+                )
             manifest_run_ids = {run.run_id for run in manifest_runs}
             if manifest_run_ids != requested_ids:
                 raise BenchmarkConfigError(
@@ -775,6 +883,32 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                     raise BenchmarkConfigError(
                         f"{batch['id']} run {run_id!r} differs from its canonical calibration run"
                     )
+            raw_convergence_plans = batch.get("convergence_plans")
+            if profile.get("calibration_stage") == "convergence":
+                if not isinstance(raw_convergence_plans, str):
+                    raise BenchmarkConfigError(
+                        f"Convergence batch {batch['id']} requires convergence_plans"
+                    )
+                from .convergence_fanout import validate_convergence_plans
+
+                convergence_payload = load_json_object(
+                    resolve_repo_path(
+                        repo_root,
+                        raw_convergence_plans,
+                        f"{batch['id']} convergence plans",
+                    ),
+                    f"{batch['id']} convergence plans",
+                )
+                validate_convergence_plans(
+                    repo_root,
+                    convergence_payload,
+                    tuple(candidate_from_dict(item) for item in manifest["candidates"]),
+                    manifest_runs,
+                )
+            elif raw_convergence_plans is not None:
+                raise BenchmarkConfigError(
+                    f"Only convergence batches may declare convergence_plans: {batch['id']}"
+                )
 
     from .algorithm_seed_contract import algorithm_seeds_by_configuration
 
@@ -962,12 +1096,9 @@ def _validate_calibration_budget_profiles(
                 raise BenchmarkConfigError(
                     f"Profile {profile_id} declares the wrong replicate budget"
                 )
-            generation_parallelism = profile["resources"]["generate_data"]["max_parallel_tasks"]
-            if generation_parallelism > expected_replicates:
-                raise BenchmarkConfigError(
-                    f"Profile {profile_id} generation parallelism exceeds each request's "
-                    "replicate budget"
-                )
+            expected_execution_class = "bulk_canonical" if purpose == "calibration" else "bulk_full"
+            if profile["execution_class"] != expected_execution_class:
+                raise BenchmarkConfigError(f"Profile {profile_id} uses the wrong execution class")
             runs = _profile_runs(repo_root, profile)
             replicate_counts = [run.get("replicates") for run in runs]
             if not replicate_counts or any(
@@ -1257,7 +1388,7 @@ def _validate_efficiency_budget_profiles(
             or {str(job["condition_id"]) for job in validation_jobs} != expected_conditions
             or safety_jobs
             or profile["planned_design"]["replicates_per_condition"] != expected_replicates
-            or profile["resources"]["infer_network"]["max_parallel_runs"] != 1
+            or profile["execution_class"] != "bulk_full"
             or "replicate_exceptions" in profile["planned_design"]
         ):
             raise BenchmarkConfigError(
@@ -1328,8 +1459,7 @@ def _validate_efficiency_budget_profiles(
         or safety_profile["statistics"] != {"status": "not_applicable", "comparisons": []}
         or safety_profile["planned_design"]["replicates_per_condition"] != 3
         or "replicate_exceptions" in safety_profile["planned_design"]
-        or safety_profile["resources"]["generate_data"]["max_parallel_tasks"] != 1
-        or safety_profile["resources"]["infer_network"]["max_parallel_runs"] != 1
+        or safety_profile["execution_class"] != "bulk_full"
         or len(safety_jobs) != len(expected_safety)
         or {str(job["condition_id"]) for job in safety_jobs} != set(expected_safety)
     ):
@@ -1484,9 +1614,7 @@ def _validate_dimensional_transfer_profiles(
             or {str(job["dataset_role"]) for job in jobs} != {"dimensional_transfer"}
             or profile["planned_design"]["replicates_per_condition"] != 1
             or profile["planned_design"].get("replicate_exceptions") != expected_exceptions
-            or profile["resources"]["generate_data"]
-            != {"max_parallel_tasks": 1, "max_cores": 8, "max_ram_gb": 48}
-            or profile["resources"]["infer_network"]["max_parallel_runs"] != 1
+            or profile["execution_class"] != "scale_full"
         ):
             raise BenchmarkConfigError(
                 f"Profile {profile_id} differs from the frozen dimensional-transfer budget"
@@ -1558,19 +1686,16 @@ def _validate_dimensional_transfer_profiles(
 
 
 def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
+    from .execution_policy import load_execution_policy
+
+    execution_classes = set(load_execution_policy(repo_root)["classes"])
     profiles = []
     for path in sorted((repo_root / "experiments" / "v1" / "profiles").glob("*.json")):
         profile = load_profile(repo_root, path.stem)
         validate_profile_references(repo_root, profile)
-        inference = profile["resources"]["infer_network"]
-        parallel_runs = int(inference["max_parallel_runs"])
-        if parallel_runs * int(inference["max_cores"]) > 8:
+        if profile["execution_class"] not in execution_classes:
             raise BenchmarkConfigError(
-                f"Profile {profile['id']} inference can exceed the global eight-core ceiling"
-            )
-        if parallel_runs * float(inference["max_ram_gb"]) > 48:
-            raise BenchmarkConfigError(
-                f"Profile {profile['id']} inference can exceed the global 48 GB ceiling"
+                f"Profile {profile['id']} references an unknown execution class"
             )
         profiles.append(profile)
     required_profiles = {
@@ -1590,6 +1715,8 @@ def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
         "scalability-reduced",
         "dimensional-transfer-full",
         "dimensional-transfer-reduced",
+        "performance-full",
+        "performance-reduced",
     }
     profile_ids = {profile["id"] for profile in profiles}
     if not required_profiles.issubset(profile_ids):
@@ -1682,6 +1809,14 @@ def validate_design_contracts(repo_root: Path, andrea_repo: Path | None = None) 
         audit_reproducibility(repo_root)
     except ReproducibilityAuditError as exc:
         raise BenchmarkConfigError(f"Reproducibility audit failed: {exc}") from exc
+    from .performance import (
+        load_performance_design,
+        validate_performance_catalog_threading,
+    )
+
+    performance_design = load_performance_design(repo_root)
+    if andrea_repo is not None:
+        validate_performance_catalog_threading(andrea_repo, performance_design)
     search, _selected = validate_calibration_contracts(repo_root)
     accountability_path = (
         repo_root / "experiments" / "v1" / "spathi" / "parameter-accountability.json"

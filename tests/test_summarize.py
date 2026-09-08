@@ -21,6 +21,50 @@ from spathi_bench.summarize import (
 _DEFAULT_METRICS = object()
 
 
+def _scheduler_fixture(run_root: Path) -> dict[str, Any]:
+    capacity = {
+        "cpu_threads": 4,
+        "memory_bytes": 8 * 1024**3,
+        "memory_gib": 8.0,
+    }
+    utilization = {
+        "wall_seconds": 5.0,
+        "cpu_thread_seconds_reserved": 5.0,
+        "memory_byte_seconds_reserved": float(4 * 1024**3 * 5),
+        "cpu_capacity_utilization": 0.25,
+        "memory_capacity_utilization": 0.5,
+        "peak_concurrent_tasks": 1,
+        "peak_reserved_cpu_threads": 1,
+        "peak_reserved_memory_bytes": 4 * 1024**3,
+    }
+    for phase in ("inference", "evaluation"):
+        path = run_root / "schedules" / f"{phase}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "complete",
+                    "capacity": {
+                        "cpu_threads": capacity["cpu_threads"],
+                        "memory_bytes": capacity["memory_bytes"],
+                        "max_concurrent_tasks": None,
+                    },
+                    "logical_tasks": 2,
+                    "physical_tasks": 2,
+                    "cache_hits": 0,
+                    "wall_seconds": 5.0,
+                    "tasks": [],
+                    "utilization": utilization,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return {"capacity": capacity}
+
+
 def test_calibration_accepts_partial_only_when_directed_aupr_is_complete() -> None:
     partial = {
         "context": "group:a",
@@ -145,12 +189,17 @@ def _publish_json_artifact(
     spec: dict[str, Any],
     relative_path: str,
     payload: dict[str, Any],
+    extra_files: dict[str, str] | None = None,
 ) -> tuple[Artifact, Path]:
     key = store.key_for(kind, spec)
     with store.staging_directory(key) as staging:
         destination = staging / relative_path
         destination.parent.mkdir(parents=True)
         destination.write_text(json.dumps(payload), encoding="utf-8")
+        for extra_relative, content in (extra_files or {}).items():
+            extra = staging / extra_relative
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            extra.write_text(content, encoding="utf-8")
         artifact = store.publish_from_temp(staging, kind=kind, spec=spec)
     return artifact, artifact.file(relative_path)
 
@@ -255,8 +304,27 @@ def _evaluation(
         payload={
             "tools": {
                 "tool_origins": {run_id: tool_origin},
-                "results": {run_id: {"duration_seconds": 5.0}},
+                "results": {
+                    run_id: {
+                        "network_path": "network.csv",
+                        "measurement": {
+                            "schema_version": "1.0",
+                            "scope": "physical_task",
+                            "wall_time_seconds": 5.0,
+                            "peak_memory_bytes": 1024,
+                        },
+                    }
+                },
             }
+        },
+        extra_files={
+            "output/network.csv": (
+                "source,target,score,sign,evidence,context\n"
+                "TF1,G1,0.9,?,inference,group:a\n"
+                "TF1,G2,0.4,?,inference,group:a\n"
+                "TF1,G1,0.8,?,inference,group:b\n"
+                "TF1,G2,0.3,?,inference,group:b\n"
+            )
         },
     )
     evaluation_spec = {
@@ -426,6 +494,7 @@ def _evaluated_run(
             ],
         ),
     ]
+    runtime_plan = _scheduler_fixture(run_root)
     write_state(
         run_root,
         {
@@ -435,6 +504,7 @@ def _evaluated_run(
             "benchmark_repository": {"commit": "4" * 40},
             "status": "exported",
             "artifact_store": str(store.root),
+            "runtime_plan": runtime_plan,
             "datasets": [dataset],
             "evaluations": evaluations,
             "cache": {"dataset_hits": 0, "inference_hits": 0, "evaluation_hits": 0},
@@ -973,7 +1043,7 @@ def test_summarize_emits_balanced_calibration_rows_without_mixing_partitions(
             ),
             "group_contexts": ["group:a", "group:b"],
             "n_group_contexts": 2,
-            "peak_memory_mb": None,
+            "peak_memory_mb": 1024 / 1024**2,
             "run_id": "spathi_candidate_seed_1729",
             "spathi_build_fingerprint": "2" * 64,
             "spathi_commit": "1" * 40,

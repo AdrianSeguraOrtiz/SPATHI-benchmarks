@@ -35,6 +35,7 @@ from .inference_scope_contract import inference_regulator_scopes
 from .noninferiority import analyze_noninferiority, resolve_efficiency_adoption
 from .provenance import observe_benchmark_repository
 from .seeds import derive_plan_seed, load_seed_plan
+from .tool_contract import spathi_runtime_resources
 
 SELECTED_PLACEHOLDER = "selected_spathi"
 _PROFILE_IDS = {"reduced": "reduced-v1", "full": "full-v1"}
@@ -417,6 +418,7 @@ def build_selected_spathi_requests(
                 "execution_mode": "group_native",
                 "extra_inputs": ["groups", "tf_list"],
                 "outputs": {"directed": True, "sign": "none"},
+                "runtime_resources": spathi_runtime_resources(),
             }
             for run, seed in zip(runs, normalized_seeds, strict=True)
         ]

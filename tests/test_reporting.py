@@ -25,6 +25,29 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def _runtime_plan(*, cpu_threads: int = 8, memory_gib: float = 32.0) -> dict[str, Any]:
+    unsigned = {
+        "schema_version": "1.0",
+        "detected": {
+            "effective_cpu_threads": cpu_threads,
+            "effective_memory_bytes": round(memory_gib * 1024**3),
+            "source": "report-test",
+        },
+        "request": {
+            "max_cores": cpu_threads,
+            "max_ram_gb": memory_gib,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 0.0,
+        },
+        "capacity": {
+            "cpu_threads": cpu_threads,
+            "memory_bytes": round(memory_gib * 1024**3),
+            "memory_gib": memory_gib,
+        },
+    }
+    return {**unsigned, "fingerprint": canonical_json_sha256(unsigned)}
+
+
 def _dataset_fixture(
     repo_root: Path,
     *,
@@ -122,9 +145,33 @@ def _calibration_fixture(
     workflow_root.mkdir(parents=True)
     spathi_commit = "2" * 40
     search_path = repo_root / "experiments/v1/spathi/search-space.json"
+    stage_ids = tuple(
+        dict.fromkeys(stage for stage, _fidelity in calibration_reporting.CALIBRATION_PHASE_ORDER)
+    )
+    development_stages = tuple(stage for stage in stage_ids if stage != "validation")
+    phase_designs: dict[str, Any] = {}
+    for stage_id, fidelity in calibration_reporting.CALIBRATION_PHASE_ORDER:
+        tier = {
+            "candidate_source": "all_expanded" if fidelity == "scout" else "shortlist",
+            "advance_limit": 1,
+            "dataset_selector": {
+                "condition_ids": ["linear_baseline"],
+                "replicate_indices": [1],
+            },
+            "algorithm_seed_indices": [1],
+            "target_scope": {"method": "all"},
+            "expected_physical_fits": 2,
+        }
+        if stage_id == "convergence":
+            tier["expected_logical_results"] = 8
+        if fidelity == "final":
+            phase_designs[stage_id] = tier
+        else:
+            phase_designs.setdefault(stage_id, {})[fidelity] = tier
     search_space = {
         "objective": {"primary_metric": "aupr_directed", "direction": "maximize"},
         "dataset_partition": {"assignment_unit": "dataset_instance"},
+        "selection_protocol": {},
         "stages": [
             {
                 "id": stage_id,
@@ -137,8 +184,9 @@ def _calibration_fixture(
                     {"id": "runner", "rationale": f"Compare the {stage_id} runner."},
                 ],
             }
-            for index, stage_id in enumerate(calibration_reporting.CALIBRATION_STAGE_ORDER, start=1)
+            for index, stage_id in enumerate(development_stages, start=1)
         ],
+        "calibration_budgets": {"reduced": {"multifidelity": {"stages": phase_designs}}},
     }
     _write_json(search_path, search_space)
     search_sha256 = sha256_file(search_path)
@@ -166,7 +214,8 @@ def _calibration_fixture(
         condition_id="linear_baseline",
         seed=31001,
     )
-    for stage_id in calibration_reporting.CALIBRATION_STAGE_ORDER:
+    for stage_id, fidelity in calibration_reporting.CALIBRATION_PHASE_ORDER:
+        phase_id = f"{stage_id}__{fidelity}"
         dataset_role = "validation" if stage_id == "validation" else "development"
         kept = {
             "configuration_id": f"{stage_id}__kept",
@@ -186,13 +235,18 @@ def _calibration_fixture(
             "variant_id": "runner",
             "parameters": {**kept["parameters"], "n_estimators": 250},
         }
-        ranking_path = workflow_root / "stages" / stage_id / "ranking.json"
+        ranking_path = workflow_root / "stages" / phase_id / "ranking.json"
         parent = None
         if ranking_paths:
             parent = {
                 "path": ranking_paths[-1].relative_to(repo_root).as_posix(),
                 "sha256": sha256_file(ranking_paths[-1]),
-                "stage_id": calibration_reporting.CALIBRATION_STAGE_ORDER[len(ranking_paths) - 1],
+                "stage_id": calibration_reporting.CALIBRATION_PHASE_ORDER[len(ranking_paths) - 1][
+                    0
+                ],
+                "fidelity": calibration_reporting.CALIBRATION_PHASE_ORDER[len(ranking_paths) - 1][
+                    1
+                ],
             }
         winner = None
         if stage_id == "validation":
@@ -205,8 +259,9 @@ def _calibration_fixture(
         ranking = {
             "schema_version": "1.0",
             "stage_id": stage_id,
+            "fidelity": fidelity,
             "calibration_budget": "reduced",
-            "profile_id": f"calibration-reduced-{stage_id}",
+            "profile_id": f"calibration-reduced-{stage_id}-{fidelity}",
             "search_space_sha256": search_sha256,
             "spathi_commit": spathi_commit,
             "parent_ranking": parent,
@@ -253,17 +308,17 @@ def _calibration_fixture(
         }
         _write_json(ranking_path, ranking)
         ranking_paths.append(ranking_path)
-        stage_records[stage_id] = {
+        stage_records[phase_id] = {
             "status": "ranked",
             "profile_id": ranking["profile_id"],
             "ranking": ranking_path.relative_to(repo_root).as_posix(),
             "ranking_sha256": sha256_file(ranking_path),
-            "run_root": (version_root / f"calibration-{stage_id}")
+            "run_root": (version_root / f"calibration-{phase_id}")
             .relative_to(repo_root)
             .as_posix(),
         }
         _write_json(
-            version_root / f"calibration-{stage_id}" / "state.json",
+            version_root / f"calibration-{phase_id}" / "state.json",
             {
                 "schema_version": "1.0",
                 "status": "completed",
@@ -385,6 +440,7 @@ def _comparison_fixture(
         "profile_id": "reduced-v1",
         "purpose": "regression",
         "aggregates": [{"marker": "published-summary"}],
+        "scheduling": {},
     }
     summary_path = _write_json(reports_root / "summary.json", summary)
     statistics = {
@@ -527,6 +583,7 @@ def _comparison_fixture(
         "production_config": production.relative_to(repo_root).as_posix(),
         "production_config_sha256": sha256_file(production),
         "identity": {"spathi_commit": "2" * 40, "fingerprint": "5" * 64},
+        "runtime_plan": _runtime_plan(),
         "interactive_report": (version_root / "reports/reduced/comparison-fixture/comparison.html")
         .relative_to(repo_root)
         .as_posix(),
@@ -738,9 +795,10 @@ def test_calibration_report_preserves_frozen_ranking_selection_and_null_memory(
     payload = captured["payload"]
     assert payload["workflow"]["status"] == "complete"
     assert payload["selected"] == selected
-    assert [stage["id"] for stage in payload["stages"]] == list(
-        calibration_reporting.CALIBRATION_STAGE_ORDER
-    )
+    assert [stage["id"] for stage in payload["stages"]] == [
+        f"{stage_id}__{fidelity}"
+        for stage_id, fidelity in calibration_reporting.CALIBRATION_PHASE_ORDER
+    ]
     assert payload["datasets"]["summary"] == {
         "dataset_count": 2,
         "total_cells": 600,
@@ -760,8 +818,8 @@ def test_calibration_report_preserves_frozen_ranking_selection_and_null_memory(
     }
     for stage in payload["stages"]:
         assert [candidate["configuration_id"] for candidate in stage["candidates"]] == [
-            f"{stage['id']}__kept",
-            f"{stage['id']}__runner",
+            f"{stage['stage_id']}__kept",
+            f"{stage['stage_id']}__runner",
         ]
         assert [candidate["score"] for candidate in stage["candidates"]] == [0.2, 0.9]
         assert [candidate["selected"] for candidate in stage["candidates"]] == [True, False]
@@ -956,7 +1014,7 @@ def test_calibration_report_rejects_a_ranking_changed_after_workflow_completion(
     tmp_path: Path,
 ) -> None:
     repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
-    ranking_path = workflow_root / "stages/convergence/ranking.json"
+    ranking_path = workflow_root / "stages/convergence__final/ranking.json"
     ranking_path.write_text("{}\n", encoding="utf-8")
 
     with pytest.raises(BenchmarkConfigError, match="changed after the workflow was recorded"):

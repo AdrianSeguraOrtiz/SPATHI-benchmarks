@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,164 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _execution_resources(*, threads: int = 4, memory_gib: float = 8.0) -> dict[str, Any]:
+    return {
+        "cpu_threads": threads,
+        "memory_bytes": round(memory_gib * 1024**3),
+        "memory_gib": memory_gib,
+        "cpuset_cpus": list(range(threads)),
+        "planner": "heuristic",
+        "planner_time_limit_seconds": 60.0,
+        "output_profile": "canonical",
+        "exclusive": True,
+        "execution_plan_fingerprint": "a" * 64,
+        "timeout_seconds": 43_200.0,
+    }
+
+
+def _andrea_measurement(
+    resources: dict[str, Any],
+    *,
+    wall_time_seconds: float = 3.5,
+    cpu_time_seconds: float | None = 7.0,
+    peak_memory_bytes: int | None = 4096,
+    telemetry_status: str = "complete",
+) -> dict[str, Any]:
+    cpuset = list(resources["cpuset_cpus"])
+    return {
+        "schema_version": "1.0",
+        "scope": "physical_task",
+        "wall_time_seconds": wall_time_seconds,
+        "container_wall_time_seconds": wall_time_seconds - 0.1,
+        "cpu_time_seconds": cpu_time_seconds,
+        "peak_memory_bytes": peak_memory_bytes,
+        "output_bytes": 256,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:04Z",
+        "task_started_monotonic_ns": 1_000_000_000,
+        "task_finished_monotonic_ns": 4_500_000_000,
+        "container_started_at_utc": "2026-01-01T00:00:00Z",
+        "container_finished_at_utc": "2026-01-01T00:00:04Z",
+        "assigned_resources": {
+            "threads": resources["cpu_threads"],
+            "ram_limit_bytes": resources["memory_bytes"],
+            "cpuset_cpus_requested": cpuset,
+            "cpuset_cpus_configured": cpuset,
+            "cpuset_cpus_effective": cpuset,
+            "cpu_quota_cores_effective": float(resources["cpu_threads"]),
+            "ram_limit_bytes_effective": resources["memory_bytes"],
+        },
+        "telemetry": {
+            "status": telemetry_status,
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "physical_task_end_to_end_including_container_launch_and_exit_collection"
+            ),
+            "container_wall_source": "docker_state_timestamps",
+            "cpu_source": "cgroup-v2:cpu.stat",
+            "memory_source": "cgroup-v2:memory.peak",
+            "memory_semantics": "container_cgroup_peak",
+            "io_source": None,
+            "io_semantics": "unavailable",
+            "throttled_time_seconds": 0.0,
+            "oom_events": 0,
+            "oom_kill_events": 0,
+            "memory_limit_events": 0,
+            "oom_killed": False,
+        },
+    }
+
+
+def _andrea_execution_measurement(
+    resources: dict[str, Any],
+    *,
+    wall_time_seconds: float = 9.0,
+) -> dict[str, Any]:
+    cpuset = [list(resources["cpuset_cpus"])]
+    return {
+        "schema_version": "1.0",
+        "scope": "andrea_execution",
+        "wall_time_seconds": wall_time_seconds,
+        "child_wall_time_sum_seconds": 3.5,
+        "postprocess_wall_time_seconds": 0.5,
+        "cpu_time_seconds": 7.0,
+        "peak_memory_bytes": 4096,
+        "output_bytes": 512,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:09Z",
+        "task_started_monotonic_ns": 1_000_000_000,
+        "task_finished_monotonic_ns": 10_000_000_000,
+        "assigned_resources": {
+            "threads_peak": resources["cpu_threads"],
+            "ram_limit_peak_bytes": resources["memory_bytes"],
+            "cpuset_cpus_requested_sets": cpuset,
+            "cpuset_cpus_effective_sets": cpuset,
+        },
+        "telemetry": {
+            "status": "complete",
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "andrea_execution_end_to_end_including_input_verification_preparation_"
+                "scheduling_merging_and_requested_output_materialization"
+            ),
+            "cpu_source": "sum_of_child_container_cpu",
+            "cpu_semantics": "sum_of_physical_container_cpu_excludes_andrea_host_process",
+            "memory_source": "child_container_cgroup_peaks",
+            "memory_semantics": (
+                "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"
+            ),
+            "io_source": None,
+            "io_semantics": "unavailable",
+        },
+    }
+
+
+def _andrea_logical_measurement(resources: dict[str, Any]) -> dict[str, Any]:
+    cpuset = [list(resources["cpuset_cpus"])]
+    return {
+        "schema_version": "1.0",
+        "scope": "logical_run",
+        "wall_time_seconds": 4.5,
+        "child_wall_time_sum_seconds": 7.0,
+        "postprocess_wall_time_seconds": 0.5,
+        "cpu_time_seconds": 6.0,
+        "peak_memory_bytes": 4096,
+        "output_bytes": 256,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": "2026-01-01T00:00:00Z",
+        "task_finished_at_utc": "2026-01-01T00:00:05Z",
+        "task_started_monotonic_ns": 1_000_000_000,
+        "task_finished_monotonic_ns": 5_500_000_000,
+        "assigned_resources": {
+            "threads_peak": resources["cpu_threads"],
+            "ram_limit_peak_bytes": resources["memory_bytes"],
+            "cpuset_cpus_requested_sets": cpuset,
+            "cpuset_cpus_effective_sets": cpuset,
+        },
+        "telemetry": {
+            "status": "partial",
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "logical_run_from_first_physical_task_start_through_logical_"
+                "postprocess; input_preparation_is_excluded"
+            ),
+            "cpu_source": "sum_of_child_container_cpu",
+            "cpu_semantics": "sum_excludes_andrea_host_postprocess",
+            "memory_source": "child_container_cgroup_peaks",
+            "memory_semantics": (
+                "overlap_upper_bound_from_child_peaks_excludes_andrea_host_postprocess"
+            ),
+            "io_source": None,
+            "io_semantics": "unavailable",
+        },
+    }
 
 
 def _group_policy(parameters: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +297,14 @@ def test_materialization_executes_one_shape_with_scalability_seed(
         production=production,
         panel=panel,
         dataset=panel["datasets"][0],
+        stage="scout",
+        target_scope={
+            "method": "sha256_gene_id",
+            "size": 64,
+            "salt": "spathi-scalability-scout-v1",
+            "dataset_id": panel["datasets"][0]["id"],
+        },
+        timeout_seconds=43_200.0,
         output_dir=root / "work/scalability/materialized",
     )
 
@@ -157,6 +324,13 @@ def test_materialization_executes_one_shape_with_scalability_seed(
     assert metadata["runs"][0]["seed_derivation"] == materialized["seed_derivation"]
     assert metadata["runs"][0]["seed_derivation"]["namespace"] == "reduced.scalability"
     assert profile["inference_batches"][0]["dataset_role"] == "scalability"
+    assert profile["generation_jobs"][0]["id"] == (
+        f"generate_{panel['datasets'][0]['id']}"
+    )
+    assert profile["id"].endswith("_scout")
+    tools = json.loads(Path(materialized["tools_path"]).read_text(encoding="utf-8"))
+    assert tools["runs"][0]["params"]["target_scope"]["size"] == 64
+    assert tools["runs"][0]["resources"]["timeout_seconds"] == 43_200.0
 
     tools_path = Path(materialized["tools_path"])
     tools = json.loads(tools_path.read_text(encoding="utf-8"))
@@ -195,6 +369,9 @@ def test_materialized_synthetic_control_declares_its_own_scale_grid(
         production=production,
         panel=panel,
         dataset=control,
+        stage="all_targets",
+        target_scope={"method": "all"},
+        timeout_seconds=86_400.0,
         output_dir=root / "work/scalability/materialized-control",
     )
 
@@ -206,6 +383,42 @@ def test_materialized_synthetic_control_declares_its_own_scale_grid(
         "transcription_factors": [control["tfs"]],
     }
     assert request["expression_preparation"] == panel["expression_preparation"]
+
+
+def test_materialization_rejects_a_scope_inconsistent_with_its_budget(
+    tmp_path: Path,
+    frozen_spathi_params: dict[str, Any],
+) -> None:
+    root = _copy_materialization_repository(tmp_path)
+    template = load_profile(REPO_ROOT, "scalability-reduced", require_runnable=True)
+    panel = json.loads(
+        (REPO_ROOT / "experiments/v1/simulations/scale_stress/scale-reduced.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    production = _production(frozen_spathi_params)
+    production_path = _write_json(root / "work/efficiency/production-config.json", production)
+    dataset = panel["datasets"][0]
+
+    with pytest.raises(BenchmarkConfigError, match="invalid target scope"):
+        scalability.materialize_scalability_dataset(
+            repo_root=root,
+            budget="reduced",
+            template_profile=template,
+            production_config_path=production_path,
+            production=production,
+            panel=panel,
+            dataset=dataset,
+            stage="scout",
+            target_scope={
+                "method": "sha256_gene_id",
+                "size": 128,
+                "salt": "spathi-scalability-scout-v1",
+                "dataset_id": dataset["id"],
+            },
+            timeout_seconds=43_200.0,
+            output_dir=root / "work/scalability/invalid-scope",
+        )
 
 
 def _publish(
@@ -234,6 +447,20 @@ def _reference(artifact: Artifact, *, cache_hit: bool = False) -> dict[str, Any]
     }
 
 
+def _generation_measurement(*, seconds: float = 1.0) -> str:
+    return json.dumps(
+        {
+            "schema_version": "1.0",
+            "scope": "scale_stress_generation",
+            "wall_time_seconds": seconds,
+            "wall_source": "benchmark_monotonic_clock",
+            "wall_semantics": (
+                "fresh_artifact_generation_excluding_cache_lookup_and_publication"
+            ),
+        }
+    )
+
+
 def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     store = ArtifactStore(root / "work/v1/artifacts")
@@ -252,6 +479,7 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
         kind="dataset",
         spec={"dataset": dataset_id},
         files={
+            "generation-measurement.json": _generation_measurement(),
             f"output/panel/datasets/{dataset_id}/expression.tsv": (
                 "gene\tcell_1\tcell_2\tcell_3\nG1\t1\t2\t3\n"
             ),
@@ -287,7 +515,20 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
         },
         "memory_estimate_bytes": {"estimated_peak_heap_with_rough_trees": 2048},
     }
-    report = {"status": "executed", "execution": {"elapsed_seconds": 9.0}}
+    resources = _execution_resources()
+    report = {
+        "status": "executed",
+        "output_profile": "canonical",
+        "execution": {"measurement": _andrea_execution_measurement(resources)},
+        "tools": {
+            "results": {
+                run_id: {
+                    "status": "completed",
+                    "measurement": _andrea_measurement(resources),
+                }
+            }
+        },
+    }
     inference_artifact = _publish(
         store,
         kind="inference",
@@ -327,28 +568,21 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
         repo_root=root,
         runtime_state=state,
         dataset_spec=dataset_spec,
+        stage="all_targets",
+        target_scope={"method": "all"},
         run_id=run_id,
         algorithm_seed=99,
         seed_derivation=derivation,
-        resources={
-            "max_parallel_runs": 1,
-            "max_cores": 4,
-            "max_ram_gb": 8,
-            "planner": "heuristic",
-            "planner_time_limit_seconds": 60,
-        },
-        generation_wall_time_seconds=1.0,
-        inference_wall_time_seconds=10.0,
-        peak_rss_bytes=4096,
-        rss_samples=4,
+        resources=resources,
     )
 
     assert measurement["policy_branch"] == "single_group"
     assert measurement["dimensions"]["targets"] == 12
     assert measurement["inference"]["targets_eligible"] == 10
+    assert measurement["inference"]["andrea_execution_measurement"]["wall_time_seconds"] == 9.0
     assert measurement["inference"]["models_completed"] == 12
     assert measurement["inference"]["trees_fitted"] == 1000
-    assert measurement["inference"]["peak_rss_bytes"] == 4096
+    assert measurement["inference"]["andrea_measurement"]["peak_memory_bytes"] == 4096
     assert measurement["inference"]["threads_effective"] == 4
     assert measurement["inference"]["estimated_peak_heap_with_rough_trees_bytes"] == 2048
     assert measurement["inference"]["spathi_output_bytes"] > 0
@@ -359,20 +593,12 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
             repo_root=root,
             runtime_state=state,
             dataset_spec=dataset_spec,
+            stage="all_targets",
+            target_scope={"method": "all"},
             run_id=run_id,
             algorithm_seed=99,
             seed_derivation=derivation,
-            resources={
-                "max_parallel_runs": 1,
-                "max_cores": 4,
-                "max_ram_gb": 8,
-                "planner": "heuristic",
-                "planner_time_limit_seconds": 60,
-            },
-            generation_wall_time_seconds=1.0,
-            inference_wall_time_seconds=10.0,
-            peak_rss_bytes=4096,
-            rss_samples=4,
+            resources=resources,
         )
 
 
@@ -484,18 +710,6 @@ def test_resume_rejects_tampered_runtime_bound_measurement(tmp_path: Path) -> No
         )
 
 
-def test_process_tree_rss_includes_descendants_once() -> None:
-    table = """
-      10 1 100
-      11 10 50
-      12 10 25
-      13 11 10
-      20 1 999
-    """
-    assert scalability._rss_from_process_table([10], table) == 185 * 1024
-    assert scalability._rss_from_process_table([10, 11], table) == 185 * 1024
-
-
 def test_pipeline_transports_only_an_identity_validated_failed_andrea_report(
     tmp_path: Path,
 ) -> None:
@@ -519,6 +733,9 @@ def test_pipeline_transports_only_an_identity_validated_failed_andrea_report(
             "run_id": "spathi",
             "status": "executed",
             "dataset": {"id": "dataset"},
+            "execution": {
+                "measurement": _andrea_execution_measurement(_execution_resources())
+            },
             "tools": {
                 "selected": ["spathi"],
                 "status_by_tool": {"spathi": "failed"},
@@ -528,8 +745,11 @@ def test_pipeline_transports_only_an_identity_validated_failed_andrea_report(
                     "spathi": {
                         "status": "failed",
                         "exit_code": 137,
-                        "duration_seconds": 3.5,
                         "error": "Container failed: out of memory",
+                        "execution": {"mode": "group_native"},
+                        "measurement": _andrea_measurement(
+                            _execution_resources(), telemetry_status="partial"
+                        ),
                         "progress_path": progress_path.relative_to(run_dir).as_posix(),
                         "logs_path": tool_log.relative_to(run_dir).as_posix(),
                     }
@@ -555,6 +775,7 @@ def test_pipeline_transports_only_an_identity_validated_failed_andrea_report(
     )
 
     assert failure.tool_exit_code == 137
+    assert failure.measurement["scope"] == "physical_task"
     assert failure.progress is not None and failure.progress["percent"] == 40
     assert failure.tool_log_tail == "Out of memory"
 
@@ -582,6 +803,75 @@ def test_pipeline_transports_only_an_identity_validated_failed_andrea_report(
             expected_origin="custom",
             command_failure=command_failure,
             batch_id="batch",
+        )
+
+
+def test_pipeline_accepts_grouped_failure_only_with_logical_run_telemetry(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "andrea-run"
+    tool_log = run_dir / "tools/genie3/group_aggregation.log"
+    tool_log.parent.mkdir(parents=True, exist_ok=True)
+    tool_log.write_text("All grouped executions failed\n", encoding="utf-8")
+    report_path = _write_json(
+        run_dir / "run_report.json",
+        {
+            "run_id": "genie3",
+            "status": "executed",
+            "dataset": {"id": "dataset"},
+            "execution": {
+                "measurement": _andrea_execution_measurement(_execution_resources())
+            },
+            "tools": {
+                "selected": ["genie3"],
+                "status_by_tool": {"genie3": "failed"},
+                "tool_origins": {"genie3": "catalog"},
+                "failed": {"genie3": "All grouped executions failed"},
+                "results": {
+                    "genie3": {
+                        "status": "failed",
+                        "exit_code": 1,
+                        "error": "All grouped executions failed",
+                        "execution": {"mode": "group_emulated"},
+                        "measurement": _andrea_logical_measurement(_execution_resources()),
+                        "progress_path": None,
+                        "logs_path": tool_log.relative_to(run_dir).as_posix(),
+                    }
+                },
+            },
+        },
+    )
+    command_log = tmp_path / "command.log"
+    command_log.write_text("ANDREA reported grouped failure\n", encoding="utf-8")
+    command_failure = CommandExecutionError(
+        command=["python", "-m", "andrea"],
+        return_code=1,
+        log_path=command_log,
+    )
+
+    failure = pipeline._validated_failed_inference(
+        report_path,
+        run_id="genie3",
+        dataset_id="dataset",
+        expected_origin="catalog",
+        command_failure=command_failure,
+        batch_id="group-only",
+    )
+
+    assert failure.measurement["scope"] == "logical_run"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["tools"]["results"]["genie3"]["measurement"] = _andrea_measurement(
+        _execution_resources()
+    )
+    _write_json(report_path, report)
+    with pytest.raises(BenchmarkConfigError, match="resource telemetry"):
+        pipeline._validated_failed_inference(
+            report_path,
+            run_id="genie3",
+            dataset_id="dataset",
+            expected_origin="catalog",
+            command_failure=command_failure,
+            batch_id="group-only",
         )
 
 
@@ -616,6 +906,7 @@ def test_failed_measurement_preserves_attributable_operational_evidence(
         kind="dataset",
         spec={"dataset": dataset_id},
         files={
+            "generation-measurement.json": _generation_measurement(),
             f"output/panel/datasets/{dataset_id}/expression.tsv": (
                 "gene\tcell_1\tcell_2\tcell_3\nG1\t1\t2\t3\n"
             )
@@ -629,14 +920,21 @@ def test_failed_measurement_preserves_attributable_operational_evidence(
     command_log = root / "work/v1/scale_failure/logs/20-inference.log"
     command_log.parent.mkdir(parents=True, exist_ok=True)
     command_log.write_text(tool_error + "\n", encoding="utf-8")
+    resources = _execution_resources()
     failure = scalability.InferenceExecutionFailure(
         dataset_id=dataset_id,
         batch_id="infer_scale_failure",
         run_id="spathi_scalability_scale_failure",
         orchestrator_return_code=1,
         tool_exit_code=tool_exit_code,
-        tool_duration_seconds=4.5,
         tool_error=tool_error,
+        measurement=_andrea_measurement(
+            resources,
+            cpu_time_seconds=None,
+            peak_memory_bytes=None,
+            telemetry_status="partial",
+        ),
+        execution_measurement=_andrea_execution_measurement(resources),
         command_log_path=command_log,
         progress={
             "percent": 62,
@@ -656,32 +954,22 @@ def test_failed_measurement_preserves_attributable_operational_evidence(
             "replicate_index": 1,
         },
     }
-    resources = {
-        "max_parallel_runs": 1,
-        "max_cores": 4,
-        "max_ram_gb": 8,
-        "planner": "heuristic",
-        "planner_time_limit_seconds": 60,
-    }
-
     measurement = scalability.collect_failed_scalability_measurement(
         repo_root=root,
         runtime_state=state,
         dataset_spec=dataset_spec,
+        stage="all_targets",
+        target_scope={"method": "all"},
         run_id="spathi_scalability_scale_failure",
         algorithm_seed=99,
         seed_derivation=derivation,
         resources=resources,
-        generation_wall_time_seconds=1.0,
-        inference_wall_time_seconds=5.0,
-        peak_rss_bytes=0,
-        rss_samples=0,
         failure=failure,
     )
 
     assert measurement["status"] == "failed"
     assert measurement["failure"]["failure_kind"] == expected_kind
-    assert measurement["observations"]["peak_rss_bytes"] is None
+    assert measurement["observations"]["andrea_measurement"]["peak_memory_bytes"] is None
     assert measurement["diagnostics"]["progress"]["percent"] == 62
     assert measurement["diagnostics"]["command_log"]["sha256"] == sha256_file(command_log)
     assert (
@@ -689,6 +977,8 @@ def test_failed_measurement_preserves_attributable_operational_evidence(
             repo_root=root,
             runtime_state=state,
             dataset_spec=dataset_spec,
+            stage="all_targets",
+            target_scope={"method": "all"},
             algorithm_seed=99,
             seed_derivation=derivation,
             resources=resources,
@@ -698,12 +988,33 @@ def test_failed_measurement_preserves_attributable_operational_evidence(
     )
 
 
-def _fake_measurement(dataset: dict[str, Any], *, budget: str) -> dict[str, Any]:
+def _fake_measurement(
+    dataset: dict[str, Any], *, budget: str, stage: str = "all_targets"
+) -> dict[str, Any]:
     dataset_id = dataset["id"]
     groups = len(dataset["groups"])
     genes = dataset["genes"]
+    resources = _execution_resources(
+        threads=8,
+        memory_gib=48.0 if budget == "full" else 32.0,
+    )
+    resources["timeout_seconds"] = 86_400.0 if budget == "full" else 43_200.0
+    scout_size = 128 if budget == "full" else 64
+    target_count = scout_size if stage == "scout" else genes
+    target_scope = (
+        {
+            "method": "sha256_gene_id",
+            "size": scout_size,
+            "salt": "spathi-scalability-scout-v1",
+            "dataset_id": dataset_id,
+        }
+        if stage == "scout"
+        else {"method": "all"}
+    )
     return {
         "dataset_id": dataset_id,
+        "stage": stage,
+        "target_scope": target_scope,
         "status": "completed",
         "network_mode": dataset["network_mode"],
         "policy_branch": "single_group" if groups == 1 else "multi_group",
@@ -723,16 +1034,9 @@ def _fake_measurement(dataset: dict[str, Any], *, budget: str) -> dict[str, Any]
             "genes": genes,
             "groups": groups,
             "transcription_factors": dataset["tfs"],
-            "targets": genes,
+            "targets": target_count,
         },
-        "execution_limits": {
-            "max_parallel_runs": 1,
-            "max_cores": 8,
-            "max_ram_gb": 48.0 if budget == "full" else 32.0,
-            "planner": "heuristic",
-            "planner_time_limit_seconds": 120.0 if budget == "full" else 60.0,
-            "inference_wall_time_limit_seconds": None,
-        },
+        "execution_limits": resources,
         "generation": {
             "wall_time_seconds": 1.0,
             "cache_hit": False,
@@ -740,22 +1044,26 @@ def _fake_measurement(dataset: dict[str, Any], *, budget: str) -> dict[str, Any]
             "expression_bytes": 50,
         },
         "inference": {
-            "andrea_wall_time_seconds": 2.0,
             "spathi_wall_time_seconds": 1.5,
-            "harness_wall_time_seconds": 2.5,
-            "peak_rss_bytes": 1024,
-            "rss_samples": 2,
+            "andrea_measurement": _andrea_measurement(
+                resources,
+                peak_memory_bytes=1024,
+            ),
+            "andrea_execution_measurement": _andrea_execution_measurement(
+                resources,
+                wall_time_seconds=2.0,
+            ),
             "cache_hit": False,
             "inference_artifact_bytes": 200,
             "spathi_output_bytes": 70,
-            "targets_requested": genes,
-            "targets_eligible": genes,
+            "targets_requested": target_count,
+            "targets_eligible": target_count,
             "targets_ineligible": 0,
-            "models_requested": genes * groups,
-            "models_completed": genes * groups,
-            "models_trained": genes * groups,
+            "models_requested": target_count * groups,
+            "models_completed": target_count * groups,
+            "models_trained": target_count * groups,
             "models_failed": 0,
-            "trees_fitted": genes * groups * 100,
+            "trees_fitted": target_count * groups * 100,
             "threads_requested": 8,
             "threads_effective": 8,
             "threads_available": 8,
@@ -782,10 +1090,16 @@ def _fake_failed_measurement(
         "tool_exit_code": 137,
     }
     completed["observations"] = {
-        "harness_wall_time_seconds": 2.5,
-        "tool_wall_time_seconds": 2.0,
-        "peak_rss_bytes": None,
-        "rss_samples": 0,
+        "andrea_measurement": _andrea_measurement(
+            completed["execution_limits"],
+            cpu_time_seconds=None,
+            peak_memory_bytes=None,
+            telemetry_status="partial",
+        ),
+        "andrea_execution_measurement": _andrea_execution_measurement(
+            completed["execution_limits"],
+            wall_time_seconds=2.0,
+        ),
     }
     completed["diagnostics"] = {
         "command_log": {
@@ -797,6 +1111,49 @@ def _fake_failed_measurement(
         "tool_log_tail": "Container was OOMKilled",
     }
     return completed
+
+
+def _attempt_decision(dataset_id: str, stage: str) -> dict[str, Any]:
+    return {
+        "dataset_id": dataset_id,
+        "lane_id": "fixture_lane",
+        "stage": stage,
+        "decision": "attempt",
+        "reason": "within_preregistered_resource_boundary",
+        "evidence_dataset_id": dataset_id if stage == "all_targets" else None,
+    }
+
+
+def _fake_dataset_result(
+    dataset: dict[str, Any],
+    *,
+    budget: str,
+    all_targets: dict[str, Any],
+) -> dict[str, Any]:
+    scout = _fake_measurement(dataset, budget=budget, stage="scout")
+    return {
+        "dataset_id": dataset["id"],
+        "status": all_targets["status"],
+        "network_mode": dataset["network_mode"],
+        "policy_branch": "single_group" if len(dataset["groups"]) == 1 else "multi_group",
+        "generation_seed": dataset["seed"],
+        "algorithm_seed": all_targets["algorithm_seed"],
+        "seed_derivation": all_targets["seed_derivation"],
+        "dimensions": {
+            "cells": sum(group["cells"] for group in dataset["groups"]),
+            "genes": dataset["genes"],
+            "groups": len(dataset["groups"]),
+            "transcription_factors": dataset["tfs"],
+            "targets": dataset["genes"],
+        },
+        "lane_ids": ["fixture_lane"],
+        "decisions": {
+            "scout": _attempt_decision(dataset["id"], "scout"),
+            "all_targets": _attempt_decision(dataset["id"], "all_targets"),
+        },
+        "scout": scout,
+        "all_targets": all_targets,
+    }
 
 
 def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Path) -> None:
@@ -832,10 +1189,24 @@ def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Pat
             "spathi_commit": "1" * 40,
         },
     }
-    measurements = [
-        _fake_measurement(datasets[0], budget="full"),
-        _fake_failed_measurement(datasets[1], budget="full", log_path=log_path, root=root),
+    dataset_results = [
+        _fake_dataset_result(
+            datasets[0],
+            budget="full",
+            all_targets=_fake_measurement(datasets[0], budget="full"),
+        ),
+        _fake_dataset_result(
+            datasets[1],
+            budget="full",
+            all_targets=_fake_failed_measurement(
+                datasets[1], budget="full", log_path=log_path, root=root
+            ),
+        ),
     ]
+    boundary_path = root / "experiments/v1/spathi/scalability-boundary.json"
+    boundary_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(REPO_ROOT / "experiments/v1/spathi/scalability-boundary.json", boundary_path)
+    boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
 
     results = scalability._result_document(
         repo_root=root,
@@ -858,7 +1229,7 @@ def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Pat
             "logical_cpus": 8,
             "host_memory_bytes": 64 * 1024**3,
         },
-        resources={"max_cores": 8, "max_ram_gb": 48},
+        resources=_execution_resources(threads=8, memory_gib=48.0),
         expression_preparation={
             "input_scale": "nonnegative_synthetic_counts_like",
             "normalization": "library-size-log1p",
@@ -866,7 +1237,9 @@ def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Pat
             "library_size_scope": "all_generated_genes_before_any_filtering",
             "formula": "log1p(target_sum * raw_value / per_cell_library_size)",
         },
-        measurements=measurements,
+        boundary_path=boundary_path,
+        boundary=boundary,
+        datasets=dataset_results,
     )
 
     validate_json(
@@ -881,6 +1254,35 @@ def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Pat
     assert results["summary"]["failure_kinds"]["oom"] == 1
 
 
+def test_infrastructure_failure_cannot_become_scalability_evidence(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "infrastructure.log"
+    log_path.write_text("Cannot connect to the Docker daemon\n", encoding="utf-8")
+    dataset = {
+        "id": "scale_infrastructure",
+        "seed": 10,
+        "genes": 500,
+        "tfs": 20,
+        "groups": [{"id": "g1", "cells": 100}],
+        "network_mode": "invariant",
+    }
+    failed = _fake_failed_measurement(
+        dataset,
+        budget="reduced",
+        log_path=log_path,
+        root=tmp_path,
+    )
+    failed["failure"]["failure_kind"] = "infrastructure_error"
+
+    with pytest.raises(BenchmarkConfigError, match="Infrastructure failure"):
+        scalability._attempt_resource_result(
+            failed,
+            full_target_count=500,
+            scout_target_count=64,
+        )
+
+
 def test_high_level_workflow_freezes_publication_scale_results(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -891,6 +1293,7 @@ def test_high_level_workflow_freezes_publication_scale_results(
         *scalability._IDENTITY_INPUTS,
         "experiments/v1/profiles/scalability-full.json",
         "experiments/v1/simulations/scale_stress/scale-full.json",
+        "experiments/v1/simulations/scale_stress/scale-reduced.json",
         "schemas/profile.schema.json",
     }:
         destination = root / relative
@@ -907,9 +1310,22 @@ def test_high_level_workflow_freezes_publication_scale_results(
     )
     monkeypatch.setattr(
         scalability,
-        "_run_one_dataset",
-        lambda **kwargs: _fake_measurement(kwargs["dataset"], budget="full"),
+        "host_execution_lease",
+        lambda **_kwargs: nullcontext(root / "execution.lock"),
     )
+    attempted: list[tuple[str, str, int]] = []
+
+    def fake_run(**kwargs: Any) -> dict[str, Any]:
+        attempted.append(
+            (
+                kwargs["dataset"]["id"],
+                kwargs["stage"],
+                kwargs["target_scope"].get("size", kwargs["dataset"]["genes"]),
+            )
+        )
+        return _fake_measurement(kwargs["dataset"], budget="full", stage=kwargs["stage"])
+
+    monkeypatch.setattr(scalability, "_run_one_dataset", fake_run)
     monkeypatch.setattr(
         scalability,
         "_host_resources",
@@ -993,6 +1409,16 @@ def test_high_level_workflow_freezes_publication_scale_results(
     assert results["evidence_role"] == "publication"
     assert results["claim_scope"] == "computational_scale_stress_only"
     assert results["summary"]["datasets_completed"] == len(results["datasets"])
+    assert results["summary"]["scouts_attempted"] == len(results["datasets"])
+    assert results["summary"]["all_targets_attempted"] == len(results["datasets"])
+    assert [stage for _dataset, stage, _targets in attempted] == [
+        stage for _dataset in results["datasets"] for stage in ("scout", "all_targets")
+    ]
+    assert all(targets == 128 for _dataset, stage, targets in attempted if stage == "scout")
+    assert all(
+        row["scout"]["algorithm_seed"] == row["all_targets"]["algorithm_seed"]
+        for row in results["datasets"]
+    )
     assert results["summary"]["all_completed"] is True
     assert state["interactive_report"].endswith("/scalability.html")
     assert state["reports"]["html"]["path"] == state["interactive_report"]

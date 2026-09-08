@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_ROOT/lib/common.sh"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: scripts/justify-efficiency.sh [--profile full|reduced] [--calibration-run-id ID]"
   echo "Runs or resumes the independent SPATHI efficiency-justification study."
@@ -10,17 +11,17 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "  --profile full|reduced    Use the full (default) or reduced evidence budget."
   echo "                            Calibration must use the same profile and current image."
   echo "  --calibration-run-id ID   Use a same-profile calibration with an explicit ID."
+  bench_resource_help
   echo "  -h, --help                Show this help."
   echo
-  echo "The command creates an efficiency_validation panel and runs the exact, target-"
-  echo "eligibility, adaptive-tree and combined policies in counterbalanced order. Full"
-  echo "uses non-inferiority and cost gates; reduced is descriptive and retains exact."
-  echo "A full provisional winner must also pass the conditional safety panel before the"
-  echo "production policy is frozen. Repeating the command resumes verified work."
+  echo "Development first screens the six declared component policies using only timing"
+  echo "and memory, then nominates exactly one policy without seeing validation outcomes."
+  echo "An independent, counterbalanced accuracy panel compares that nominee with exact"
+  echo "SPATHI. Full applies non-inferiority, cost, and conditional safety gates; reduced"
+  echo "is descriptive and retains exact. Repeating the command resumes verified work."
   exit 0
 fi
 
-source "$SCRIPT_ROOT/lib/common.sh"
 bench_environment
 
 bench_command justify-efficiency \

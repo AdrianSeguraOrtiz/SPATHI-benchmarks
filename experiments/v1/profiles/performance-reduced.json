@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "id": "performance-reduced",
+  "status": "runnable",
+  "purpose": "performance",
+  "description": "A descriptive computational-performance check on one representative medium scMultiSim dataset. It cannot select methods or support accuracy claims.",
+  "generation_jobs": [
+    {
+      "id": "scmultisim_performance_medium",
+      "scenario": "experiments/v1/simulations/scmultisim/validation/medium-scenario.json",
+      "simulator_runs": "experiments/v1/simulations/scmultisim/performance/medium-reduced-runs.json",
+      "dataset_role": "performance",
+      "split_id": "performance_v1",
+      "condition_id": "scmultisim_medium"
+    }
+  ],
+  "inference_batches": [
+    {
+      "id": "performance_catalog_source_reduced",
+      "kind": "baseline",
+      "dataset_role": "performance",
+      "generation_jobs": ["scmultisim_performance_medium"],
+      "replicate_indices": {"scmultisim_performance_medium": [1]},
+      "regime": "group_only",
+      "tools_params": "experiments/v1/inference/group_only/reduced-primary.json",
+      "run_metadata": "experiments/v1/inference/group_only/reduced-primary-metadata.json"
+    }
+  ],
+  "execution_class": "performance_full",
+  "planned_design": {
+    "simulators": ["scmultisim"],
+    "replicates_per_condition": 1,
+    "regimes": ["group_only"],
+    "factors": ["tool", "threads"],
+    "notes": [
+      "The same immutable dataset is supplied to every tool and thread count.",
+      "Warm-ups are excluded and the single measured system repetition is descriptive only.",
+      "The workflow executes one fresh logical inference at a time with full ANDREA outputs."
+    ]
+  },
+  "statistics": {"status": "not_applicable", "comparisons": []}
+}
