@@ -3,11 +3,11 @@
   "repositories": {
     "andrea": {
       "url": "https://github.com/AdrianSeguraOrtiz/ANDREA.git",
-      "commit": "2f3a5e69cb240a58a22142cc9196321e8d866c44"
+      "commit": "0e3c86973c55f7b6bb019678ec093e3c568cae3b"
     },
     "spathi": {
       "url": "https://github.com/AdrianSeguraOrtiz/SPATHI.git",
-      "commit": "8bb14c82ac5cbb0eb45c82408e40acae9b0fbcaa"
+      "commit": "06135b7b1cda3ad8ea24718d7ae236e741d6ab02"
     }
   }
 }
