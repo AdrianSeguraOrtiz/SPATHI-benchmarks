@@ -39,8 +39,9 @@ def test_publication_boundary_accepts_safe_versionable_inputs_and_ignores_work(
     report = validate_publication_boundary(root)
 
     assert report["status"] == "pass"
-    assert report["scope"] == "tracked_and_nonignored_untracked_files"
+    assert report["scope"] == "index_blobs_and_nonignored_worktree_files"
     assert report["files_checked"] == 2
+    assert report["representations_checked"] == 2
 
 
 def test_publication_boundary_rejects_a_versionable_raw_scientific_container(
@@ -102,4 +103,45 @@ def test_publication_boundary_rejects_source_provenance_metadata(tmp_path: Path)
     )
 
     with pytest.raises(BenchmarkConfigError, match="restricted metadata key"):
+        validate_publication_boundary(root)
+
+
+def test_publication_boundary_rejects_an_unapproved_utf8_table(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    (root / "cell-annotations.tsv").write_text(
+        "cell\ttype\tstate\ncell-1\tB\tmature\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="unapproved text table"):
+        validate_publication_boundary(root)
+
+
+def test_publication_boundary_validates_the_staged_blob_not_only_the_worktree(
+    tmp_path: Path,
+) -> None:
+    root = _repository(tmp_path)
+    staged_payload = {"input_path": ".." + "/outside.tsv"}
+    (root / "design.json").write_text(json.dumps(staged_payload) + "\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "design.json"], check=True)
+    (root / "design.json").write_text(
+        json.dumps({"input_path": "experiments/public/request.json"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="external path"):
+        validate_publication_boundary(root)
+
+
+def test_publication_boundary_validates_the_worktree_when_the_index_is_safe(
+    tmp_path: Path,
+) -> None:
+    root = _repository(tmp_path)
+    subprocess.run(["git", "-C", str(root), "add", "design.json"], check=True)
+    (root / "design.json").write_text(
+        json.dumps({"input_path": ".." + "/outside.tsv"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="external path"):
         validate_publication_boundary(root)

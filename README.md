@@ -3,8 +3,8 @@
 Reproducible experiments for calibrating [SPATHI](https://github.com/AdrianSeguraOrtiz/SPATHI),
 justifying its computational policies, comparing its frozen production configuration with
 gene-regulatory-network inference tools orchestrated by
-[ANDREA](https://github.com/AdrianSeguraOrtiz/ANDREA), and testing it across a prospectively
-declared public synthetic scale grid.
+[ANDREA](https://github.com/AdrianSeguraOrtiz/ANDREA), and testing its feasibility and parallel
+scaling on prospectively declared public synthetic inputs.
 
 This is an independent repository. SPATHI owns the method, ANDREA owns the standardized
 simulation, inference and evaluation contracts, and SPATHI-benchmarks owns the experimental
@@ -21,8 +21,9 @@ The publication workflow is deliberately sequential:
 | Dimensional transfer | `dimensional_transfer` | reduced operational checks or full post-freeze descriptive one-axis scale contrasts |
 | Held-out comparison | `test` | confirmatory dynamic-network accuracy and exploratory analyses |
 | Scalability | public synthetic scale grid | completion, attributable failures and resource evidence across declared engineering stress levels |
+| Performance | fixed small and medium synthetic inputs | isolated cross-tool runtime, memory, output size and parallel-scaling evidence |
 
-The five natural commands are:
+The six natural commands are:
 
 ```bash
 scripts/calibrate.sh
@@ -30,6 +31,7 @@ scripts/justify-efficiency.sh
 scripts/dimensional-transfer.sh
 scripts/compare.sh
 scripts/scalability.sh
+scripts/performance.sh
 ```
 
 They use the `full` budget by default. `full` is the evidence budget intended for publication;
@@ -41,11 +43,12 @@ scripts/justify-efficiency.sh --profile reduced
 scripts/dimensional-transfer.sh --profile reduced
 scripts/compare.sh --profile reduced
 scripts/scalability.sh --profile reduced
+scripts/performance.sh --profile reduced
 ```
 
 Do not mix budgets. A reduced calibration can feed only the reduced efficiency study, and a
-reduced production policy can feed only reduced dimensional-transfer, comparison and scalability
-workflows. Reduced results must not be presented as substitutes for the full analyses.
+reduced production policy can feed only reduced dimensional-transfer, comparison, scalability and
+performance workflows. Reduced results must not be presented as substitutes for the full analyses.
 
 All high-level workflows are content-bound and resumable. Repeating the same command verifies and
 reuses completed work. If several compatible upstream workflows exist, select one explicitly with
@@ -102,12 +105,23 @@ scripts/calibrate.sh [--profile full|reduced] [--run-id ID] [--report-only]
 Calibration executes six bounded stages: `geometry`, `estimator`, `interaction`,
 `estimator_scale_transfer`, `convergence` and `validation`. The scale-transfer gate crosses the six
 declared `max_features` rules over at most three interaction finalists on an independent 1,000-TF,
-2,200-gene development subpanel; it does not add an unchanged inherited candidate and advances at
-most two configurations. The other development stages use the ordinary development panel, and
+2,200-gene development subpanel and advances at most two configurations. Interaction and
+scale-transfer use explicit crossed variants without an unchanged inherited candidate. Their
+upstream shortlists preserve three preregistered identities in the parameters that survive the next
+cross, so candidate counts cannot shrink through duplicate effective configurations. The other
+development stages use the ordinary development panel, and
 validation chooses one finalist on an independent validation panel. The objective is directed
 AUPR, with deterministic tie-breakers for stability, simplicity and canonical configuration ID.
 Runtime and memory remain reported evidence but do not select a scientific configuration;
 efficiency is justified later on its dedicated panel.
+
+The reduced calibration declares exactly 431 physical SPATHI fits and 527 logical networks; the full
+calibration declares exactly 1,762 physical fits and 2,482 logical networks. Candidate expansion
+rejects duplicate effective configurations instead of silently shrinking either preregistered
+cardinality. The difference between physical and logical counts is deliberate:
+each convergence plan fits one 1,000-tree forest and publishes four exact, independently evaluable
+prefix networks at 250, 500, 750 and 1,000 trees. Runtime schedules report physical fits and logical
+results as separate quantities.
 
 Target eligibility remains `all` and adaptive trees remain disabled during calibration. These
 cost-saving policies are not silently selected as ordinary hyperparameters. The result is
@@ -134,11 +148,15 @@ stages.
 scripts/justify-efficiency.sh [--profile full|reduced] [--calibration-run-id ID]
 ```
 
-This phase uses data that are disjoint from calibration and test. It compares the calibrated exact
-arm with three predeclared policies: automatic target eligibility, adaptive tree stopping, and
-their combination. A policy is adoptable only if it passes accuracy non-inferiority, target and
-truth-edge coverage where applicable, complete execution, and a strict runtime-benefit gate.
-Development may nominate fewer than three policies. If it nominates none, the held-out step is a
+This phase uses data that are disjoint from calibration and test. Development scouts finite grids
+for automatic target eligibility and adaptive tree stopping, then remeasures exact SPATHI, both
+component nominees and their constructed combination in one serial, deterministically
+counterbalanced joint confirmation. The same timing seed is used for all four arms and held-back
+seeds supply their paired accuracy evidence before at most one global nominee is frozen. This
+requires 75 physical fits in reduced and 285 in full.
+Independent validation compares only that nominee with exact SPATHI. It is adoptable only if it
+passes accuracy non-inferiority, target and truth-edge coverage where applicable, complete
+execution, and a strict runtime-benefit gate. If development nominates none, the held-out step is a
 reference-only execution audit: it computes no empty contrast or multiplicity adjustment and
 freezes exact SPATHI for every downstream phase.
 
@@ -148,8 +166,8 @@ pre-freeze efficiency-safety veto described below. If no formal candidate passes
 provisional candidate fails safety, the exact arm is frozen in `production-config.json`.
 The reduced budget reports point estimates and observed completeness only: it emits no confidence
 interval, inferential pass/fail field or adoption claim, and freezes the exact arm. That file is
-the only SPATHI configuration accepted by downstream dimensional-transfer, comparison and
-scalability workflows.
+the only SPATHI configuration accepted by downstream dimensional-transfer, comparison,
+scalability and performance workflows.
 
 Candidate selection is deliberately conservative. Any formally bound execution failure in a
 candidate arm invalidates the global relative selection and retains the exact policy; the workflow
@@ -222,7 +240,7 @@ The full budget varies genes, TFs and cells one axis at a time and provides thre
 one-axis scale contrasts. The TF contrast also changes the regulatory topology and which TFs
 regulate targets, so it does not identify a pure causal effect of candidate-TF count. Neither
 budget reselects the policy, enters the confirmatory external-tool ranking or justifies biological
-biological realism. If the production policy differs from the exact calibrated arm, the two
+realism. If the production policy differs from the exact calibrated arm, the two
 predeclared scale anchors receive an exact-policy diagnostic; that diagnostic does not turn the
 high-dimensional endpoints into exact-versus-production comparisons.
 
@@ -286,21 +304,21 @@ Scalability runs the frozen production policy on deterministically generated exp
 whose cell, gene, TF and group dimensions span a rounded, author-defined public stress grid. It records
 completion and computational cost without reopening calibration or efficiency selection.
 
-Each dimensional shape runs separately so its resources remain attributable. The workflow records
-generation, ANDREA, SPATHI and harness wall times; sampled peak RSS for the SPATHI container process
-tree; expression, artifact and SPATHI-output sizes; requested, eligible and ineligible targets;
-requested and completed models; and fitted trees. A completed measurement may be resumed and
-verified, but fresh scale evidence cannot be reconstructed from a pre-existing inference cache hit.
-Another container using the same SPATHI image is rejected while RSS is sampled, because its memory
-could not be attributed unambiguously.
+Each dimensional shape first runs an outcome-blind SHA-256 target scout: 64 targets in reduced and
+128 in full. Scout and all-target stages use the same algorithm seed. Only canonical end-to-end
+ANDREA execution wall time and the physical container peak-memory measurement can decide whether
+all targets are attempted. The committed
+contract uses 80% of a preregistered 12-hour reduced or 24-hour full wall envelope and 80% of the
+RAM actually allocated to the container. The same 12/24-hour value is enforced by ANDREA as the
+physical-task timeout. A reached boundary propagates along the dataset's frozen
+progression lane and skipped stages are recorded exactly as
+`not_attempted_after_preregistered_resource_boundary`.
 
-An attributable SPATHI execution failure is a valid scalability outcome, never a successful
-completion. OOM, timeout, tool and distinguishable infrastructure failures are retained per
-dataset with the exact resource limits, elapsed time, available RSS samples, last valid progress
-snapshot and a content-verified command log. The panel still publishes its report with
-`all_completed=false`, and continues with later shapes. This exception applies only when ANDREA
-produced a failed report matching the exact requested dataset, run and tool origin; a missing,
-ambiguous, tampered or identity-inconsistent report aborts publication as a contract error.
+The workflow records one immutable generation clock, SPATHI core time and canonical ANDREA
+end-to-end time, plus container CPU time, physical-container peak memory, output sizes, target
+eligibility, models and fitted trees. OOM, timeout and attributable SPATHI tool failures remain
+visible. Infrastructure, identity, telemetry or contract failures abort the workflow and never
+become scientific resource-boundary evidence.
 
 The scale-stress generator is computational rather than biological. Its dropout, latent structure,
 noise and regulatory model are explicit public synthetic scenarios. Consequently, this phase supports statements about
@@ -327,27 +345,77 @@ Outputs are written below:
 
 ```text
 work/v1/workflows/scalability/<budget>/<flow-id>/
-├── materialized/<dataset>/
-├── measurements/<dataset>.json
+├── materialized/<dataset>/<scout|all_targets>/
+├── measurements/<dataset>/<scout|all_targets>.json
 ├── scalability-results.json
 └── workflow.json
 
-work/v1/scalability_<budget>_<dataset>/<flow-id>/
+work/v1/scalability_<budget>_<dataset>_<scout|all_targets>/<flow-id>/
 work/v1/reports/<budget>/<flow-id>/scalability.html
 work/v1/reports/<budget>/<flow-id>/scalability-report.manifest.json
 ```
 
+### `performance.sh`
+
+```bash
+scripts/performance.sh [--profile full|reduced] [--efficiency-run-id ID]
+```
+
+Performance compares the already frozen SPATHI production policy with catalog tools under a
+separate computational-only protocol. Every measured condition is a fresh ANDREA invocation with
+full outputs, an explicit thread count and a deterministic CPU set; one logical invocation runs at
+a time. CPU sets are nested and topology-aware: one logical CPU from each physical core is assigned
+before simultaneous-multithreading siblings. One warm-up per dataset–method–thread condition is
+retained for audit and excluded from all summaries. System repetitions keep the same algorithm
+seed, so they estimate execution noise rather than biological or algorithmic variation.
+
+Reported wall time is ANDREA's canonical execution-level measurement, including input verification
+and preparation, scheduling, merging, and requested output materialization. The study is therefore an end-to-end software comparison rather
+than a kernel-only microbenchmark.
+
+The reduced descriptive check uses one medium scMultiSim dataset, SPATHI, GENIE3, GRNBoost2 and
+inferCSN at 1 and 8 threads: eight measured runs plus eight warm-ups. The full publication panel
+uses fixed small and medium scMultiSim datasets, adds ARACNe3 and TIGRESS, and measures 1, 2, 4 and
+8 threads with three system repetitions: 144 measured runs plus 48 warm-ups. pySCENIC and
+order-aware configurations are deliberately outside this panel. The workflow reports wall and CPU
+time, the overlap upper bound from physical-container cgroup memory peaks (excluding the ANDREA host
+process), exact output bytes, completion, OOM events and semantic network equivalence. Speedup and
+parallel efficiency are emitted only when all repetitions and thread endpoints complete with
+identical canonical networks; otherwise they remain null with an explicit reason. ANDREA does not
+expose block-device I/O counters in the v1 telemetry contract, so read/write I/O is explicitly
+unavailable rather than estimated.
+
+Performance uses its own fixed, public synthetic datasets and budget-specific seeds, and never
+reads their truth or evaluates accuracy. Its observations cannot select a method, tune a parameter,
+reopen the production policy or enter the held-out accuracy ranking.
+
+Outputs are written below:
+
+```text
+work/v1/workflows/performance/<budget>/<flow-id>/
+├── materialized/performance-materialization.json
+├── runs/<task-id>/
+├── performance-results.json
+├── performance-measurements.csv
+├── performance-summary.csv
+└── workflow.json
+
+work/v1/reports/<budget>/<flow-id>/performance.html
+work/v1/reports/<budget>/<flow-id>/performance-report.manifest.json
+```
+
 ## Interactive reports
 
-All five phases generate an English, self-contained HTML report automatically. Plotly, styles and
+All six phases generate an English, self-contained HTML report automatically. Plotly, styles and
 report data are embedded, so no server or network access is required. A provenance manifest beside
 each HTML file separates frozen scientific inputs from renderer inputs and records their hashes.
 Reports present existing evidence; they do not rerank candidates, recompute tests or change a
 production decision.
 
-Efficiency and scalability publish their report bundles transactionally. Their `workflow.json`
-remains in `publishing` while the HTML and provenance manifest are being written and changes to
-`complete` only after both canonical paths and SHA-256 hashes have been recorded under `reports`.
+Efficiency, scalability and performance publish their report bundles transactionally. Their
+`workflow.json` remains in `publishing` while the HTML and provenance manifest are being written
+and changes to `complete` only after both canonical paths and SHA-256 hashes have been recorded
+under `reports`.
 On resume, missing report members are rebuilt deterministically; an existing member whose bytes no
 longer match the frozen bundle is rejected rather than silently overwritten.
 
@@ -363,6 +431,9 @@ contrasts; reduced reports explicitly show that no scale contrast was estimated.
 The scalability report shows declared dimensional coverage, per-dataset completion, target and
 model accounting, timings, memory, fitted trees, artifact sizes and attributable failures without
 presenting those data as biological-accuracy evidence.
+The performance report shows the frozen host and CPU assignments, measured endpoints, completion,
+OOM and semantic-equivalence audits, plus speedup and parallel efficiency only for globally
+equivalent complete conditions.
 
 ## Evidence budgets and panels
 
@@ -373,24 +444,26 @@ Reduced datasets are not prefixes or reused subsets of full datasets.
 
 | Phase | `reduced` | `full` |
 | --- | --- | --- |
-| Ordinary calibration development panel | 8 datasets, 2 algorithmic seeds per stage (geometry uses 7) | 24 datasets, 5 algorithmic seeds per stage (geometry uses 21) |
+| Ordinary calibration development panel | 8 datasets; 1 scout + 1 confirmation seed per multi-fidelity stage; 2 convergence seeds | 24 datasets; 1 scout + 2 confirmation seeds per multi-fidelity stage; 5 convergence seeds |
 | Calibration estimator scale-transfer | 1 dataset, 2 algorithmic seeds | 3 datasets, 3 algorithmic seeds |
 | Calibration validation | 8 datasets, 2 algorithmic seeds | 24 datasets, 5 algorithmic seeds |
 | Efficiency validation | 5 datasets, 2 algorithmic seeds | 25 datasets (5 per stratum), 5 algorithmic seeds |
 | Pre-freeze efficiency safety | not run | 18 datasets (3 in each of 6 conditions), 1 common paired algorithm seed |
 | Dimensional transfer | 4 moderate/routing conditions, 1 dataset each; 1 algorithmic seed; no scale contrasts | 7 conditions; 3 datasets for the 3,000-gene anchor and 1 for each other condition; 1 algorithmic seed |
-| Held-out comparison | 10 datasets; 3 algorithmic seeds per stochastic configuration and 1 per deterministic configuration | 50 datasets; 3 algorithmic seeds per stochastic configuration and 1 per deterministic configuration |
+| Held-out comparison | 10 datasets; 3 algorithmic seeds per stochastic configuration and 1 per deterministic configuration | 60 datasets (40 dynamic and 20 invariant controls); 3 algorithmic seeds per stochastic configuration and 1 per deterministic configuration |
 | Scalability | 2 dimensional stress cases | 6 dynamic scale cases plus 1 invariant control |
+| Performance | 8 measured runs plus 8 excluded warm-ups: 4 methods, 1 dataset, 1/8 threads, 1 repetition | 144 measured runs plus 48 excluded warm-ups: 6 methods, 2 datasets, 1/2/4/8 threads, 3 repetitions |
 
-The committed v1 execution ceiling is eight logical CPU cores and 48 GB RAM across all concurrent
-runs. Resource values passed to one ANDREA inference are per-run quotas, so the profile validator
-also checks `max_parallel_runs × quota` against the global ceiling. Individual phases may impose a
-lower ceiling. Every result records the observed host and concrete limits; changing them defines a
-new computational study rather than silently mixing cost measurements.
+Execution capacity is resolved from the current machine rather than embedded in a scientific
+profile. The launcher detects affinity, cgroup limits, available RAM, CPU topology and storage,
+then freezes any optional operator ceilings and reserves in the runtime plan. Resource values
+passed to one ANDREA inference remain per-run quotas, and the rolling scheduler never admits CPU or
+RAM claims beyond the resolved capacity. Every result records both the observed host and concrete
+limits so timing evidence from unlike runtime plans is not silently pooled.
 
 Dyngen and scMultiSim provide dynamic group-specific truth for calibration and the main comparison.
 SERGIO, BoolODE and GeneSPIDER2 provide invariant-network controls. The full held-out panel contains
-30 dynamic datasets and 20 invariant controls. The reduced comparison contains one independent
+40 dynamic datasets and 20 invariant controls. The reduced comparison contains one independent
 dataset from each of the same ten conditions.
 
 For the ordinary scMultiSim panels, role-exclusive topology means that the complete committed graph
