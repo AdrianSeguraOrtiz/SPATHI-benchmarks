@@ -11,7 +11,6 @@ import pytest
 from spathi_bench.calibration import (
     CalibrationError,
     CandidateConfiguration,
-    _validate_canonical_parent_expansion,
     build_andrea_requests,
     build_stage_profile,
     expand_stage_candidates,
@@ -25,6 +24,7 @@ from spathi_bench.calibration import (
     stage_profile_id,
     validate_calibration_panel,
 )
+from spathi_bench.calibration_design import calibration_ledger, calibration_phase
 from spathi_bench.calibration_materialization import materialize_calibration_stage
 from spathi_bench.config import (
     BenchmarkConfigError,
@@ -46,6 +46,16 @@ def _seeds(search: dict[str, Any], budget: str, stage: str) -> tuple[int, ...]:
     return tuple(search["calibration_budgets"][budget]["algorithmic_seeds"][stage])
 
 
+def _phase_seeds(search: dict[str, Any], budget: str, stage: str, fidelity: str) -> tuple[int, ...]:
+    seeds = _seeds(search, budget, stage)
+    phase = calibration_phase(search, budget, stage, fidelity)
+    return tuple(seeds[index - 1] for index in phase.algorithm_seed_indices)
+
+
+def _dataset_ids(count: int) -> tuple[str, ...]:
+    return tuple(f"dataset_{index:03d}" for index in range(1, count + 1))
+
+
 def _copy_calibration_repository(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     for directory in ("schemas", "experiments"):
@@ -60,6 +70,8 @@ def _summary_rows(
     *,
     role: str,
     seeds: tuple[int, ...],
+    fidelity: str,
+    dataset_ids: tuple[str, ...] = ("dataset_a", "dataset_b"),
     aupr: dict[tuple[str, str, int], float] | None = None,
     wall_time: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
@@ -73,9 +85,9 @@ def _summary_rows(
             "dataset_id": dataset_id,
             "algorithm_seed": seed,
             "run_id": (
-                f"validation__{candidate.configuration_id}__seed_{seed}"
+                f"validation__{candidate.configuration_id}__final__seed_{seed}"
                 if role == "validation"
-                else f"{candidate.configuration_id}__seed_{seed}"
+                else f"{candidate.configuration_id}__{fidelity}__seed_{seed}"
             ),
             "execution_sha256": "1" * 64,
             "aupr_directed": aupr.get((candidate.configuration_id, dataset_id, seed), 0.5),
@@ -85,7 +97,7 @@ def _summary_rows(
             "group_contexts": ["group:a", "group:b"],
         }
         for candidate in candidates
-        for dataset_id in ("dataset_a", "dataset_b")
+        for dataset_id in dataset_ids
         for seed in seeds
     ]
 
@@ -93,9 +105,27 @@ def _summary_rows(
 def _stage_chain(search: dict[str, Any]) -> dict[str, tuple[CandidateConfiguration, ...]]:
     geometry = expand_stage_candidates(search, "geometry")
     estimator = expand_stage_candidates(search, "estimator", parents=geometry[:3])
-    interaction = expand_stage_candidates(search, "interaction", parents=estimator[:3])
+    estimator_parents = tuple(
+        next(
+            candidate
+            for candidate in estimator
+            if candidate.parent_configuration_id == parent.configuration_id
+            and candidate.variant_id == "inherited"
+        )
+        for parent in geometry[:3]
+    )
+    interaction = expand_stage_candidates(search, "interaction", parents=estimator_parents)
+    interaction_parents = tuple(
+        next(
+            candidate
+            for candidate in interaction
+            if candidate.parent_configuration_id == parent.configuration_id
+            and candidate.variant_id == "extra_trees_sqrt_leaf_2"
+        )
+        for parent in estimator_parents
+    )
     scale_transfer = expand_stage_candidates(
-        search, "estimator_scale_transfer", parents=interaction[:3]
+        search, "estimator_scale_transfer", parents=interaction_parents
     )
     convergence = expand_stage_candidates(search, "convergence", parents=scale_transfer[:2])
     return {
@@ -143,6 +173,7 @@ def test_calibration_panel_rejects_systematic_context_omission() -> None:
         candidate,
         role="development",
         seeds=_seeds(search, "full", "geometry"),
+        fidelity="scout",
     )
     panel = _panel_for_rows(rows, contexts=("group:a", "group:b", "group:c"))
 
@@ -157,6 +188,7 @@ def test_calibration_panel_requires_the_complete_dataset_run_product() -> None:
         candidate,
         role="development",
         seeds=_seeds(search, "full", "geometry"),
+        fidelity="scout",
     )
     panel = _panel_for_rows(rows)
     validate_calibration_panel(panel, rows, expected_role="development")
@@ -182,6 +214,10 @@ def test_search_is_bounded_staged_and_covers_current_scientific_parameters() -> 
     ]
     assert {20, 100} <= {
         item["n_components"] for item in geometry_overrides if "n_components" in item
+    }
+    assert {"auto", "full", "randomized"} == {
+        search["base_configuration"]["pca_svd_solver"],
+        *(item["pca_svd_solver"] for item in geometry_overrides if "pca_svd_solver" in item),
     }
     assert {"none", "standard"} <= {
         search["base_configuration"]["distance_standardization"],
@@ -213,12 +249,79 @@ def test_search_is_bounded_staged_and_covers_current_scientific_parameters() -> 
     assert search["base_configuration"]["distance_metric"] == "cosine"
     assert search["base_configuration"]["n_estimators"] == 250
     assert search["base_configuration"]["max_features"] == "sqrt"
+    interaction_stage = search["stages"][2]
+    scale_transfer_stage = search["stages"][3]
+    assert interaction_stage["include_inherited_configuration"] is False
+    assert interaction_stage["parent_expansion_identity"] == {
+        "excluded_parameters": [
+            "tree_method",
+            "max_features",
+            "min_samples_leaf",
+            "max_depth",
+            "bootstrap",
+        ],
+        "required_distinct_parents": 3,
+    }
+    assert scale_transfer_stage["parent_expansion_identity"] == {
+        "excluded_parameters": ["max_features"],
+        "required_distinct_parents": 3,
+    }
     assert search["calibration_constraints"]["fixed_parameters"] == {
-        "pca_svd_solver": "auto",
         "bandwidth": "auto",
         "target_eligibility": "all",
         "adaptive_trees": False,
     }
+
+
+def test_multifidelity_ledgers_are_exact_and_prospectively_independent() -> None:
+    search = load_search_space(REPO_ROOT)
+    expected = {
+        "reduced": (
+            [64, 18, 144, 24, 72, 24, 18, 3, 32, 32],
+            [64, 18, 144, 24, 72, 24, 18, 3, 128, 32],
+            431,
+            527,
+        ),
+        "full": (
+            [112, 168, 288, 288, 144, 192, 54, 36, 240, 240],
+            [112, 168, 288, 288, 144, 192, 54, 36, 960, 240],
+            1762,
+            2482,
+        ),
+    }
+    for budget, (physical, logical, physical_total, logical_total) in expected.items():
+        ledger = calibration_ledger(search, budget)
+        assert [phase.expected_physical_fits for phase in ledger] == physical
+        assert [phase.expected_logical_results for phase in ledger] == logical
+        assert sum(physical) == physical_total
+        assert sum(logical) == logical_total
+        contract = search["calibration_budgets"][budget]["multifidelity"]
+        assert contract["independent_profile"] is True
+        assert contract["may_consume_other_profile_outcomes"] is False
+
+    for stage in (
+        "geometry",
+        "estimator",
+        "interaction",
+        "estimator_scale_transfer",
+    ):
+        for budget in ("reduced", "full"):
+            scout = calibration_phase(search, budget, stage, "scout")
+            assert scout.candidate_source == "all_expanded"
+            assert scout.candidate_count > scout.advance_limit
+
+
+def test_high_tf_scout_is_hash_only_and_confirmation_uses_all_targets() -> None:
+    search = load_search_space(REPO_ROOT)
+    for budget in ("reduced", "full"):
+        scout = calibration_phase(search, budget, "estimator_scale_transfer", "scout")
+        confirmation = calibration_phase(search, budget, "estimator_scale_transfer", "confirmation")
+        assert scout.target_scope == {
+            "method": "sha256_gene_id",
+            "size": 256,
+            "salt": "spathi-calibration-high-tf-v1",
+        }
+        assert confirmation.target_scope == {"method": "all"}
 
 
 def test_conditional_policy_has_one_total_routing_rule_and_shared_estimators() -> None:
@@ -242,11 +345,11 @@ def test_conditional_policy_has_one_total_routing_rule_and_shared_estimators() -
 def test_geometry_expansion_and_requests_are_deterministic_and_policy_aware() -> None:
     search = load_search_space(REPO_ROOT)
     candidates = expand_stage_candidates(search, "geometry")
-    runs = expand_stage_runs(search, "geometry", "full")
-    seeds = _seeds(search, "full", "geometry")
+    runs = expand_stage_runs(search, "geometry", "full", "scout")
+    seeds = _phase_seeds(search, "full", "geometry", "scout")
 
     assert candidates[0].variant_id == "base"
-    assert len(candidates) == 14
+    assert len(candidates) == 16
     assert len(runs) == len(candidates) * len(seeds)
     assert [run.algorithm_seed for run in runs[: len(seeds)]] == list(seeds)
     assert runs[0].parameters["random_seed"] == seeds[0]
@@ -274,6 +377,7 @@ def test_materialized_geometry_profile_validates_the_complete_canonical_run(
         repo_root=repo,
         stage_id="geometry",
         calibration_budget="reduced",
+        fidelity="scout",
         parent_ranking_path=None,
         output_dir=bundle,
         profile_output=profile_path,
@@ -328,8 +432,10 @@ def test_reduced_and_full_algorithmic_seed_domains_are_disjoint() -> None:
         "validation",
     ):
         assert set(_seeds(search, "reduced", stage)).isdisjoint(_seeds(search, "full", stage))
-    assert stage_profile_id("interaction", "reduced") == "calibration-reduced-interaction"
-    assert stage_profile_id("validation", "full") == "selection-full-validation"
+    assert stage_profile_id("interaction", "reduced", "confirmation") == (
+        "calibration-reduced-interaction-confirmation"
+    )
+    assert stage_profile_id("validation", "full", "final") == ("selection-full-validation-final")
 
 
 def test_stage_profile_cannot_mix_budget_and_template() -> None:
@@ -340,15 +446,17 @@ def test_stage_profile_cannot_mix_budget_and_template() -> None:
         template,
         "geometry",
         "reduced",
+        "scout",
         bundle_path="work/calibration/reduced/geometry/plan",
         search_space=load_search_space(REPO_ROOT),
     )
-    assert profile["id"] == "calibration-reduced-geometry"
+    assert profile["id"] == "calibration-reduced-geometry-scout"
     assert {job["split_id"] for job in profile["generation_jobs"]} == {"development_v1"}
     scale_profile = build_stage_profile(
         template,
         "estimator_scale_transfer",
         "reduced",
+        "scout",
         bundle_path="work/calibration/reduced/estimator-scale-transfer/plan",
         search_space=load_search_space(REPO_ROOT),
     )
@@ -363,6 +471,7 @@ def test_stage_profile_cannot_mix_budget_and_template() -> None:
             template,
             "geometry",
             "full",
+            "scout",
             bundle_path="work/calibration/full/geometry/plan",
             search_space=load_search_space(REPO_ROOT),
         )
@@ -376,10 +485,28 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
     reverse = expand_stage_candidates(search, "estimator", parents=tuple(reversed(parents)))
 
     assert forward == reverse
-    assert len(forward) <= 3 * 12
-    interaction = expand_stage_candidates(search, "interaction", parents=forward[:3])
+    assert len(forward) == 3 * 12
+    estimator_parents = tuple(
+        next(
+            candidate
+            for candidate in forward
+            if candidate.parent_configuration_id == parent.configuration_id
+            and candidate.variant_id == "inherited"
+        )
+        for parent in parents
+    )
+    interaction = expand_stage_candidates(search, "interaction", parents=estimator_parents)
+    interaction_parents = tuple(
+        next(
+            candidate
+            for candidate in interaction
+            if candidate.parent_configuration_id == parent.configuration_id
+            and candidate.variant_id == "extra_trees_sqrt_leaf_2"
+        )
+        for parent in estimator_parents
+    )
     scale_transfer = expand_stage_candidates(
-        search, "estimator_scale_transfer", parents=interaction[:3]
+        search, "estimator_scale_transfer", parents=interaction_parents
     )
     expected_scale_variants = {
         "high_tf_features_sqrt",
@@ -390,7 +517,7 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
         "high_tf_features_fraction_100",
     }
     assert len(scale_transfer) == 3 * len(expected_scale_variants)
-    for parent in interaction[:3]:
+    for parent in interaction_parents:
         assert {
             candidate.variant_id
             for candidate in scale_transfer
@@ -398,8 +525,9 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
         } == expected_scale_variants
     assert all(candidate.variant_id != "inherited" for candidate in scale_transfer)
     convergence = expand_stage_candidates(search, "convergence", parents=scale_transfer[:2])
-    assert len(interaction) <= 3 * 6
-    assert len(convergence) <= 3 * 4
+    assert len(interaction) == 3 * 6
+    assert all(candidate.variant_id != "inherited" for candidate in interaction)
+    assert len(convergence) == 2 * 4
     assert {candidate.parameters["n_estimators"] for candidate in convergence} == {
         250,
         500,
@@ -408,7 +536,7 @@ def test_later_stages_are_bounded_and_parent_order_independent() -> None:
     }
 
 
-def test_scale_transfer_deduplicates_equivalent_parent_expansions() -> None:
+def test_scale_transfer_rejects_equivalent_parent_expansions() -> None:
     search = load_search_space(REPO_ROOT)
     geometry = expand_stage_candidates(search, "geometry")[0]
     estimator = next(
@@ -423,27 +551,40 @@ def test_scale_transfer_deduplicates_equivalent_parent_expansions() -> None:
         if candidate.variant_id in {"extra_trees_sqrt_leaf_2", "extra_trees_fraction_050_leaf_2"}
     )
 
-    candidates = expand_stage_candidates(
-        search,
-        "estimator_scale_transfer",
-        parents=parents,
+    assert len(parents) == 2
+    with pytest.raises(CalibrationError, match="duplicate effective configurations"):
+        expand_stage_candidates(
+            search,
+            "estimator_scale_transfer",
+            parents=parents,
+        )
+
+
+def test_interaction_rejects_parents_that_only_differ_in_overwritten_parameters() -> None:
+    search = load_search_space(REPO_ROOT)
+    geometry = expand_stage_candidates(search, "geometry")[0]
+    estimators = expand_stage_candidates(search, "estimator", parents=(geometry,))
+    parents = tuple(
+        candidate
+        for candidate in estimators
+        if candidate.variant_id in {"extra_trees_features_log2", "extra_trees_leaf_2"}
     )
 
     assert len(parents) == 2
-    assert len(candidates) == 6
-    assert len({candidate.parent_configuration_id for candidate in candidates}) == 1
-    _validate_canonical_parent_expansion(
-        search,
-        "estimator_scale_transfer",
-        parents,
-        candidates,
-    )
-    with pytest.raises(CalibrationError, match="canonical parent expansion"):
-        _validate_canonical_parent_expansion(
+    with pytest.raises(CalibrationError, match="duplicate effective configurations"):
+        expand_stage_candidates(search, "interaction", parents=parents)
+
+
+def test_scout_run_expansion_requires_the_declared_candidate_cardinality() -> None:
+    search = load_search_space(REPO_ROOT)
+    geometry = expand_stage_candidates(search, "geometry")
+    with pytest.raises(CalibrationError, match="requires exactly 36 distinct logical candidates"):
+        expand_stage_runs(
             search,
-            "estimator_scale_transfer",
-            parents,
-            candidates[:-1],
+            "estimator",
+            "full",
+            "scout",
+            parents=(geometry[0],),
         )
 
 
@@ -461,11 +602,17 @@ def test_expansion_rejects_missing_wrong_or_excess_parents() -> None:
 def test_stage_selection_uses_aupr_before_stability_and_simplicity() -> None:
     search = load_search_space(REPO_ROOT)
     candidates = expand_stage_candidates(search, "geometry")
-    seeds = _seeds(search, "full", "geometry")
+    phase = calibration_phase(search, "full", "geometry", "scout")
+    seeds = _phase_seeds(search, "full", "geometry", "scout")
+    dataset_ids = _dataset_ids(phase.dataset_count)
     winner = candidates[1]
     aupr = {
         (winner.configuration_id, dataset_id, seed): score
-        for dataset_id, score in (("dataset_a", 0.9), ("dataset_b", 0.3))
+        for dataset_id, score in zip(
+            dataset_ids,
+            (0.9 if index % 2 == 0 else 0.3 for index in range(len(dataset_ids))),
+            strict=True,
+        )
         for seed in seeds
     }
     ranking = rank_stage_candidates(
@@ -476,13 +623,18 @@ def test_stage_selection_uses_aupr_before_stability_and_simplicity() -> None:
             candidates,
             role="development",
             seeds=seeds,
+            fidelity="scout",
+            dataset_ids=dataset_ids,
             aupr=aupr,
             wall_time={winner.configuration_id: 1000.0},
         ),
         calibration_budget="full",
+        fidelity="scout",
     )
     assert ranking[0].candidate == winner
-    assert ranking[0].hierarchical_aupr == pytest.approx(0.6)
+    assert ranking[0].hierarchical_aupr == pytest.approx(
+        sum(0.9 if index % 2 == 0 else 0.3 for index in range(len(dataset_ids))) / len(dataset_ids)
+    )
 
 
 def test_calibration_does_not_use_runtime_as_a_selection_tie_breaker() -> None:
@@ -493,11 +645,13 @@ def test_calibration_does_not_use_runtime_as_a_selection_tie_breaker() -> None:
         by_simplicity.setdefault(candidate.base_parameter_changes, []).append(candidate)
     tied = next(items[:2] for items in by_simplicity.values() if len(items) >= 2)
     expected = min(tied, key=lambda candidate: candidate.configuration_id)
-    seeds = _seeds(search, "full", "geometry")
+    phase = calibration_phase(search, "full", "geometry", "scout")
+    seeds = _phase_seeds(search, "full", "geometry", "scout")
+    dataset_ids = _dataset_ids(phase.dataset_count)
     aupr = {
         (candidate.configuration_id, dataset_id, seed): (0.8 if candidate in tied else 0.1)
         for candidate in candidates
-        for dataset_id in ("dataset_a", "dataset_b")
+        for dataset_id in dataset_ids
         for seed in seeds
     }
     wall_time = {candidate.configuration_id: 1.0 for candidate in candidates}
@@ -511,10 +665,13 @@ def test_calibration_does_not_use_runtime_as_a_selection_tie_breaker() -> None:
             candidates,
             role="development",
             seeds=seeds,
+            fidelity="scout",
+            dataset_ids=dataset_ids,
             aupr=aupr,
             wall_time=wall_time,
         ),
         calibration_budget="full",
+        fidelity="scout",
     )
 
     assert ranking[0].candidate == expected
@@ -523,7 +680,9 @@ def test_calibration_does_not_use_runtime_as_a_selection_tie_breaker() -> None:
 def test_convergence_promotes_the_smallest_noninferior_stable_ceiling_per_parent() -> None:
     search = load_search_space(REPO_ROOT)
     candidates = _stage_chain(search)["convergence"]
-    seeds = _seeds(search, "reduced", "convergence")
+    phase = calibration_phase(search, "reduced", "convergence", "final")
+    seeds = _phase_seeds(search, "reduced", "convergence", "final")
+    dataset_ids = _dataset_ids(phase.dataset_count)
     parents = sorted({candidate.parent_configuration_id for candidate in candidates})
     parent_quality = dict(zip(parents, (0.80, 0.75), strict=True))
     aupr: dict[tuple[str, str, int], float] = {}
@@ -532,7 +691,7 @@ def test_convergence_promotes_the_smallest_noninferior_stable_ceiling_per_parent
         score = parent_quality[candidate.parent_configuration_id] - (
             0.001 if ceiling == 250 else 0.0
         )
-        for dataset_id in ("dataset_a", "dataset_b"):
+        for dataset_id in dataset_ids:
             for seed in seeds:
                 aupr[(candidate.configuration_id, dataset_id, seed)] = score
 
@@ -540,8 +699,16 @@ def test_convergence_promotes_the_smallest_noninferior_stable_ceiling_per_parent
         search,
         "convergence",
         candidates,
-        _summary_rows(candidates, role="development", seeds=seeds, aupr=aupr),
+        _summary_rows(
+            candidates,
+            role="development",
+            seeds=seeds,
+            fidelity="final",
+            dataset_ids=dataset_ids,
+            aupr=aupr,
+        ),
         calibration_budget="reduced",
+        fidelity="final",
     )
 
     promoted = ranking[:2]
@@ -551,43 +718,86 @@ def test_convergence_promotes_the_smallest_noninferior_stable_ceiling_per_parent
 
 def test_validation_accepts_only_bounded_convergence_finalists() -> None:
     search = load_search_space(REPO_ROOT)
-    finalists = _stage_chain(search)["convergence"][:3]
+    finalists = _stage_chain(search)["convergence"][:2]
     seeds = _seeds(search, "full", "validation")
+    dataset_ids = _dataset_ids(
+        calibration_phase(search, "full", "validation", "final").dataset_count
+    )
     runs = expand_validation_runs(search, finalists, "full")
     assert len(runs) == len(finalists) * len(seeds)
     best = finalists[1]
     aupr = {
         (best.configuration_id, dataset_id, seed): 0.7
-        for dataset_id in ("dataset_a", "dataset_b")
+        for dataset_id in dataset_ids
         for seed in seeds
     }
     selected = rank_validation_candidates(
         search,
         finalists,
-        _summary_rows(finalists, role="validation", seeds=seeds, aupr=aupr),
+        _summary_rows(
+            finalists,
+            role="validation",
+            seeds=seeds,
+            fidelity="final",
+            dataset_ids=dataset_ids,
+            aupr=aupr,
+        ),
         calibration_budget="full",
     )
     assert selected[0].candidate == best
+    with pytest.raises(CalibrationError, match="exactly 2"):
+        expand_validation_runs(search, finalists[:1], "full")
+    with pytest.raises(CalibrationError, match="exactly 2"):
+        expand_validation_runs(search, _stage_chain(search)["convergence"][:3], "full")
     geometry = expand_stage_candidates(search, "geometry")
     with pytest.raises(CalibrationError, match="convergence stage"):
-        expand_validation_runs(search, geometry[:3], "full")
+        expand_validation_runs(search, geometry[:2], "full")
 
 
 def test_candidate_integrity_rejects_role_and_parameter_mutation() -> None:
     search = load_search_space(REPO_ROOT)
     candidates = expand_stage_candidates(search, "geometry")
-    seeds = _seeds(search, "full", "geometry")
+    phase = calibration_phase(search, "full", "geometry", "scout")
+    seeds = _phase_seeds(search, "full", "geometry", "scout")
+    dataset_ids = _dataset_ids(phase.dataset_count)
     relabelled = (replace(candidates[0], dataset_role="validation"), *candidates[1:])
     with pytest.raises(CalibrationError, match="must use development"):
-        rank_stage_candidates(search, "geometry", relabelled, [], calibration_budget="full")
+        rank_stage_candidates(
+            search,
+            "geometry",
+            relabelled,
+            [],
+            calibration_budget="full",
+            fidelity="scout",
+        )
 
     parameters = dict(candidates[0].parameters)
     parameters["adaptive_trees"] = True
     mutated = (replace(candidates[0], parameters=parameters), *candidates[1:])
     with pytest.raises(CalibrationError, match="parameter digest is inconsistent"):
-        rank_stage_candidates(search, "geometry", mutated, [], calibration_budget="full")
+        rank_stage_candidates(
+            search,
+            "geometry",
+            mutated,
+            [],
+            calibration_budget="full",
+            fidelity="scout",
+        )
 
-    rows = _summary_rows(candidates, role="development", seeds=seeds)
+    rows = _summary_rows(
+        candidates,
+        role="development",
+        seeds=seeds,
+        fidelity="scout",
+        dataset_ids=dataset_ids,
+    )
     rows.pop()
-    with pytest.raises(CalibrationError, match="same algorithmic seeds"):
-        rank_stage_candidates(search, "geometry", candidates, rows, calibration_budget="full")
+    with pytest.raises(CalibrationError, match="same datasets"):
+        rank_stage_candidates(
+            search,
+            "geometry",
+            candidates,
+            rows,
+            calibration_budget="full",
+            fidelity="scout",
+        )

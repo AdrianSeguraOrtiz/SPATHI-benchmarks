@@ -18,8 +18,10 @@ from spathi_bench.calibration import (
     expand_stage_candidates,
     load_search_space,
     locked_spathi_identity,
+    stage_profile_id,
     validate_ranking_chain,
 )
+from spathi_bench.calibration_design import calibration_phase
 from spathi_bench.calibration_materialization import freeze_calibration_selection
 from spathi_bench.config import BenchmarkConfigError, validate_calibration_contracts
 
@@ -31,6 +33,8 @@ def _ranking_rows(
     *,
     role: str,
     seeds: tuple[int, ...],
+    fidelity: str,
+    dataset_count: int,
     spathi_identity: dict[str, str],
     preferred: Any | None = None,
 ) -> list[dict[str, Any]]:
@@ -42,9 +46,9 @@ def _ranking_rows(
             "dataset_id": dataset_id,
             "algorithm_seed": seed,
             "run_id": (
-                f"validation__{candidate.configuration_id}__seed_{seed}"
+                f"validation__{candidate.configuration_id}__final__seed_{seed}"
                 if role == "validation"
-                else f"{candidate.configuration_id}__seed_{seed}"
+                else f"{candidate.configuration_id}__{fidelity}__seed_{seed}"
             ),
             "execution_sha256": canonical_json_sha256(
                 {"configuration_id": candidate.configuration_id, "random_seed": seed}
@@ -59,7 +63,7 @@ def _ranking_rows(
             "spathi_image_id": "sha256:" + "1" * 64,
         }
         for candidate in candidates
-        for dataset_id in ("dataset_a", "dataset_b")
+        for dataset_id in (f"dataset_{index:03d}" for index in range(1, dataset_count + 1))
         for seed in seeds
     ]
 
@@ -96,28 +100,48 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
     evidence = repo / "experiments/v1/spathi/evidence"
     evidence.mkdir(parents=True, exist_ok=True)
 
-    parents: tuple[Any, ...] = ()
+    selected: tuple[Any, ...] = ()
     parent_link: dict[str, Any] | None = None
-    for index, stage_id in enumerate(
-        ("geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence"),
+    phases = (
+        ("geometry", "scout"),
+        ("geometry", "confirmation"),
+        ("estimator", "scout"),
+        ("estimator", "confirmation"),
+        ("interaction", "scout"),
+        ("interaction", "confirmation"),
+        ("estimator_scale_transfer", "scout"),
+        ("estimator_scale_transfer", "confirmation"),
+        ("convergence", "final"),
+    )
+    for index, (stage_id, fidelity) in enumerate(
+        phases,
         start=1,
     ):
-        candidates = expand_stage_candidates(search, stage_id, parents=parents)
-        seeds = tuple(search["calibration_budgets"]["full"]["algorithmic_seeds"][stage_id])
+        candidates = (
+            expand_stage_candidates(search, stage_id, parents=selected)
+            if fidelity == "scout" or stage_id == "convergence"
+            else selected
+        )
+        phase = calibration_phase(search, "full", stage_id, fidelity)
+        all_seeds = search["calibration_budgets"]["full"]["algorithmic_seeds"][stage_id]
+        seeds = tuple(all_seeds[position - 1] for position in phase.algorithm_seed_indices)
         rows = _ranking_rows(
             candidates,
             role="development",
             seeds=seeds,
+            fidelity=fidelity,
+            dataset_count=phase.dataset_count,
             spathi_identity=spathi_identity,
         )
         ranking = build_calibration_ranking(
             search,
             stage_id,
+            fidelity,
             candidates,
             rows,
             calibration_panel=_calibration_panel(rows, "development"),
             calibration_budget="full",
-            profile_id=f"calibration-full-{stage_id}",
+            profile_id=stage_profile_id(stage_id, "full", fidelity),
             parent_ranking=parent_link,
             benchmark_commit="1" * 40,
             search_space_sha256=search_hash,
@@ -125,17 +149,18 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             benchmark_summary_sha256=f"{index + 4:x}" * 64,
             **spathi_identity,
         )
-        ranking_path = evidence / f"{stage_id}-ranking.json"
+        ranking_path = evidence / f"{stage_id}-{fidelity}-ranking.json"
         ranking_path.write_text(json.dumps(ranking), encoding="utf-8")
         parent_link = {
             "path": ranking_path.relative_to(repo).as_posix(),
             "sha256": sha256_file(ranking_path),
             "stage_id": stage_id,
+            "fidelity": fidelity,
             "calibration_budget": "full",
         }
-        parents = tuple(candidate_from_dict(item) for item in ranking["selected_candidates"])
+        selected = tuple(candidate_from_dict(item) for item in ranking["selected_candidates"])
 
-    finalists = parents
+    finalists = selected
     validation_seeds = tuple(
         search["calibration_budgets"]["full"]["algorithmic_seeds"]["validation"]
     )
@@ -144,17 +169,20 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
         finalists,
         role="validation",
         seeds=validation_seeds,
+        fidelity="final",
+        dataset_count=calibration_phase(search, "full", "validation", "final").dataset_count,
         spathi_identity=spathi_identity,
         preferred=finalists[1],
     )
     return build_calibration_ranking(
         search,
         "validation",
+        "final",
         finalists,
         rows,
         calibration_panel=_calibration_panel(rows, "validation"),
         calibration_budget="full",
-        profile_id="selection-full-validation",
+        profile_id=stage_profile_id("validation", "full", "final"),
         parent_ranking=parent_link,
         benchmark_commit="1" * 40,
         search_space_sha256=search_hash,
@@ -230,23 +258,30 @@ def test_ranking_chain_rejects_finalists_outside_parent_shortlist(tmp_path: Path
     identity = locked_spathi_identity(REPO_ROOT)
     convergence_path = repo / valid["parent_ranking"]["path"]
     convergence = json.loads(convergence_path.read_text(encoding="utf-8"))
+    selected_ids = {item["configuration_id"] for item in convergence["selected_candidates"]}
     incompatible = tuple(
-        candidate_from_dict(item["candidate"]) for item in convergence["ranking"][-3:]
-    )
+        candidate_from_dict(item["candidate"])
+        for item in convergence["ranking"]
+        if item["candidate"]["configuration_id"] not in selected_ids
+    )[:2]
+    assert len(incompatible) == 2
     rows = _ranking_rows(
         incompatible,
         role="validation",
         seeds=tuple(search["calibration_budgets"]["full"]["algorithmic_seeds"]["validation"]),
+        fidelity="final",
+        dataset_count=calibration_phase(search, "full", "validation", "final").dataset_count,
         spathi_identity=identity,
     )
     ranking = build_calibration_ranking(
         search,
         "validation",
+        "final",
         incompatible,
         rows,
         calibration_panel=_calibration_panel(rows, "validation"),
         calibration_budget="full",
-        profile_id="selection-full-validation",
+        profile_id=stage_profile_id("validation", "full", "final"),
         parent_ranking=valid["parent_ranking"],
         benchmark_commit="1" * 40,
         search_space_sha256=sha256_file(REPO_ROOT / "experiments/v1/spathi/search-space.json"),
@@ -255,7 +290,7 @@ def test_ranking_chain_rejects_finalists_outside_parent_shortlist(tmp_path: Path
         **identity,
     )
 
-    with pytest.raises(BenchmarkConfigError, match="convergence shortlist"):
+    with pytest.raises(BenchmarkConfigError, match="parent shortlist"):
         validate_ranking_chain(
             repo,
             search,

@@ -47,7 +47,7 @@
         "distance_space": {"enum": ["pca", "expression"]},
         "n_components": {"type": "integer", "minimum": 1},
         "distance_standardization": {"enum": ["none", "standard"]},
-        "pca_svd_solver": {"const": "auto"},
+        "pca_svd_solver": {"enum": ["auto", "randomized", "full"]},
         "distance_metric": {"enum": ["euclidean", "cosine"]},
         "kernel": {"enum": ["gaussian", "exponential"]},
         "bandwidth": {"const": "auto"},

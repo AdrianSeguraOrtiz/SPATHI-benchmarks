@@ -16,6 +16,7 @@ RUN python -m pip install --no-cache-dir -r /tmp/constraints.txt \
 
 COPY --from=spathi src /opt/spathi/src
 COPY containers/spathi/run_tool.py /usr/local/bin/run_spathi_tool.py
+COPY containers/spathi/run_convergence.py /usr/local/bin/run_spathi_convergence.py
 
 LABEL org.opencontainers.image.title="SPATHI ANDREA adapter" \
       org.opencontainers.image.source="https://github.com/AdrianSeguraOrtiz/SPATHI" \

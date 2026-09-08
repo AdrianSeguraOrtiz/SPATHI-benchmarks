@@ -38,8 +38,8 @@
     },
     "namespaces": {
       "type": "array",
-      "minItems": 16,
-      "maxItems": 16,
+      "minItems": 18,
+      "maxItems": 18,
       "items": {"$ref": "#/$defs/namespace"}
     },
     "allocations": {
@@ -73,7 +73,8 @@
             "efficiency_safety",
             "test",
             "scalability",
-            "dimensional_transfer"
+            "dimensional_transfer",
+            "performance"
           ]
         }
       }

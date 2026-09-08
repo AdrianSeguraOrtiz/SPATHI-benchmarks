@@ -156,13 +156,12 @@ def test_committed_panel_is_closed_reproducible_and_post_freeze() -> None:
     }
 
 
-def test_profiles_use_their_serial_budget_panel_and_no_generic_statistics() -> None:
+def test_profiles_use_portable_execution_classes_and_no_generic_statistics() -> None:
     for budget, expected_datasets in (("reduced", 4), ("full", 9)):
         profile = load_profile(REPO_ROOT, f"dimensional-transfer-{budget}", require_runnable=True)
         assert profile["purpose"] == "dimensional_transfer"
         assert profile["inference_batches"] == []
-        assert profile["resources"]["generate_data"]["max_parallel_tasks"] == 1
-        assert profile["resources"]["infer_network"]["max_parallel_runs"] == 1
+        assert profile["execution_class"] == "scale_full"
         assert profile["statistics"] == {"status": "not_applicable", "comparisons": []}
         replicates = sum(
             json.loads((REPO_ROOT / job["simulator_runs"]).read_text(encoding="utf-8"))["runs"][0][

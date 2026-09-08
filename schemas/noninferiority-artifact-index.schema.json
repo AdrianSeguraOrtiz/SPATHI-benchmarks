@@ -51,18 +51,22 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "max_cores",
-        "max_ram_gb",
-        "max_parallel_runs",
+        "cpu_threads",
+        "memory_bytes",
+        "memory_gib",
         "planner",
-        "planner_time_limit_seconds"
+        "planner_time_limit_seconds",
+        "output_profile",
+        "execution_plan_fingerprint"
       ],
       "properties": {
-        "max_parallel_runs": {"const": 1},
-        "max_cores": {"type": "integer", "minimum": 1},
-        "max_ram_gb": {"type": "number", "exclusiveMinimum": 0},
+        "cpu_threads": {"type": "integer", "minimum": 1},
+        "memory_bytes": {"type": "integer", "minimum": 1073741824},
+        "memory_gib": {"type": "number", "minimum": 1},
         "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
-        "planner_time_limit_seconds": {"type": "integer", "minimum": 1}
+        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "output_profile": {"enum": ["canonical", "full"]},
+        "execution_plan_fingerprint": {"$ref": "#/$defs/sha256"}
       }
     },
     "execution": {
@@ -114,11 +118,17 @@
         "measurement_protocol": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["peak_memory", "sample_interval_milliseconds", "output_bytes", "model_counts", "tree_counts"],
+          "required": [
+            "source", "scope", "wall_time", "peak_memory", "output_bytes",
+            "telemetry_status", "model_counts", "tree_counts"
+          ],
           "properties": {
-            "peak_memory": {"const": "docker_stats_sampled_container_memory"},
-            "sample_interval_milliseconds": {"type": "integer", "minimum": 10},
-            "output_bytes": {"const": "exact_spathi_output_tree"},
+            "source": {"const": "andrea_execution_measurement"},
+            "scope": {"const": "andrea_execution"},
+            "wall_time": {"const": "andrea_execution_end_to_end_including_input_verification_preparation_scheduling_merging_and_requested_output_materialization"},
+            "peak_memory": {"const": "physical_container_peak_overlap_upper_bound_excluding_andrea_host"},
+            "output_bytes": {"const": "andrea_execution_output_tree_at_measurement"},
+            "telemetry_status": {"const": "complete_required"},
             "model_counts": {"const": "validated_spathi_run_metadata"},
             "tree_counts": {"const": "validated_spathi_model_diagnostics"}
           }

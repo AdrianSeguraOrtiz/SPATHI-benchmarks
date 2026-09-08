@@ -81,9 +81,9 @@
         "dataset", "reference_inference", "candidate_inference",
         "reference_network_sha256", "candidate_network_sha256",
         "reference_target_eligibility_sha256", "reference_model_diagnostics_sha256",
-        "reference_run_metadata_sha256", "reference_resource_measurement_sha256",
+        "reference_run_metadata_sha256", "reference_run_report_sha256",
         "candidate_target_eligibility_sha256", "candidate_model_diagnostics_sha256",
-        "candidate_run_metadata_sha256", "candidate_resource_measurement_sha256"
+        "candidate_run_metadata_sha256", "candidate_run_report_sha256"
       ],
       "properties": {
         "dataset": {"$ref": "#/$defs/sha256"},
@@ -94,11 +94,11 @@
         "reference_target_eligibility_sha256": {"$ref": "#/$defs/sha256"},
         "reference_model_diagnostics_sha256": {"$ref": "#/$defs/sha256"},
         "reference_run_metadata_sha256": {"$ref": "#/$defs/sha256"},
-        "reference_resource_measurement_sha256": {"$ref": "#/$defs/sha256"},
+        "reference_run_report_sha256": {"$ref": "#/$defs/sha256"},
         "candidate_target_eligibility_sha256": {"$ref": "#/$defs/sha256"},
         "candidate_model_diagnostics_sha256": {"$ref": "#/$defs/sha256"},
         "candidate_run_metadata_sha256": {"$ref": "#/$defs/sha256"},
-        "candidate_resource_measurement_sha256": {"$ref": "#/$defs/sha256"}
+        "candidate_run_report_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
     "candidate_space": {

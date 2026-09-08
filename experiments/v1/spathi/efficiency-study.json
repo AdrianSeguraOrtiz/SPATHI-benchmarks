@@ -53,8 +53,8 @@
     },
     "claim_scope": "conditional_to_predeclared_synthetic_panel_and_fixed_algorithm_seed_ensemble",
     "familywise_alpha": 0.05,
-    "multiplicity": "bonferroni_across_confirmatory_candidates",
-    "multiplicity_rationale": "Each candidate is an intersection-union decision: every accuracy, coverage, completion and runtime gate must pass. Bonferroni allocation across the three candidate decisions controls the probability of any false production adoption without treating the mandatory gates as separate opportunities to claim success.",
+    "multiplicity": "single_hypothesis_no_adjustment",
+    "multiplicity_rationale": "Development freezes at most one global nominee before the independent validation outcomes are accessed. Validation therefore tests one intersection-union decision and uses the familywise alpha directly; its mandatory accuracy, coverage, completion and runtime gates are not separate opportunities to claim success.",
     "candidate_decision": "accuracy_coverage_completion_and_runtime_gates",
     "confidence_interval_method": "one_sided_percentile_fixed_strata_hierarchical_bootstrap",
     "bootstrap_strata": [

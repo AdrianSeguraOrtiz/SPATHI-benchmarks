@@ -20,6 +20,12 @@ from statistics import fmean, median, pstdev
 from typing import Any
 
 from .artifacts import canonical_json_sha256, sha256_file
+from .calibration_design import (
+    FIDELITIES,
+    MULTIFIDELITY_STAGES,
+    calibration_phase,
+    validate_multifidelity_design,
+)
 from .config import (
     BenchmarkConfigError,
     load_image_lock,
@@ -28,6 +34,7 @@ from .config import (
     validate_json,
 )
 from .seeds import SeedPlanError, derive_plan_seed, load_seed_plan
+from .tool_contract import spathi_runtime_resources
 
 SEARCH_SPACE_PATH = Path("experiments/v1/spathi/search-space.json")
 SEARCH_SPACE_SCHEMA_PATH = Path("schemas/spathi-search-space.schema.json")
@@ -45,16 +52,32 @@ _SEARCH_STAGES = (
     "convergence",
 )
 _CALIBRATION_STAGES = frozenset((*_SEARCH_STAGES, "validation"))
-_PARENT_STAGES = {
+_PARENT_PHASES = {
+    ("geometry", "scout"): None,
+    ("geometry", "confirmation"): ("geometry", "scout"),
+    ("estimator", "scout"): ("geometry", "confirmation"),
+    ("estimator", "confirmation"): ("estimator", "scout"),
+    ("interaction", "scout"): ("estimator", "confirmation"),
+    ("interaction", "confirmation"): ("interaction", "scout"),
+    ("estimator_scale_transfer", "scout"): ("interaction", "confirmation"),
+    ("estimator_scale_transfer", "confirmation"): (
+        "estimator_scale_transfer",
+        "scout",
+    ),
+    ("convergence", "final"): ("estimator_scale_transfer", "confirmation"),
+    ("validation", "final"): ("convergence", "final"),
+}
+_LOGICAL_PARENT_STAGES = {
     "geometry": None,
     "estimator": "geometry",
     "interaction": "estimator",
     "estimator_scale_transfer": "interaction",
     "convergence": "estimator_scale_transfer",
-    "validation": "convergence",
+}
+_LOGICAL_CHILD_STAGES = {
+    parent: child for child, parent in _LOGICAL_PARENT_STAGES.items() if parent is not None
 }
 _FIXED_CALIBRATION_PARAMETERS: Mapping[str, Any] = {
-    "pca_svd_solver": "auto",
     "bandwidth": "auto",
     "target_eligibility": "all",
     "adaptive_trees": False,
@@ -117,6 +140,7 @@ class CalibrationRun:
     configuration_id: str
     configuration_sha256: str
     stage_id: str
+    fidelity: str
     dataset_role: str
     algorithm_seed: int
     parameters: Mapping[str, Any]
@@ -220,7 +244,7 @@ def _score_from_dict(payload: object) -> CandidateScore:
             algorithm_seed_count=_integer(
                 raw["algorithm_seed_count"],
                 "score algorithm seed count",
-                minimum=2,
+                minimum=1,
             ),
         )
     except KeyError as exc:
@@ -393,6 +417,7 @@ def load_search_space(repo_root: Path) -> dict[str, Any]:
     )
     _validate_search_semantics(search_space)
     _validate_seed_contract(root, search_space)
+    validate_multifidelity_design(search_space)
     return search_space
 
 
@@ -470,13 +495,18 @@ def resolve_group_policy(policy: Mapping[str, Any], group_count: int) -> dict[st
     return copy.deepcopy(dict(_mapping(branch.get("parameters"), f"{branch_id} parameters")))
 
 
-def stage_profile_id(stage_id: str, calibration_budget: str) -> str:
+def stage_profile_id(stage_id: str, calibration_budget: str, fidelity: str) -> str:
     """Return the canonical runnable profile ID for one stage and evidence budget."""
 
     _validate_calibration_stage(stage_id)
     budget = _validate_calibration_budget_id(calibration_budget)
+    if stage_id in MULTIFIDELITY_STAGES:
+        if fidelity not in FIDELITIES:
+            raise CalibrationError(f"Stage {stage_id!r} requires scout or confirmation fidelity")
+    elif fidelity != "final":
+        raise CalibrationError(f"Stage {stage_id!r} requires final fidelity")
     purpose = "selection" if stage_id == "validation" else "calibration"
-    return f"{purpose}-{budget}-{stage_id}"
+    return f"{purpose}-{budget}-{stage_id}-{fidelity}"
 
 
 def canonical_run_records(runs: Sequence[CalibrationRun]) -> list[dict[str, Any]]:
@@ -487,6 +517,7 @@ def canonical_run_records(runs: Sequence[CalibrationRun]) -> list[dict[str, Any]
             "run_id": run.run_id,
             "configuration_id": run.configuration_id,
             "configuration_sha256": run.configuration_sha256,
+            "fidelity": run.fidelity,
             "algorithm_seed": run.algorithm_seed,
             "execution_sha256": canonical_json_sha256(dict(run.parameters)),
         }
@@ -501,6 +532,7 @@ def build_stage_profile(
     template: Mapping[str, Any],
     stage_id: str,
     calibration_budget: str,
+    fidelity: str,
     *,
     bundle_path: str,
     search_space: Mapping[str, Any] | None = None,
@@ -508,7 +540,10 @@ def build_stage_profile(
     """Materialize one stage-specific runnable profile from its planned template."""
 
     budget = _validate_calibration_budget_id(calibration_budget)
-    profile_id = stage_profile_id(stage_id, budget)
+    if search_space is None:
+        raise CalibrationError(f"Stage {stage_id!r} requires its frozen phase design")
+    phase = calibration_phase(search_space, budget, stage_id, fidelity)
+    profile_id = stage_profile_id(stage_id, budget, fidelity)
     expected_purpose = "selection" if stage_id == "validation" else "calibration"
     expected_role = "validation" if stage_id == "validation" else "development"
     if template.get("status") != "planned" or template.get("purpose") != expected_purpose:
@@ -523,12 +558,10 @@ def build_stage_profile(
     if not isinstance(raw_jobs, list) or not raw_jobs:
         raise CalibrationError(f"The {expected_purpose} template has no frozen generation jobs")
     if stage_id != "validation":
-        if search_space is None:
-            raise CalibrationError(f"Stage {stage_id!r} requires its frozen dataset selector")
         stage = _stage(search_space, stage_id)
         selector = _mapping(stage.get("dataset_selector"), f"{stage_id} dataset selector")
         split_id = selector.get("split_id")
-        condition_ids = selector.get("condition_ids")
+        condition_ids = list(phase.condition_ids)
         if (
             not isinstance(split_id, str)
             or not split_id
@@ -569,16 +602,18 @@ def build_stage_profile(
             "id": profile_id,
             "status": "runnable",
             "calibration_stage": stage_id,
+            "calibration_fidelity": fidelity,
             "calibration_budget": budget,
             "description": (
                 f"{str(template.get('description', '')).strip()} "
-                f"Materialized immutable {stage_id} stage."
+                f"Materialized immutable {stage_id} {fidelity} phase."
             ).strip(),
             "inference_batches": [
                 {
                     "id": f"spathi-{stage_id}",
                     "kind": "spathi",
                     "dataset_role": expected_role,
+                    "generation_jobs": [str(job["id"]) for job in raw_jobs],
                     "regime": "group_only",
                     "tools_params": f"{bundle_path}/tools-params.json",
                     "custom_tools": f"{bundle_path}/custom-tools.json",
@@ -588,6 +623,10 @@ def build_stage_profile(
             ],
         }
     )
+    if stage_id != "validation":
+        profile["inference_batches"][0]["replicate_indices"] = {
+            str(job["id"]): list(phase.replicate_indices) for job in raw_jobs
+        }
     statistics = _mapping(profile.get("statistics"), "profile statistics")
     profile["statistics"] = {
         **copy.deepcopy(dict(statistics)),
@@ -602,20 +641,25 @@ def load_parent_ranking(
     search_space: Mapping[str, Any],
     stage_id: str,
     calibration_budget: str,
+    fidelity: str,
     ranking_path: Path | None,
 ) -> tuple[tuple[CandidateConfiguration, ...], dict[str, Any] | None]:
     """Validate a preceding ranking and return its frozen shortlist and link."""
 
     budget = _validate_calibration_budget(search_space, calibration_budget)
-    if stage_id not in _PARENT_STAGES:
-        raise CalibrationError(f"Unknown calibration stage: {stage_id!r}")
-    expected_stage = _PARENT_STAGES[stage_id]
-    if expected_stage is None:
+    expected_phase = _PARENT_PHASES.get((stage_id, fidelity))
+    if (stage_id, fidelity) not in _PARENT_PHASES:
+        raise CalibrationError(f"Unknown calibration phase: {stage_id}.{fidelity}")
+    if expected_phase is None:
         if ranking_path is not None:
-            raise CalibrationError("The geometry stage cannot receive --parents")
+            raise CalibrationError("The geometry scout cannot receive --parents")
         return (), None
+    expected_stage, expected_fidelity = expected_phase
     if ranking_path is None:
-        raise CalibrationError(f"Stage {stage_id!r} requires --parents from {expected_stage!r}")
+        raise CalibrationError(
+            f"Phase {stage_id}.{fidelity} requires --parents from "
+            f"{expected_stage}.{expected_fidelity}"
+        )
 
     root = repo_root.resolve()
     resolved = ranking_path.resolve()
@@ -632,10 +676,9 @@ def load_parent_ranking(
     locked_identity = locked_spathi_identity(root)
     if any(ranking.get(field) != value for field, value in locked_identity.items()):
         raise CalibrationError("Parent ranking was produced by another SPATHI build")
-    if ranking.get("stage_id") != expected_stage:
+    if ranking.get("stage_id") != expected_stage or ranking.get("fidelity") != expected_fidelity:
         raise CalibrationError(
-            f"Stage {stage_id!r} requires a {expected_stage!r} ranking, "
-            f"not {ranking.get('stage_id')!r}"
+            f"Phase {stage_id}.{fidelity} requires a {expected_stage}.{expected_fidelity} ranking"
         )
     if ranking.get("calibration_budget") != budget:
         raise CalibrationError(
@@ -657,6 +700,7 @@ def load_parent_ranking(
         "path": relative,
         "sha256": sha256_file(resolved),
         "stage_id": expected_stage,
+        "fidelity": expected_fidelity,
         "calibration_budget": budget,
     }
 
@@ -683,6 +727,10 @@ def expand_stage_candidates(
     _validate_candidate_integrity(
         tuple(parent for parent in parent_items if parent is not None),
         base_configuration,
+    )
+    _validate_parent_expansion_identities(
+        stage,
+        tuple(parent for parent in parent_items if parent is not None),
     )
     variants = [
         (str(item["id"]), _mapping(item["parameter_overrides"], "parameter_overrides"))
@@ -732,38 +780,74 @@ def expand_stage_candidates(
     identifiers = [candidate.configuration_id for candidate in candidates]
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError(f"Stage {stage_id!r} generated duplicate configuration IDs")
-    deduplicated: dict[str, CandidateConfiguration] = {}
+    by_configuration: dict[str, list[str]] = defaultdict(list)
     for candidate in candidates:
-        deduplicated.setdefault(candidate.configuration_sha256, candidate)
-    return tuple(deduplicated.values())
+        by_configuration[candidate.configuration_sha256].append(candidate.configuration_id)
+    collisions = [identifiers for identifiers in by_configuration.values() if len(identifiers) > 1]
+    if collisions:
+        rendered = "; ".join(", ".join(items) for items in collisions)
+        raise CalibrationError(
+            f"Stage {stage_id!r} generated duplicate effective configurations: {rendered}. "
+            "The preregistered candidate cardinality cannot be changed after ranking."
+        )
+    return tuple(candidates)
 
 
 def expand_stage_runs(
     search_space: Mapping[str, Any],
     stage_id: str,
     calibration_budget: str,
+    fidelity: str,
     *,
     parents: Sequence[CandidateConfiguration] = (),
+    candidates: Sequence[CandidateConfiguration] | None = None,
 ) -> tuple[CalibrationRun, ...]:
-    """Expand every stage candidate across its predeclared algorithmic seeds."""
+    """Expand one scout or confirmation phase over its frozen seed subset."""
 
     _stage(search_space, stage_id)
-    seeds = _algorithmic_seeds(search_space, calibration_budget, stage_id)
-    candidates = expand_stage_candidates(search_space, stage_id, parents=parents)
+    phase = calibration_phase(search_space, calibration_budget, stage_id, fidelity)
+    all_seeds = _algorithmic_seeds(search_space, calibration_budget, stage_id)
+    seeds = tuple(all_seeds[index - 1] for index in phase.algorithm_seed_indices)
+    if fidelity == "scout" or stage_id == "convergence":
+        if candidates is not None:
+            raise CalibrationError("Scout candidates must use the canonical stage expansion")
+        selected_candidates = expand_stage_candidates(search_space, stage_id, parents=parents)
+    else:
+        if candidates is None:
+            raise CalibrationError("Confirmation requires its frozen scout shortlist")
+        selected_candidates = tuple(candidates)
+        if len(selected_candidates) != phase.candidate_count:
+            raise CalibrationError(
+                f"{stage_id} confirmation requires {phase.candidate_count} candidates"
+            )
+        base = _mapping(search_space.get("base_configuration"), "base_configuration")
+        _validate_candidate_integrity(selected_candidates, base)
+        if any(candidate.stage_id != stage_id for candidate in selected_candidates):
+            raise CalibrationError("Confirmation candidates must come from the same stage scout")
+    expected_candidate_count = phase.candidate_count
+    if stage_id == "convergence":
+        expected_candidate_count *= 4
+    if len(selected_candidates) != expected_candidate_count:
+        raise CalibrationError(
+            f"{stage_id}.{fidelity} requires exactly {expected_candidate_count} distinct "
+            f"logical candidates; received {len(selected_candidates)}"
+        )
     return tuple(
         CalibrationRun(
-            run_id=f"{candidate.configuration_id}__seed_{seed}",
+            run_id=f"{candidate.configuration_id}__{fidelity}__seed_{seed}",
             configuration_id=candidate.configuration_id,
             configuration_sha256=candidate.configuration_sha256,
             stage_id=stage_id,
+            fidelity=fidelity,
             dataset_role=candidate.dataset_role,
             algorithm_seed=seed,
             parameters={
                 "group_policy": materialize_group_policy(search_space, candidate.parameters),
                 "random_seed": seed,
+                "target_scope": copy.deepcopy(dict(phase.target_scope)),
             },
         )
-        for candidate in candidates
+        for candidate in selected_candidates
         for seed in seeds
     )
 
@@ -781,9 +865,9 @@ def expand_validation_runs(
         "maximum validation finalists",
         minimum=1,
     )
-    if not 2 <= len(finalists) <= maximum:
+    if len(finalists) != maximum:
         raise CalibrationError(
-            f"Validation requires between 2 and {maximum} convergence finalists; "
+            f"Validation requires exactly {maximum} convergence finalists; "
             f"received {len(finalists)}"
         )
     if any(candidate.stage_id != "convergence" for candidate in finalists):
@@ -796,15 +880,17 @@ def expand_validation_runs(
     seeds = _algorithmic_seeds(search_space, calibration_budget, "validation")
     return tuple(
         CalibrationRun(
-            run_id=f"validation__{candidate.configuration_id}__seed_{seed}",
+            run_id=f"validation__{candidate.configuration_id}__final__seed_{seed}",
             configuration_id=candidate.configuration_id,
             configuration_sha256=candidate.configuration_sha256,
             stage_id="validation",
+            fidelity="final",
             dataset_role="validation",
             algorithm_seed=seed,
             parameters={
                 "group_policy": materialize_group_policy(search_space, candidate.parameters),
                 "random_seed": seed,
+                "target_scope": {"method": "all"},
             },
         )
         for candidate in sorted(finalists, key=lambda item: item.configuration_id)
@@ -822,6 +908,7 @@ def validate_calibration_manifest(
     root = repo_root.resolve()
     validate_json(dict(manifest), root / MANIFEST_SCHEMA_PATH, "calibration manifest")
     stage_id = str(manifest.get("stage_id"))
+    fidelity = str(manifest.get("fidelity"))
     _validate_calibration_stage(stage_id, label="calibration manifest stage")
     calibration_budget = _validate_calibration_budget(
         search_space,
@@ -833,7 +920,7 @@ def validate_calibration_manifest(
         or manifest.get("search_space_sha256") != search_digest
     ):
         raise CalibrationError("Calibration manifest search-space identity is stale")
-    if manifest.get("profile_id") != stage_profile_id(stage_id, calibration_budget):
+    if manifest.get("profile_id") != stage_profile_id(stage_id, calibration_budget, fidelity):
         raise CalibrationError("Calibration manifest has the wrong stage profile ID")
     locked_identity = locked_spathi_identity(root)
     if any(manifest.get(field) != value for field, value in locked_identity.items()):
@@ -849,6 +936,7 @@ def validate_calibration_manifest(
         search_space,
         stage_id,
         calibration_budget,
+        fidelity,
         parent_path,
     )
     if raw_parent != expected_parent:
@@ -858,13 +946,24 @@ def validate_calibration_manifest(
         candidates = parents
         runs = expand_validation_runs(search_space, candidates, calibration_budget)
         expected_role = "validation"
-    else:
+    elif fidelity == "scout" or stage_id == "convergence":
         candidates = expand_stage_candidates(search_space, stage_id, parents=parents)
         runs = expand_stage_runs(
             search_space,
             stage_id,
             calibration_budget,
+            fidelity,
             parents=parents,
+        )
+        expected_role = "development"
+    else:
+        candidates = parents
+        runs = expand_stage_runs(
+            search_space,
+            stage_id,
+            calibration_budget,
+            fidelity,
+            candidates=candidates,
         )
         expected_role = "development"
     if manifest.get("dataset_role") != expected_role:
@@ -1059,10 +1158,12 @@ def build_andrea_requests(
     if len(set(run_ids)) != len(run_ids):
         raise CalibrationError("Calibration runs contain duplicate run IDs")
     stage_ids = {run.stage_id for run in runs}
+    fidelities = {run.fidelity for run in runs}
     dataset_roles = {run.dataset_role for run in runs}
-    if len(stage_ids) != 1 or len(dataset_roles) != 1:
-        raise CalibrationError("One calibration request bundle must use one stage and role")
+    if len(stage_ids) != 1 or len(fidelities) != 1 or len(dataset_roles) != 1:
+        raise CalibrationError("One calibration request bundle must use one phase and role")
     stage_id = next(iter(stage_ids))
+    fidelity = next(iter(fidelities))
     dataset_role = next(iter(dataset_roles))
     seed_order = tuple(dict.fromkeys(run.algorithm_seed for run in runs))
     seed_indexes = {seed: index for index, seed in enumerate(seed_order, start=1)}
@@ -1086,6 +1187,7 @@ def build_andrea_requests(
                 "execution_mode": "group_native",
                 "extra_inputs": ["groups", "tf_list"],
                 "outputs": {"directed": True, "sign": "none"},
+                "runtime_resources": spathi_runtime_resources(),
             }
             for run in runs
         ]
@@ -1103,12 +1205,15 @@ def build_andrea_requests(
                 "algorithm_seed": run.algorithm_seed,
                 "algorithm_seed_parameter": "random_seed",
                 "family": "spathi",
+                "calibration_fidelity": fidelity,
+                "target_scope": copy.deepcopy(dict(run.parameters["target_scope"])),
                 "seed_derivation": {
                     "namespace": f"{calibration_budget}.{dataset_role}",
                     "stream": "inference",
                     "coordinates": {
                         "phase": "calibration",
                         "stage": stage_id,
+                        "fidelity": fidelity,
                         "replicate": seed_indexes[run.algorithm_seed],
                     },
                 },
@@ -1126,6 +1231,7 @@ def rank_stage_candidates(
     summary_rows: Iterable[Mapping[str, Any]],
     *,
     calibration_budget: str,
+    fidelity: str,
 ) -> tuple[CandidateScore, ...]:
     """Return the complete ordered ranking for one development stage."""
 
@@ -1135,13 +1241,21 @@ def rank_stage_candidates(
         "base_configuration",
     )
     _validate_candidate_integrity(candidates, base_configuration)
-    _validate_stage_candidate_set(stage, candidates)
-    expected_seeds = _algorithmic_seeds(search_space, calibration_budget, stage_id)
+    if fidelity == "scout" or stage_id == "convergence":
+        _validate_stage_candidate_set(stage, candidates)
+    else:
+        if any(candidate.stage_id != stage_id for candidate in candidates):
+            raise CalibrationError("Confirmation ranking contains candidates from another stage")
+    phase = calibration_phase(search_space, calibration_budget, stage_id, fidelity)
+    all_seeds = _algorithmic_seeds(search_space, calibration_budget, stage_id)
+    expected_seeds = tuple(all_seeds[index - 1] for index in phase.algorithm_seed_indices)
     scores = _rank_balanced_rows(
         candidates,
         summary_rows,
         expected_role="development",
         expected_seeds=expected_seeds,
+        expected_fidelity=fidelity,
+        expected_dataset_count=phase.dataset_count,
     )
     if stage_id == "convergence":
         scores = _rank_convergence_scores(stage, scores)
@@ -1163,9 +1277,9 @@ def rank_validation_candidates(
         "maximum validation finalists",
         minimum=1,
     )
-    if not 2 <= len(finalists) <= maximum:
+    if len(finalists) != maximum:
         raise CalibrationError(
-            f"Validation requires between 2 and {maximum} predeclared finalists; "
+            f"Validation requires exactly {maximum} predeclared finalists; "
             f"received {len(finalists)}"
         )
     if any(candidate.stage_id != "convergence" for candidate in finalists):
@@ -1182,6 +1296,10 @@ def rank_validation_candidates(
             summary_rows,
             expected_role="validation",
             expected_seeds=expected_seeds,
+            expected_fidelity="final",
+            expected_dataset_count=calibration_phase(
+                search_space, calibration_budget, "validation", "final"
+            ).dataset_count,
         )
     )
 
@@ -1189,6 +1307,7 @@ def rank_validation_candidates(
 def build_calibration_ranking(
     search_space: Mapping[str, Any],
     stage_id: str,
+    fidelity: str,
     candidates: Sequence[CandidateConfiguration],
     summary_rows: Iterable[Mapping[str, Any]],
     *,
@@ -1207,17 +1326,21 @@ def build_calibration_ranking(
     """Build a self-consistent ranking artifact without changing selected-config."""
 
     budget = _validate_calibration_budget(search_space, calibration_budget)
-    if profile_id != stage_profile_id(stage_id, budget):
+    if profile_id != stage_profile_id(stage_id, budget, fidelity):
         raise CalibrationError("Calibration ranking has the wrong stage profile ID")
     if _GIT_COMMIT.fullmatch(benchmark_commit) is None:
         raise CalibrationError("Calibration ranking requires a valid benchmark commit")
-    expected_parent_stage = _PARENT_STAGES[stage_id]
-    if expected_parent_stage is None:
+    expected_parent_phase = _PARENT_PHASES[(stage_id, fidelity)]
+    if expected_parent_phase is None:
         if parent_ranking is not None:
             raise CalibrationError("Geometry ranking cannot link a parent ranking")
     else:
+        expected_parent_stage, expected_parent_fidelity = expected_parent_phase
         parent = _mapping(parent_ranking, "ranking parent link")
-        if parent.get("stage_id") != expected_parent_stage:
+        if (
+            parent.get("stage_id") != expected_parent_stage
+            or parent.get("fidelity") != expected_parent_fidelity
+        ):
             raise CalibrationError("Calibration ranking links the wrong parent stage")
         if parent.get("calibration_budget") != budget:
             raise CalibrationError("Calibration ranking links a different calibration budget")
@@ -1244,10 +1367,16 @@ def build_calibration_ranking(
             candidates,
             evidence_rows,
             calibration_budget=budget,
+            fidelity=fidelity,
         )
-        stage = _stage(search_space, stage_id)
-        limit = _integer(stage.get("advance_limit"), f"{stage_id} advance limit", minimum=1)
-        selected_scores = scores[:limit]
+        limit = calibration_phase(search_space, budget, stage_id, fidelity).advance_limit
+        selected_scores = _select_stage_shortlist(
+            search_space,
+            str(stage_id),
+            str(fidelity),
+            scores,
+            limit,
+        )
         dataset_role = "development"
     winner = selected_scores[0] if stage_id == "validation" else None
     payload = {
@@ -1258,6 +1387,7 @@ def build_calibration_ranking(
         "search_space_id": search_space["id"],
         "search_space_sha256": search_space_sha256,
         "stage_id": stage_id,
+        "fidelity": fidelity,
         "dataset_role": dataset_role,
         "parent_ranking": None if parent_ranking is None else copy.deepcopy(dict(parent_ranking)),
         "calibration_manifest_sha256": calibration_manifest_sha256,
@@ -1327,19 +1457,28 @@ def validate_ranking_artifact(
     ):
         raise CalibrationError("Calibration ranking uses a different calibration budget")
     stage_id = ranking.get("stage_id")
+    fidelity = ranking.get("fidelity")
     role = ranking.get("dataset_role")
-    if ranking.get("profile_id") != stage_profile_id(str(stage_id), calibration_budget):
+    if ranking.get("profile_id") != stage_profile_id(
+        str(stage_id), calibration_budget, str(fidelity)
+    ):
         raise CalibrationError("Calibration ranking has the wrong stage profile ID")
     if _GIT_COMMIT.fullmatch(str(ranking.get("benchmark_commit", ""))) is None:
         raise CalibrationError("Calibration ranking has an invalid benchmark commit")
-    expected_parent_stage = _PARENT_STAGES.get(str(stage_id))
+    expected_parent_phase = _PARENT_PHASES.get((str(stage_id), str(fidelity)))
+    if (str(stage_id), str(fidelity)) not in _PARENT_PHASES:
+        raise CalibrationError("Calibration ranking identifies an unknown phase")
     parent_ranking = ranking.get("parent_ranking")
-    if expected_parent_stage is None:
+    if expected_parent_phase is None:
         if parent_ranking is not None:
             raise CalibrationError("Geometry ranking cannot link a parent ranking")
     else:
+        expected_parent_stage, expected_parent_fidelity = expected_parent_phase
         parent = _mapping(parent_ranking, "ranking parent link")
-        if parent.get("stage_id") != expected_parent_stage:
+        if (
+            parent.get("stage_id") != expected_parent_stage
+            or parent.get("fidelity") != expected_parent_fidelity
+        ):
             raise CalibrationError("Calibration ranking links the wrong parent stage")
         if parent.get("calibration_budget") != calibration_budget:
             raise CalibrationError("Calibration ranking links a different calibration budget")
@@ -1401,8 +1540,8 @@ def validate_ranking_artifact(
     if stage_id == "validation":
         protocol = _mapping(search_space.get("selection_protocol"), "selection_protocol")
         maximum = int(protocol["maximum_validation_finalists"])
-        if not 2 <= len(serialized_scores) <= maximum:
-            raise CalibrationError(f"Validation ranking requires between 2 and {maximum} finalists")
+        if len(serialized_scores) != maximum:
+            raise CalibrationError(f"Validation ranking requires exactly {maximum} finalists")
         if any(candidate.stage_id != "convergence" for candidate in candidates):
             raise CalibrationError("Validation ranking contains a non-convergence candidate")
         recomputed_scores = rank_validation_candidates(
@@ -1414,15 +1553,25 @@ def validate_ranking_artifact(
         selected_scores = recomputed_scores[:1]
     else:
         stage = _stage(search_space, str(stage_id))
-        _validate_stage_candidate_set(stage, candidates)
+        if fidelity == "scout" or stage_id == "convergence":
+            _validate_stage_candidate_set(stage, candidates)
         recomputed_scores = rank_stage_candidates(
             search_space,
             str(stage_id),
             candidates,
             raw_rows,
             calibration_budget=calibration_budget,
+            fidelity=str(fidelity),
         )
-        selected_scores = recomputed_scores[: int(stage["advance_limit"])]
+        selected_scores = _select_stage_shortlist(
+            search_space,
+            str(stage_id),
+            str(fidelity),
+            recomputed_scores,
+            calibration_phase(
+                search_space, calibration_budget, str(stage_id), str(fidelity)
+            ).advance_limit,
+        )
 
     if [score_to_dict(score) for score in recomputed_scores] != raw_scores:
         raise CalibrationError(
@@ -1490,13 +1639,15 @@ def validate_ranking_chain(
         expected_calibration_budget=expected_calibration_budget,
     )
     stage_id = str(ranking["stage_id"])
+    fidelity = str(ranking["fidelity"])
     calibration_budget = str(ranking["calibration_budget"])
-    expected_parent_stage = _PARENT_STAGES[stage_id]
+    expected_parent_phase = _PARENT_PHASES[(stage_id, fidelity)]
     parent_value = ranking.get("parent_ranking")
-    if expected_parent_stage is None:
+    if expected_parent_phase is None:
         if parent_value is not None:
             raise CalibrationError("Geometry ranking has an unexpected parent link")
         return scores
+    expected_parent_stage, expected_parent_fidelity = expected_parent_phase
     parent = _mapping(parent_value, "ranking parent link")
     raw_path = parent.get("path")
     if not isinstance(raw_path, str):
@@ -1509,7 +1660,10 @@ def validate_ranking_chain(
         raise CalibrationError("Calibration ranking chain contains a cycle")
     parent_ranking = load_json_object(parent_path, "parent ranking evidence")
     validate_json(parent_ranking, root / RANKING_SCHEMA_PATH, "parent ranking evidence")
-    if parent_ranking.get("stage_id") != expected_parent_stage:
+    if (
+        parent_ranking.get("stage_id") != expected_parent_stage
+        or parent_ranking.get("fidelity") != expected_parent_fidelity
+    ):
         raise CalibrationError("Calibration ranking chain has an invalid stage transition")
     if (
         parent.get("calibration_budget") != calibration_budget
@@ -1534,7 +1688,7 @@ def validate_ranking_chain(
         raise CalibrationError("Parent ranking chain contains no selected candidates")
     selected_parents = tuple(candidate_from_dict(item) for item in raw_selected)
     current_candidates = tuple(score.candidate for score in scores)
-    if stage_id == "validation":
+    if stage_id == "validation" or fidelity == "confirmation":
         expected = {
             (candidate.configuration_id, candidate.configuration_sha256)
             for candidate in selected_parents
@@ -1545,7 +1699,7 @@ def validate_ranking_chain(
         }
         if observed != expected:
             raise CalibrationError(
-                "Validation ranking finalists differ from the convergence shortlist"
+                f"{stage_id}.{fidelity} candidates differ from its parent shortlist"
             )
     else:
         _validate_canonical_parent_expansion(
@@ -1781,6 +1935,47 @@ def _validate_search_semantics(search_space: Mapping[str, Any]) -> None:
             raise CalibrationError(
                 f"Stage {stage_id!r} changes its frozen development dataset selector"
             )
+        identity_contract = _parent_expansion_identity_contract(stage)
+        if identity_contract is not None:
+            excluded_parameters, required_distinct_parents = identity_contract
+            unknown_parameters = excluded_parameters - set(base_configuration)
+            if unknown_parameters:
+                raise CalibrationError(
+                    f"Stage {stage_id!r} excludes unknown parent-identity parameters: "
+                    f"{sorted(unknown_parameters)}"
+                )
+            maximum_parents = _integer(
+                stage.get("maximum_parent_configurations"),
+                f"{stage_id} maximum parents",
+                minimum=1,
+            )
+            if required_distinct_parents != maximum_parents:
+                raise CalibrationError(
+                    f"Stage {stage_id!r} must require one distinct identity per parent"
+                )
+            if stage.get("include_inherited_configuration") is not False:
+                raise CalibrationError(
+                    f"Stage {stage_id!r} cannot combine an inherited candidate with a "
+                    "parent-normalizing crossed design"
+                )
+            override_signatures: set[str] = set()
+            for candidate_value in _sequence(stage.get("candidates"), "stage candidates"):
+                candidate = _mapping(candidate_value, "candidate")
+                overrides = _mapping(
+                    candidate.get("parameter_overrides"),
+                    "parameter overrides",
+                )
+                if set(overrides) != set(excluded_parameters):
+                    raise CalibrationError(
+                        f"Calibration candidate {candidate.get('id')!r} must override exactly "
+                        f"the parent-identity parameters {sorted(excluded_parameters)}"
+                    )
+                signature = canonical_json_sha256(dict(overrides))
+                if signature in override_signatures:
+                    raise CalibrationError(
+                        f"Stage {stage_id!r} contains duplicate crossed override tuples"
+                    )
+                override_signatures.add(signature)
         for candidate_value in _sequence(stage.get("candidates"), "stage candidates"):
             candidate = _mapping(candidate_value, "candidate")
             overrides = _mapping(candidate.get("parameter_overrides"), "parameter overrides")
@@ -1850,7 +2045,7 @@ def _validated_parents(
         raise CalibrationError(
             f"Stage {stage_id!r} accepts at most {maximum} parents; received {len(parents)}"
         )
-    expected_parent_stage = _PARENT_STAGES[stage_id]
+    expected_parent_stage = _LOGICAL_PARENT_STAGES[stage_id]
     if expected_parent_stage is None:
         raise CalibrationError(f"Stage {stage_id!r} has no parent stage")
     identifiers = [parent.configuration_id for parent in parents]
@@ -1908,6 +2103,9 @@ def _validate_stage_candidate_set(
     identifiers = [candidate.configuration_id for candidate in candidates]
     if len(set(identifiers)) != len(identifiers):
         raise CalibrationError(f"Stage {stage_id!r} received duplicate candidates")
+    configuration_hashes = [candidate.configuration_sha256 for candidate in candidates]
+    if len(set(configuration_hashes)) != len(configuration_hashes):
+        raise CalibrationError(f"Stage {stage_id!r} received duplicate effective configurations")
 
     inherited_variant = "base" if stage_id == "geometry" else "inherited"
     include_inherited = bool(stage["include_inherited_configuration"])
@@ -1971,12 +2169,129 @@ def _configuration_digest(parameters: Mapping[str, Any]) -> str:
     return canonical_json_sha256(dict(parameters))
 
 
+def _parent_expansion_identity_contract(
+    stage: Mapping[str, Any],
+) -> tuple[frozenset[str], int] | None:
+    raw_contract = stage.get("parent_expansion_identity")
+    if raw_contract is None:
+        return None
+    contract = _mapping(raw_contract, "parent expansion identity")
+    raw_excluded = _sequence(
+        contract.get("excluded_parameters"),
+        "parent expansion excluded parameters",
+    )
+    excluded = tuple(str(item) for item in raw_excluded)
+    if not excluded or len(set(excluded)) != len(excluded):
+        raise CalibrationError("Parent expansion excluded parameters must be non-empty and unique")
+    required = _integer(
+        contract.get("required_distinct_parents"),
+        "required distinct parent identities",
+        minimum=2,
+    )
+    return frozenset(excluded), required
+
+
+def _retained_parameter_identity(
+    candidate: CandidateConfiguration,
+    excluded_parameters: frozenset[str],
+) -> str:
+    unknown = excluded_parameters - set(candidate.parameters)
+    if unknown:
+        raise CalibrationError(
+            f"Candidate {candidate.configuration_id!r} lacks parent-identity parameters: "
+            f"{sorted(unknown)}"
+        )
+    return canonical_json_sha256(
+        {
+            key: copy.deepcopy(value)
+            for key, value in candidate.parameters.items()
+            if key not in excluded_parameters
+        }
+    )
+
+
+def _validate_parent_expansion_identities(
+    stage: Mapping[str, Any],
+    parents: Sequence[CandidateConfiguration],
+) -> None:
+    contract = _parent_expansion_identity_contract(stage)
+    if contract is None or not parents:
+        return
+    excluded, _required = contract
+    identities = [_retained_parameter_identity(parent, excluded) for parent in parents]
+    if len(set(identities)) != len(identities):
+        raise CalibrationError(
+            f"Stage {stage['id']!r} received parents that become duplicate effective "
+            "configurations after its declared overrides"
+        )
+
+
+def _select_stage_shortlist(
+    search_space: Mapping[str, Any],
+    stage_id: str,
+    fidelity: str,
+    scores: Sequence[CandidateScore],
+    limit: int,
+) -> tuple[CandidateScore, ...]:
+    """Choose the best outcome-ranked shortlist satisfying downstream identifiability.
+
+    A crossed child can deliberately overwrite parameters explored by its parent.
+    In that case, the parent shortlist must retain enough distinct identities in the
+    parameters that survive the child overrides. Representatives and remaining
+    candidates are both chosen in the frozen score order; no candidate is silently
+    deduplicated and the declared shortlist cardinality is preserved.
+    """
+
+    if limit < 1 or limit > len(scores):
+        raise CalibrationError(
+            f"Stage {stage_id!r} cannot select {limit} candidates from {len(scores)} scores"
+        )
+    child_id = _LOGICAL_CHILD_STAGES.get(stage_id)
+    if child_id is None or fidelity not in FIDELITIES:
+        return tuple(scores[:limit])
+    child = _stage(search_space, child_id)
+    contract = _parent_expansion_identity_contract(child)
+    if contract is None:
+        return tuple(scores[:limit])
+    excluded, required = contract
+    if limit < required:
+        raise CalibrationError(
+            f"Stage {stage_id!r} shortlist limit {limit} cannot provide the "
+            f"{required} parent identities required by {child_id!r}"
+        )
+
+    representative_indexes: list[int] = []
+    observed_identities: set[str] = set()
+    for index, score in enumerate(scores):
+        identity = _retained_parameter_identity(score.candidate, excluded)
+        if identity in observed_identities:
+            continue
+        observed_identities.add(identity)
+        representative_indexes.append(index)
+        if len(representative_indexes) == required:
+            break
+    if len(representative_indexes) != required:
+        raise CalibrationError(
+            f"Stage {stage_id!r} provides only {len(representative_indexes)} distinct "
+            f"parent identities; {child_id!r} requires {required}"
+        )
+
+    selected_indexes = set(representative_indexes)
+    for index in range(len(scores)):
+        if len(selected_indexes) == limit:
+            break
+        selected_indexes.add(index)
+    return tuple(scores[index] for index in sorted(selected_indexes))
+
+
 def _rank_balanced_rows(
     candidates: Sequence[CandidateConfiguration],
     summary_rows: Iterable[Mapping[str, Any]],
     *,
     expected_role: str,
     expected_seeds: tuple[int, ...] | None,
+    expected_fidelity: str,
+    expected_dataset_count: int,
 ) -> list[CandidateScore]:
     by_id = {candidate.configuration_id: candidate for candidate in candidates}
     if len(by_id) != len(candidates):
@@ -2010,9 +2325,9 @@ def _rank_balanced_rows(
             raise CalibrationError(f"Summary row {index} has an invalid dataset_id")
         seed = _integer(row.get("algorithm_seed"), f"summary row {index} seed", minimum=0)
         expected_run_id = (
-            f"validation__{configuration_id}__seed_{seed}"
+            f"validation__{configuration_id}__final__seed_{seed}"
             if expected_role == "validation"
-            else f"{configuration_id}__seed_{seed}"
+            else f"{configuration_id}__{expected_fidelity}__seed_{seed}"
         )
         if row.get("run_id") != expected_run_id:
             raise CalibrationError(
@@ -2083,6 +2398,11 @@ def _rank_balanced_rows(
     dataset_ids = sorted(next(iter(dataset_sets)))
     if not dataset_ids:
         raise CalibrationError("Calibration selection requires at least one dataset")
+    if len(dataset_ids) != expected_dataset_count:
+        raise CalibrationError(
+            f"Summary dataset count {len(dataset_ids)} differs from the predeclared "
+            f"count {expected_dataset_count}"
+        )
 
     observed_seed_sets: set[frozenset[int]] = set()
     for per_dataset in values.values():
@@ -2095,8 +2415,6 @@ def _rank_balanced_rows(
             f"Summary seed set {list(observed_seeds)} differs from the predeclared "
             f"set {sorted(expected_seeds)}"
         )
-    if len(observed_seeds) < 2:
-        raise CalibrationError("At least two algorithmic seeds are required for stability")
     for dataset_id in dataset_ids:
         context_sets = {
             executions[seed][3]

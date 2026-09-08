@@ -18,6 +18,7 @@ from .config import (
 )
 from .efficiency_development import (
     materialize_efficiency_development,
+    select_efficiency_components,
     select_efficiency_development,
 )
 from .efficiency_safety import (
@@ -26,6 +27,7 @@ from .efficiency_safety import (
     materialize_safety_plan,
     provisional_candidate,
 )
+from .execution_policy import resolve_execution_class
 from .noninferiority import analyze_noninferiority, materialize_noninferiority_plan
 from .noninferiority_evidence import write_noninferiority_evidence
 from .noninferiority_run import run_noninferiority_artifacts
@@ -33,6 +35,8 @@ from .pipeline import build_spathi_image, generate_data, preflight
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_efficiency_report
+from .resource_plan import detect_host_capacity, load_or_create_runtime_plan
+from .resource_scheduler import host_execution_lease
 from .runtime import (
     andrea_host_environment,
     benchmark_host_environment,
@@ -44,12 +48,14 @@ from .state import run_lock, state_path
 
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _IDENTITY_INPUTS = (
+    "experiments/v1/execution/policy.json",
     "experiments/v1/spathi/efficiency-design-sensitivity.json",
     "experiments/v1/spathi/efficiency-development.json",
     "experiments/v1/spathi/efficiency-study.json",
     "images.lock.json",
     "repos.lock.json",
     "schemas/efficiency-design-sensitivity.schema.json",
+    "schemas/execution-policy.schema.json",
     "schemas/efficiency-development-selection.schema.json",
     "schemas/efficiency-development.schema.json",
     "schemas/noninferiority-artifact-index.schema.json",
@@ -72,8 +78,10 @@ _IDENTITY_INPUTS = (
     "src/spathi_bench/noninferiority_run.py",
     "src/spathi_bench/efficiency_order.py",
     "src/spathi_bench/efficiency_workflow.py",
+    "src/spathi_bench/execution_policy.py",
     "src/spathi_bench/report_publication.py",
     "src/spathi_bench/scenario_inputs.py",
+    "src/spathi_bench/tool_contract.py",
 )
 
 
@@ -308,6 +316,7 @@ def _generate_profile(
     profile_id: str,
     run_root: Path,
     expected_spathi_image_id: str,
+    runtime_plan: dict[str, Any],
 ) -> dict[str, Any]:
     """Materialize one content-bound generation profile and verify its SPATHI image."""
 
@@ -317,6 +326,7 @@ def _generate_profile(
             **common,
             andrea_repo=andrea_repo,
             spathi_repo=spathi_repo,
+            runtime_plan=runtime_plan,
         )
         build_spathi_image(**common, spathi_repo=spathi_repo)
         generate_data(**common, andrea_repo=andrea_repo)
@@ -341,41 +351,82 @@ def _run_efficiency_development(
     flow_id: str,
     budget: str,
     selected_path: Path,
+    runtime_plan: dict[str, Any],
 ) -> tuple[Path, Path, Path]:
     """Run the finite development grid and freeze its outcome-bound selection."""
 
-    development_profile_id = f"efficiency-development-{budget}"
     development_root = workflow_root / "efficiency-development"
-    development_profile_path = development_root / "profile.json"
+
+    component_step = "component_scout"
+    component_root = development_root / "component-scout"
+    component_profile_id = f"efficiency-development-{budget}-component-scout"
+    component_profile_path = component_root / "profile.json"
     materialize_efficiency_development(
         repo_root=repo_root,
         selected_config_path=selected_path,
         budget=budget,
-        output_dir=development_root / "bundle",
-        profile_output=development_profile_path,
+        step=component_step,
+        component_selection_path=None,
+        output_dir=component_root / "bundle",
+        profile_output=component_profile_path,
     )
-    development_run_root = work_root / "v1" / development_profile_id / flow_id
+    component_run_root = work_root / "v1" / component_profile_id / flow_id
     # Local import avoids a module-level cycle: workflows also exposes this workflow.
     from .workflows import run_profile_pipeline
 
     run_profile_pipeline(
         repo_root=repo_root,
-        profile_id=development_profile_id,
-        profile_file=development_profile_path,
-        run_root=development_run_root,
+        profile_id=component_profile_id,
+        profile_file=component_profile_path,
+        run_root=component_run_root,
         andrea_repo=andrea_repo,
         spathi_repo=spathi_repo,
         statistics=False,
+        runtime_plan=runtime_plan,
+    )
+    component_selection_path = development_root / "component-selection.json"
+    select_efficiency_components(
+        repo_root=repo_root,
+        selected_config_path=selected_path,
+        budget=budget,
+        scout_metrics_path=component_run_root / "reports/metrics.csv",
+        output_path=component_selection_path,
+    )
+
+    confirmation_step = "joint_confirmation"
+    confirmation_root = development_root / "joint-confirmation"
+    confirmation_profile_id = f"efficiency-development-{budget}-joint-confirmation"
+    confirmation_profile_path = confirmation_root / "profile.json"
+    materialize_efficiency_development(
+        repo_root=repo_root,
+        selected_config_path=selected_path,
+        budget=budget,
+        step=confirmation_step,
+        component_selection_path=component_selection_path,
+        output_dir=confirmation_root / "bundle",
+        profile_output=confirmation_profile_path,
+    )
+    confirmation_run_root = work_root / "v1" / confirmation_profile_id / flow_id
+    run_profile_pipeline(
+        repo_root=repo_root,
+        profile_id=confirmation_profile_id,
+        profile_file=confirmation_profile_path,
+        run_root=confirmation_run_root,
+        andrea_repo=andrea_repo,
+        spathi_repo=spathi_repo,
+        statistics=False,
+        runtime_plan=runtime_plan,
     )
     development_selection_path = development_root / "selection.json"
     select_efficiency_development(
         repo_root=repo_root,
         selected_config_path=selected_path,
         budget=budget,
-        metrics_path=development_run_root / "reports/metrics.csv",
+        component_selection_path=component_selection_path,
+        confirmation_metrics_path=confirmation_run_root / "reports/metrics.csv",
         output_path=development_selection_path,
     )
-    return development_run_root, development_profile_path, development_selection_path
+    return confirmation_run_root, confirmation_profile_path, development_selection_path
 
 
 def _production_config(
@@ -527,6 +578,10 @@ def run_efficiency_workflow(
     work_root: Path,
     profile: str,
     calibration_run_id: str | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
     """Generate the independent panel, run all arms, verify evidence and analyze it."""
 
@@ -598,7 +653,21 @@ def run_efficiency_workflow(
     workflow_root = work / "v1/workflows/efficiency" / profile / flow_id
     run_root = work / "v1" / profile_id / flow_id
     workflow_path = workflow_root / "workflow.json"
-    with run_lock(workflow_root):
+    runtime_plan = load_or_create_runtime_plan(
+        workflow_root / "runtime-plan.json",
+        boundary=workflow_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=work),
+    )
+    execution_plan = resolve_execution_class(
+        repo_root=root,
+        class_id=str(profile_payload["execution_class"]),
+        runtime_plan=runtime_plan,
+    )
+    with host_execution_lease(workload=f"efficiency:{flow_id}"), run_lock(workflow_root):
         expected_image_id = selected["selection_evidence"]["spathi_image_id"]
         (
             development_run_root,
@@ -612,7 +681,8 @@ def run_efficiency_workflow(
             workflow_root=workflow_root,
             flow_id=flow_id,
             budget=profile,
-            selected_config_path=selected_path,
+            selected_path=selected_path,
+            runtime_plan=runtime_plan,
         )
         _generate_profile(
             repo_root=root,
@@ -621,6 +691,7 @@ def run_efficiency_workflow(
             profile_id=profile_id,
             run_root=run_root,
             expected_spathi_image_id=expected_image_id,
+            runtime_plan=runtime_plan,
         )
         panel_path = workflow_root / "panel.json"
         panel = _panel_from_generation(
@@ -644,7 +715,6 @@ def run_efficiency_workflow(
             budget=profile,
             output_path=plan_path,
         )
-        resources = profile_payload["resources"]["infer_network"]
         index_path = workflow_root / "artifact-index.json"
         run_noninferiority_artifacts(
             repo_root=root,
@@ -652,11 +722,7 @@ def run_efficiency_workflow(
             andrea_repo=andrea_repo,
             artifact_index_path=index_path,
             artifact_store_path=work / "v1/artifacts",
-            max_parallel_runs=1,
-            max_cores=int(resources["max_cores"]),
-            max_ram_gb=float(resources["max_ram_gb"]),
-            planner=str(resources["planner"]),
-            planner_time_limit_seconds=int(resources["planner_time_limit_seconds"]),
+            execution_plan=execution_plan,
         )
         evidence_path = workflow_root / "evidence.json"
         write_noninferiority_evidence(
@@ -696,6 +762,7 @@ def run_efficiency_workflow(
                 profile_id=safety_profile_id,
                 run_root=safety_generation_run,
                 expected_spathi_image_id=expected_image_id,
+                runtime_plan=runtime_plan,
             )
             safety_root = workflow_root / "efficiency-safety"
             safety_panel_path = safety_root / "panel.json"
@@ -725,16 +792,10 @@ def run_efficiency_workflow(
                 andrea_repo=andrea_repo,
                 artifact_index_path=safety_index_path,
                 artifact_store_path=work / "v1/artifacts",
-                max_parallel_runs=1,
-                max_cores=int(safety_profile_payload["resources"]["infer_network"]["max_cores"]),
-                max_ram_gb=float(
-                    safety_profile_payload["resources"]["infer_network"]["max_ram_gb"]
-                ),
-                planner=str(safety_profile_payload["resources"]["infer_network"]["planner"]),
-                planner_time_limit_seconds=int(
-                    safety_profile_payload["resources"]["infer_network"][
-                        "planner_time_limit_seconds"
-                    ]
+                execution_plan=resolve_execution_class(
+                    repo_root=root,
+                    class_id=str(safety_profile_payload["execution_class"]),
+                    runtime_plan=runtime_plan,
                 ),
             )
             safety_evidence_path = safety_root / "evidence.json"
@@ -788,6 +849,7 @@ def run_efficiency_workflow(
                 "profile_sha256s": profile_digests,
             },
             "status": "publishing",
+            "runtime_plan": runtime_plan,
             "efficiency_development": {
                 "run": development_run_root.relative_to(root).as_posix(),
                 "profile": development_profile_path.relative_to(root).as_posix(),

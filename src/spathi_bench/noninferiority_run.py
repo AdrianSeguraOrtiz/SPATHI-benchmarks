@@ -8,10 +8,7 @@ members of the predeclared counterbalanced order.
 
 from __future__ import annotations
 
-import json
-import re
-import subprocess
-import threading
+import math
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -47,144 +44,77 @@ from .runtime import (
     docker_runtime_environment,
 )
 from .safe_io import atomic_write_json, path_below_no_symlinks, write_idempotent_json
+from .tool_contract import oom_observed, spathi_runtime_resources
 
-_MEMORY_SAMPLE_INTERVAL_MILLISECONDS = 100
-_MEMORY_UNITS = {
-    "b": 1,
-    "kb": 1000,
-    "kib": 1024,
-    "mb": 1000**2,
-    "mib": 1024**2,
-    "gb": 1000**3,
-    "gib": 1024**3,
-    "tb": 1000**4,
-    "tib": 1024**4,
-}
-_MEMORY_VALUE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b)\s*$", re.I)
+_GIB = 1024**3
 
 
-def _memory_bytes(raw: str) -> int:
-    """Parse Docker's current-memory value without confusing SI and IEC units."""
+def _canonical_execution_measurement(
+    report: Mapping[str, Any],
+    *,
+    expected_threads: int,
+    expected_ram_gb: float,
+    require_complete: bool,
+) -> dict[str, Any]:
+    """Validate and return ANDREA's canonical end-to-end telemetry."""
 
-    value = raw.split("/", 1)[0].strip()
-    match = _MEMORY_VALUE.fullmatch(value)
-    if match is None:
-        raise BenchmarkConfigError(f"Docker returned an unsupported memory value: {raw!r}")
-    multiplier = _MEMORY_UNITS.get(match.group(2).lower())
-    if multiplier is None:
-        raise BenchmarkConfigError(f"Docker returned an unsupported memory unit: {raw!r}")
-    measured = int(float(match.group(1)) * multiplier)
-    if measured < 1:
-        raise BenchmarkConfigError(f"Docker returned a non-positive memory value: {raw!r}")
-    return measured
-
-
-class _ContainerMemorySampler:
-    """Sample the one SPATHI container mounted below an ANDREA output root."""
-
-    def __init__(self, *, output_root: Path, image_id: str) -> None:
-        self.output_root = output_root.resolve()
-        self.image_id = image_id
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._samples: list[int] = []
-        self._error: BaseException | None = None
-
-    def start(self) -> None:
-        self._thread = threading.Thread(
-            target=self._sample,
-            name="spathi-efficiency-memory",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def finish(self) -> tuple[int, int]:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
-            if self._thread.is_alive():
-                raise BenchmarkConfigError("SPATHI container memory sampler did not terminate")
-        if self._error is not None:
-            raise BenchmarkConfigError(f"Cannot measure SPATHI container memory: {self._error}")
-        if not self._samples:
-            raise BenchmarkConfigError(
-                "No SPATHI container memory sample was captured; efficiency evidence cannot "
-                "be published without an observed peak"
+    execution = report.get("execution")
+    measurement = execution.get("measurement") if isinstance(execution, Mapping) else None
+    if not isinstance(measurement, Mapping):
+        raise BenchmarkConfigError("ANDREA report omits canonical end-to-end telemetry")
+    wall = measurement.get("wall_time_seconds")
+    cpu = measurement.get("cpu_time_seconds")
+    peak = measurement.get("peak_memory_bytes")
+    output = measurement.get("output_bytes")
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
+    if (
+        measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "andrea_execution"
+        or isinstance(wall, bool)
+        or not isinstance(wall, (int, float))
+        or not math.isfinite(float(wall))
+        or float(wall) < 0
+        or (
+            cpu is not None
+            and (
+                isinstance(cpu, bool)
+                or not isinstance(cpu, (int, float))
+                or not math.isfinite(float(cpu))
+                or float(cpu) < 0
             )
-        return max(self._samples), len(self._samples)
-
-    def _docker(self, *arguments: str) -> str:
-        completed = subprocess.run(
-            ["docker", *arguments],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
         )
-        if completed.returncode != 0:
-            return ""
-        return completed.stdout.strip()
-
-    def _belongs_to_output(self, container_id: str) -> bool:
-        raw = self._docker("inspect", "--format", "{{json .Mounts}}", container_id)
-        if not raw:
-            return False
-        try:
-            mounts = json.loads(raw)
-        except json.JSONDecodeError:
-            return False
-        for mount in mounts if isinstance(mounts, list) else []:
-            source = mount.get("Source") if isinstance(mount, dict) else None
-            if not isinstance(source, str):
-                continue
-            try:
-                Path(source).resolve().relative_to(self.output_root)
-            except ValueError:
-                continue
-            return True
-        return False
-
-    def _sample(self) -> None:
-        try:
-            container_id: str | None = None
-            interval = _MEMORY_SAMPLE_INTERVAL_MILLISECONDS / 1000.0
-            while not self._stop.is_set():
-                if container_id is None:
-                    ids = self._docker(
-                        "ps",
-                        "--no-trunc",
-                        "--filter",
-                        f"ancestor={self.image_id}",
-                        "--format",
-                        "{{.ID}}",
-                    ).splitlines()
-                    container_id = next(
-                        (item for item in ids if item and self._belongs_to_output(item)),
-                        None,
-                    )
-                if container_id is not None:
-                    raw = self._docker(
-                        "stats", "--no-stream", "--format", "{{.MemUsage}}", container_id
-                    )
-                    if raw:
-                        self._samples.append(_memory_bytes(raw.splitlines()[-1]))
-                self._stop.wait(interval)
-        except BaseException as exc:  # surfaced synchronously by finish()
-            self._error = exc
-
-
-def _output_tree_bytes(output_root: Path) -> int:
-    output_dirs = [
-        path for path in output_root.rglob("out") if path.is_dir() and path.parent.name == "io"
-    ]
-    if len(output_dirs) != 1:
+        or (peak is not None and (type(peak) is not int or peak < 0))
+        or type(output) is not int
+        or output < 0
+        or not isinstance(assigned, Mapping)
+        or type(assigned.get("threads_peak")) is not int
+        or int(assigned["threads_peak"]) > expected_threads
+        or type(assigned.get("ram_limit_peak_bytes")) is not int
+        or int(assigned["ram_limit_peak_bytes"]) > round(expected_ram_gb * _GIB)
+        or not isinstance(telemetry, Mapping)
+        or telemetry.get("status") not in {"complete", "partial", "unavailable"}
+        or telemetry.get("wall_source") != "andrea_monotonic_clock"
+        or telemetry.get("wall_semantics")
+        != "andrea_execution_end_to_end_including_input_verification_preparation_"
+        "scheduling_merging_and_requested_output_materialization"
+    ):
+        raise BenchmarkConfigError("ANDREA end-to-end telemetry is invalid")
+    if require_complete and (
+        float(wall) <= 0
+        or not isinstance(cpu, (int, float))
+        or isinstance(cpu, bool)
+        or type(peak) is not int
+        or peak < 1
+        or output < 1
+        or assigned.get("threads_peak") != expected_threads
+        or assigned.get("ram_limit_peak_bytes") != round(expected_ram_gb * _GIB)
+        or telemetry.get("status") != "complete"
+    ):
         raise BenchmarkConfigError(
-            f"Efficiency run has {len(output_dirs)} SPATHI output trees; expected exactly one"
+            "Completed efficiency inference lacks complete canonical resource telemetry"
         )
-    total = sum(path.stat().st_size for path in output_dirs[0].rglob("*") if path.is_file())
-    if total < 1:
-        raise BenchmarkConfigError("SPATHI output tree is empty")
-    return total
+    return dict(measurement)
 
 
 def _inside(repo_root: Path, path: Path, label: str, *, require_file: bool = False) -> str:
@@ -253,6 +183,7 @@ def _configuration_run(
         "execution_mode": "group_native",
         "extra_inputs": ["groups", "tf_list"],
         "outputs": {"directed": True, "sign": "none"},
+        "runtime_resources": spathi_runtime_resources(),
     }
     return run, metadata, custom
 
@@ -297,12 +228,21 @@ def _inference_spec(
     }
 
 
-def _validate_execution_output(output_root: Path, *, dataset_id: str, run_id: str) -> None:
+def _validate_execution_output(
+    output_root: Path,
+    *,
+    dataset_id: str,
+    run_id: str,
+    expected_threads: int,
+    expected_ram_gb: float,
+    output_profile: str,
+) -> None:
     report_path = unique_direct_manifest(output_root, "run_report.json")
     report = load_json_object(report_path, "efficiency inference report")
     tools = report.get("tools") or {}
     if (
         report.get("status") != "executed"
+        or report.get("output_profile") != output_profile
         or report.get("run_id") != run_id
         or report.get("dataset", {}).get("id") != dataset_id
         or tools.get("selected") != [run_id]
@@ -313,6 +253,12 @@ def _validate_execution_output(output_root: Path, *, dataset_id: str, run_id: st
         or tools.get("tool_origins", {}).get(run_id) != "custom"
     ):
         raise BenchmarkConfigError(f"ANDREA did not complete exactly {run_id!r} on {dataset_id!r}")
+    _canonical_execution_measurement(
+        report,
+        expected_threads=expected_threads,
+        expected_ram_gb=expected_ram_gb,
+        require_complete=True,
+    )
     for suffix in (
         "io/out/network.csv",
         "io/out/target_eligibility.tsv.gz",
@@ -331,7 +277,13 @@ def _validate_execution_output(output_root: Path, *, dataset_id: str, run_id: st
 
 
 def _known_tool_failure(
-    output_root: Path, *, dataset_id: str, run_id: str
+    output_root: Path,
+    *,
+    dataset_id: str,
+    run_id: str,
+    expected_threads: int,
+    expected_ram_gb: float,
+    output_profile: str,
 ) -> dict[str, Any] | None:
     """Return an auditable tool failure, while rejecting ambiguous infrastructure output."""
 
@@ -346,9 +298,9 @@ def _known_tool_failure(
     failed = tools.get("failed")
     failure_message = failed.get(run_id) if isinstance(failed, Mapping) else None
     tool_status = tools.get("status_by_tool", {}).get(run_id)
-    elapsed = report.get("execution", {}).get("elapsed_seconds")
     if (
         report.get("status") != "executed"
+        or report.get("output_profile") != output_profile
         or report.get("run_id") != run_id
         or report.get("dataset", {}).get("id") != dataset_id
         or tools.get("selected") != [run_id]
@@ -358,11 +310,21 @@ def _known_tool_failure(
         or tool_status in {"completed", "completed_with_warnings"}
         or not isinstance(failure_message, str)
         or not failure_message.strip()
-        or isinstance(elapsed, bool)
-        or not isinstance(elapsed, (int, float))
-        or elapsed < 0
     ):
         return None
+    try:
+        measurement = _canonical_execution_measurement(
+            report,
+            expected_threads=expected_threads,
+            expected_ram_gb=expected_ram_gb,
+            require_complete=False,
+        )
+    except BenchmarkConfigError:
+        return None
+    result = (tools.get("results") or {}).get(run_id)
+    if not isinstance(result, Mapping):
+        return None
+
     return {
         "schema_version": "1.0",
         "status": "tool_execution_failed",
@@ -371,7 +333,10 @@ def _known_tool_failure(
         "tool_status": tool_status,
         "failure_message": failure_message,
         "run_report_sha256": sha256_file(report_path),
-        "elapsed_seconds": float(elapsed),
+        "measurement_sha256": canonical_json_sha256(measurement),
+        "wall_time_seconds": float(measurement["wall_time_seconds"]),
+        "peak_memory_bytes": measurement["peak_memory_bytes"],
+        "oom_killed": oom_observed(result),
     }
 
 
@@ -393,6 +358,9 @@ def _publish_bound_tool_failure(
         output_root,
         dataset_id=str(task["dataset_id"]),
         run_id=str(task["run"]["run_id"]),
+        expected_threads=int(task["run"]["resources"]["threads"]),
+        expected_ram_gb=float(task["run"]["resources"]["ram_gb"]),
+        output_profile=str(task["resources"]["output_profile"]),
     )
     if failure is None:
         return None
@@ -419,11 +387,6 @@ def _execute_task(
         _write_json(custom_path, {"tools": [task["custom"]]})
         output_root = staging / "output"
         resources = task["resources"]
-        sampler = _ContainerMemorySampler(
-            output_root=output_root,
-            image_id=str(task["custom"]["docker_image"]),
-        )
-        sampler.start()
         try:
             andrea_command(
                 [
@@ -438,46 +401,38 @@ def _execute_task(
                     "--output-dir",
                     str(output_root),
                     "--max-cores",
-                    str(resources["max_cores"]),
+                    str(task["run"]["resources"]["threads"]),
                     "--max-ram-gb",
-                    str(resources["max_ram_gb"]),
+                    str(resources["memory_gib"]),
                     "--planner",
                     str(resources["planner"]),
                     "--planner-time-limit-seconds",
                     str(resources["planner_time_limit_seconds"]),
+                    "--output-profile",
+                    str(resources["output_profile"]),
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
                 log_path=log_root / f"{task['dataset_id']}__{task['run']['run_id']}.log",
             )
-        except BaseException as primary_error:
-            sampler_failed = False
-            try:
-                sampler.finish()
-            except Exception as sampler_error:
-                sampler_failed = True
-                primary_error.add_note(
-                    f"The SPATHI memory sampler also failed during cleanup: {sampler_error}"
-                )
-            failure_artifact = (
-                None
-                if sampler_failed
-                else _publish_bound_tool_failure(
-                    task=task,
-                    staging=staging,
-                    output_root=output_root,
-                    store=store,
-                )
+        except BaseException:
+            failure_artifact = _publish_bound_tool_failure(
+                task=task,
+                staging=staging,
+                output_root=output_root,
+                store=store,
             )
             if failure_artifact is not None:
                 return failure_artifact
             raise
-        peak_memory_bytes, memory_samples = sampler.finish()
         try:
             _validate_execution_output(
                 output_root,
                 dataset_id=task["dataset_id"],
                 run_id=task["run"]["run_id"],
+                expected_threads=int(task["run"]["resources"]["threads"]),
+                expected_ram_gb=float(task["run"]["resources"]["ram_gb"]),
+                output_profile=str(resources["output_profile"]),
             )
         except BenchmarkConfigError:
             failure_artifact = _publish_bound_tool_failure(
@@ -489,23 +444,6 @@ def _execute_task(
             if failure_artifact is not None:
                 return failure_artifact
             raise
-        _write_json(
-            staging / "efficiency-resource-measurement.json",
-            {
-                "schema_version": "1.0",
-                "measurement_scope": "spathi_container_and_declared_outputs",
-                "peak_memory": {
-                    "bytes": peak_memory_bytes,
-                    "method": "docker_stats_sampled_container_memory",
-                    "sample_interval_milliseconds": _MEMORY_SAMPLE_INTERVAL_MILLISECONDS,
-                    "samples": memory_samples,
-                },
-                "output": {
-                    "bytes": _output_tree_bytes(output_root),
-                    "method": "exact_spathi_output_tree",
-                },
-            },
-        )
         return store.publish_from_temp(staging, kind="inference", spec=task["spec"])
 
 
@@ -540,23 +478,49 @@ def run_noninferiority_artifacts(
     plan_path: Path,
     andrea_repo: Path,
     artifact_index_path: Path,
+    execution_plan: Mapping[str, Any],
     artifact_store_path: Path | None = None,
-    max_parallel_runs: int = 1,
-    max_cores: int = 1,
-    max_ram_gb: float = 4.0,
-    planner: str = "heuristic",
-    planner_time_limit_seconds: int = 30,
 ) -> Path:
     """Run or resume the exact reference/candidate product declared by a plan."""
 
-    if max_parallel_runs != 1:
-        raise BenchmarkConfigError(
-            "Efficiency runtime gates require --max-parallel-runs=1 to avoid contention"
-        )
-    if max_cores < 1 or max_ram_gb <= 0:
-        raise BenchmarkConfigError("Efficiency resources must be positive")
-    if planner not in {"auto", "cp_sat", "heuristic"} or planner_time_limit_seconds < 1:
+    operations = execution_plan.get("operations")
+    inference = operations.get("inference") if isinstance(operations, Mapping) else None
+    if not isinstance(inference, Mapping):
+        raise BenchmarkConfigError("Efficiency execution plan has no inference allocation")
+    cpu_threads = inference.get("cpu_threads")
+    memory_bytes = inference.get("memory_bytes")
+    memory_gib = inference.get("memory_gib")
+    planner = inference.get("planner")
+    planner_time_limit_seconds = inference.get("planner_time_limit_seconds")
+    if (
+        not isinstance(cpu_threads, int)
+        or isinstance(cpu_threads, bool)
+        or cpu_threads < 1
+        or type(memory_bytes) is not int
+        or memory_bytes < _GIB
+        or not isinstance(memory_gib, (int, float))
+        or isinstance(memory_gib, bool)
+        or memory_gib <= 0
+        or not math.isclose(float(memory_gib), memory_bytes / _GIB, rel_tol=0, abs_tol=1e-12)
+    ):
+        raise BenchmarkConfigError("Efficiency execution allocation must be positive")
+    if (
+        planner not in {"auto", "cp_sat", "heuristic"}
+        or not isinstance(planner_time_limit_seconds, (int, float))
+        or planner_time_limit_seconds <= 0
+    ):
         raise BenchmarkConfigError("Invalid efficiency planner resources")
+    output_profile = execution_plan.get("output_profile")
+    fingerprint = execution_plan.get("fingerprint")
+    unsigned_execution_plan = dict(execution_plan)
+    unsigned_execution_plan.pop("fingerprint", None)
+    if (
+        output_profile != "full"
+        or execution_plan.get("class_id") != "bulk_full"
+        or not isinstance(fingerprint, str)
+        or fingerprint != canonical_json_sha256(unsigned_execution_plan)
+    ):
+        raise BenchmarkConfigError("Efficiency execution plan is invalid")
     root = repo_root.resolve()
     _inside(root, plan_path, "Non-inferiority plan", require_file=True)
     _inside(root, artifact_index_path, "Artifact index output")
@@ -617,16 +581,24 @@ def run_noninferiority_artifacts(
         "build_fingerprint": plan["reference"]["spathi_build_fingerprint"],
     }
     resources: dict[str, Any] = {
-        "max_parallel_runs": max_parallel_runs,
-        "max_cores": max_cores,
-        "max_ram_gb": max_ram_gb,
+        "cpu_threads": cpu_threads,
+        "memory_bytes": memory_bytes,
+        "memory_gib": memory_gib,
         "planner": planner,
         "planner_time_limit_seconds": planner_time_limit_seconds,
+        "output_profile": output_profile,
+        "execution_plan_fingerprint": fingerprint,
     }
     measurement_protocol: dict[str, Any] = {
-        "peak_memory": "docker_stats_sampled_container_memory",
-        "sample_interval_milliseconds": _MEMORY_SAMPLE_INTERVAL_MILLISECONDS,
-        "output_bytes": "exact_spathi_output_tree",
+        "source": "andrea_execution_measurement",
+        "scope": "andrea_execution",
+        "wall_time": (
+            "andrea_execution_end_to_end_including_input_verification_preparation_"
+            "scheduling_merging_and_requested_output_materialization"
+        ),
+        "peak_memory": "physical_container_peak_overlap_upper_bound_excluding_andrea_host",
+        "output_bytes": "andrea_execution_output_tree_at_measurement",
+        "telemetry_status": "complete_required",
         "model_counts": "validated_spathi_run_metadata",
         "tree_counts": "validated_spathi_model_diagnostics",
     }
@@ -731,6 +703,7 @@ def run_noninferiority_artifacts(
                     role=role,
                     image_id=image_id,
                 )
+                run["resources"] = {"threads": cpu_threads, "ram_gb": memory_gib}
                 spec = _inference_spec(
                     dataset=dataset,
                     dataset_id=dataset_id,
@@ -770,8 +743,7 @@ def run_noninferiority_artifacts(
                 tasks.append(task)
 
     def execute_missing(prepared: list[dict[str, Any]]) -> None:
-        # max_parallel_runs is deliberately fixed to one above.  Executing the
-        # list directly preserves the frozen within-block order and, unlike a
+        # Executing the list directly preserves the frozen within-block order and, unlike a
         # pre-submitted executor queue, stops at the first crash.  A subsequent
         # invocation therefore reuses validated completed artifacts and starts
         # at the first missing member without manual cache deletion.

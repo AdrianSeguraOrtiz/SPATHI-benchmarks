@@ -11,8 +11,8 @@
     "id": "closed_form_normal_location_sensitivity",
     "random_sampling": false,
     "familywise_alpha": 0.05,
-    "confirmatory_candidate_count": 3,
-    "per_candidate_one_sided_alpha": 0.016666666666666666,
+    "confirmatory_candidate_count": 1,
+    "per_candidate_one_sided_alpha": 0.05,
     "weighting": "equal_simulator_equal_condition_equal_dataset",
     "assumptions": [
       "Independent generation seeds within each fixed simulator-condition stratum.",

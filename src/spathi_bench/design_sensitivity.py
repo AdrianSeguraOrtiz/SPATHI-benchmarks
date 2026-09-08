@@ -160,12 +160,13 @@ def load_design_sensitivity_contract(
     if reference["interpretation"] != contract["interpretation"]:
         raise BenchmarkConfigError("Efficiency study changes the sensitivity interpretation")
 
-    candidates = study["validation_components"]
     method = contract["method"]
-    expected_alpha = float(study["analysis"]["familywise_alpha"]) / len(candidates)
+    analysis = study["analysis"]
+    expected_alpha = float(analysis["familywise_alpha"])
     if (
-        float(method["familywise_alpha"]) != float(study["analysis"]["familywise_alpha"])
-        or method["confirmatory_candidate_count"] != len(candidates)
+        analysis.get("multiplicity") != "single_hypothesis_no_adjustment"
+        or float(method["familywise_alpha"]) != expected_alpha
+        or method["confirmatory_candidate_count"] != 1
         or not math.isclose(
             float(method["per_candidate_one_sided_alpha"]),
             expected_alpha,
@@ -175,7 +176,7 @@ def load_design_sensitivity_contract(
         or method["weighting"] != study["analysis"]["aggregation"]
     ):
         raise BenchmarkConfigError(
-            "Efficiency sensitivity multiplicity or weighting differs from the study"
+            "Efficiency sensitivity single-nominee inference or weighting differs from the study"
         )
 
     target = contract["target_design"]

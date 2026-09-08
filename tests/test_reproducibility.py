@@ -49,16 +49,16 @@ def test_committed_design_passes_a_stable_schema_validated_audit() -> None:
     assert result["coverage"]["stochastic_inference_runs"] > 0
     assert result["coverage"]["scale_stress_generator_datasets"] > 0
     assert result["coverage"] == {
-        "simulator_manifests": 94,
-        "simulator_runs": 94,
-        "simulator_replicates": 220,
+        "simulator_manifests": 97,
+        "simulator_runs": 97,
+        "simulator_replicates": 223,
         "inference_metadata_documents": 7,
         "stochastic_inference_runs": 44,
         "deterministic_inference_runs": 6,
         "scale_stress_generator_requests": 2,
         "scale_stress_generator_datasets": 9,
         "scale_stress_component_seeds": 36,
-        "calibration_algorithm_seeds": 40,
+        "calibration_algorithm_seeds": 34,
         "statistical_contract_documents": 1,
         "statistical_root_seeds": 1,
         "comparison_algorithm_seeds": 7,

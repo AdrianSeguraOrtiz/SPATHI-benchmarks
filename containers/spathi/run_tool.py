@@ -265,13 +265,85 @@ def _resolve_group_policy(params: dict[str, Any], *, group_count: int) -> dict[s
     return _validated_scalar_params(resolved)
 
 
-def _validated_params(path: Path, *, group_count: int | None = None) -> dict[str, Any]:
+def _validated_target_scope(raw: object) -> dict[str, Any]:
+    if raw is None or raw == {"method": "all"}:
+        return {"method": "all"}
+    if not isinstance(raw, dict):
+        raise ValueError("target_scope must be all targets or a resolved frozen hash scout")
+    expected_scopes = {
+        (256, "spathi-calibration-high-tf-v1"),
+        (64, "spathi-scalability-scout-v1"),
+        (128, "spathi-scalability-scout-v1"),
+    }
+    scope_identity = (raw.get("size"), raw.get("salt"))
+    if (
+        raw.get("method") != "sha256_gene_id"
+        or scope_identity not in expected_scopes
+        or set(raw) != {"method", "size", "salt", "dataset_id"}
+    ):
+        raise ValueError(
+            "target_scope must be all targets or a resolved frozen calibration/scalability scout"
+        )
+    dataset_id = raw.get("dataset_id")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError("resolved hash target_scope requires a non-empty dataset_id")
+    return {
+        "method": "sha256_gene_id",
+        "size": int(raw["size"]),
+        "salt": str(raw["salt"]),
+        "dataset_id": dataset_id,
+    }
+
+
+def _validated_params(
+    path: Path, *, group_count: int | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
     params = _load_json_object(path, "params")
+    target_scope = _validated_target_scope(params.pop("target_scope", None))
     if "group_policy" in params:
         if group_count is None:
             raise ValueError("group_count is required to resolve a conditional SPATHI policy")
-        return _resolve_group_policy(params, group_count=group_count)
-    return _validated_scalar_params(params)
+        return _resolve_group_policy(params, group_count=group_count), target_scope
+    return _validated_scalar_params(params), target_scope
+
+
+def _hashed_target_list(
+    expression: Path,
+    output: Path,
+    scope: dict[str, Any],
+    *,
+    random_seed: int,
+) -> Path | None:
+    """Select targets from seed, dataset and gene IDs, never expression values or truth."""
+
+    if scope["method"] == "all":
+        return None
+    genes: list[str] = []
+    with expression.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle, delimiter="\t")
+        header = next(reader, None)
+        if not header or len(header) < 2:
+            raise ValueError("expression matrix has no tabular header")
+        for row_number, row in enumerate(reader, start=2):
+            if not row or not row[0].strip():
+                raise ValueError(f"expression matrix row {row_number} has no gene identifier")
+            genes.append(row[0].strip())
+    if len(genes) != len(set(genes)):
+        raise ValueError("expression matrix contains duplicate gene identifiers")
+    size = int(scope["size"])
+    if len(genes) < size:
+        raise ValueError(f"hash scout requires at least {size} expression genes")
+    salt = str(scope["salt"])
+    dataset_id = str(scope["dataset_id"])
+    selected = sorted(
+        genes,
+        key=lambda gene: (
+            hashlib.sha256(f"{salt}\0{random_seed}\0{dataset_id}\0{gene}".encode()).digest(),
+            gene,
+        ),
+    )[:size]
+    output.write_text("".join(f"{gene}\n" for gene in selected), encoding="utf-8")
+    return output
 
 
 def _validate_execution(path: Path) -> None:
@@ -484,7 +556,7 @@ def _failure_message(error: Exception, output_dir: Path) -> tuple[str, dict[str,
 
 def run(args: argparse.Namespace) -> None:
     tf_list, groups, execution_path = _validate_files(args)
-    params = _validated_params(args.params, group_count=_group_count(groups))
+    params, target_scope = _validated_params(args.params, group_count=_group_count(groups))
     _validate_execution(execution_path)
 
     published = {name: args.output_dir / name for name in ("network.csv", *AUDIT_SIDECARS)}
@@ -509,13 +581,21 @@ def run(args: argparse.Namespace) -> None:
     staged: dict[str, Path] = {}
     try:
         with TemporaryDirectory(prefix="spathi-adapter-") as scratch_name:
+            scratch = Path(scratch_name)
+            target_list = _hashed_target_list(
+                args.input,
+                scratch / "target-list.txt",
+                target_scope,
+                random_seed=int(params["random_seed"]),
+            )
             config = SpathiConfig(
                 expression=args.input,
                 tf_list=tf_list,
                 groups=groups,
-                output_dir=Path(scratch_name) / "spathi-run",
+                output_dir=scratch / "spathi-run",
                 threads=args.threads,
                 report=False,
+                target_list=target_list,
                 **params,
             )
             try:

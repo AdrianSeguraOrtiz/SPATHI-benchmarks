@@ -44,6 +44,7 @@ _ROLES = frozenset(
         "test",
         "scalability",
         "dimensional_transfer",
+        "performance",
     }
 )
 
@@ -366,6 +367,7 @@ def validate_seed_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "test",
                 "scalability",
                 "dimensional_transfer",
+                "performance",
             )
         }
     ) | {"full.efficiency_safety"}
@@ -373,7 +375,7 @@ def validate_seed_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         raise SeedPlanError(
             "namespaces must define smoke plus disjoint reduced/full development, "
             "validation, efficiency-development, efficiency-validation, efficiency-safety, test, scalability, "
-            "and dimensional-transfer namespaces"
+            "dimensional-transfer, and performance namespaces"
         )
 
     raw_allocations = plan.get("allocations")

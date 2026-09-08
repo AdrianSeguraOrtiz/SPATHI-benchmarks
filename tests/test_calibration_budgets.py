@@ -11,13 +11,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def test_calibration_budgets_freeze_full_and_reduced_algorithmic_seeds() -> None:
     search = load_json_object(REPO_ROOT / "experiments/v1/spathi/search-space.json")
 
-    assert search["calibration_budgets"] == {
+    expected_seeds = {
         "full": {
             "algorithmic_seeds": {
-                "geometry": [661002162, 737908398, 361869425, 1687437019, 49611793],
-                "estimator": [1078468867, 1606970393, 1420105189, 112047603, 2066048289],
+                "geometry": [661002162, 737908398, 361869425],
+                "estimator": [1078468867, 1606970393, 1420105189],
                 "estimator_scale_transfer": [1564593931, 1494888927, 1246618629],
-                "interaction": [1068542066, 1674017269, 135662027, 489596501, 764796620],
+                "interaction": [1068542066, 1674017269, 135662027],
                 "convergence": [1699595498, 909275566, 1245131614, 1379909982, 1544350695],
                 "validation": [2114967450, 1335083472, 976486246, 330429731, 1228553048],
             }
@@ -33,6 +33,19 @@ def test_calibration_budgets_freeze_full_and_reduced_algorithmic_seeds() -> None
             }
         },
     }
+    assert {
+        budget: {"algorithmic_seeds": specification["algorithmic_seeds"]}
+        for budget, specification in search["calibration_budgets"].items()
+    } == expected_seeds
+    assert search["calibration_budgets"]["reduced"]["expected_physical_fits"] == 431
+    assert search["calibration_budgets"]["reduced"]["expected_logical_results"] == 527
+    assert search["calibration_budgets"]["full"]["expected_physical_fits"] == 1762
+    assert search["calibration_budgets"]["full"]["expected_logical_results"] == 2482
+    for budget, specification in search["calibration_budgets"].items():
+        fidelity = specification["multifidelity"]
+        assert fidelity["independent_profile"] is True
+        assert fidelity["may_consume_other_profile_outcomes"] is False
+        assert budget + "_outcomes" not in fidelity["forbidden_scout_inputs"]
     assert all("algorithmic_seeds" not in stage for stage in search["stages"])
 
 
@@ -52,7 +65,9 @@ def test_budgeted_profiles_have_symmetric_conditions_and_expected_dataset_counts
             assert profile["calibration_budget"] == budget
             assert profile["purpose"] == purpose
             assert profile["planned_design"]["replicates_per_condition"] == replicates
-            assert profile["resources"]["generate_data"]["max_parallel_tasks"] <= replicates
+            assert profile["execution_class"] == (
+                "bulk_canonical" if purpose == "calibration" else "bulk_full"
+            )
             assert {job["dataset_role"] for job in profile["generation_jobs"]} == {role}
             expected_count = calibration_count if purpose == "calibration" else selection_count
             assert (

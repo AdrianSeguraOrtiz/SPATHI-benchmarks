@@ -32,6 +32,7 @@ from .calibration import resolve_group_policy
 from .config import BenchmarkConfigError, load_json_object, validate_json
 from .efficiency_order import counterbalanced_execution_orders, runner_implementation_sha256
 from .safe_io import path_below_no_symlinks, write_idempotent_json
+from .tool_contract import oom_observed, spathi_runtime_resources
 
 _NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
 _ELIGIBILITY_COLUMNS = (
@@ -112,7 +113,7 @@ class _Inference:
     eligibility_path: Path
     diagnostics_path: Path
     metadata_path: Path
-    resource_path: Path
+    report_path: Path
     measurements: dict[str, Any]
     network: dict[str, dict[tuple[str, str], float]]
     eligible_targets: dict[str, tuple[str, ...]]
@@ -640,69 +641,67 @@ def _validate_run_metadata(
 
 
 def _resource_measurements(
-    artifact: Artifact,
-    path: Path,
+    report: Mapping[str, Any],
     *,
-    runtime_seconds: float,
     metadata_counts: Mapping[str, int | bool],
     execution_contract: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Verify runner measurements and combine them with SPATHI's exact counters."""
+    """Verify canonical ANDREA telemetry and combine it with SPATHI counters."""
 
-    payload = load_json_object(path, "efficiency resource measurement")
-    if set(payload) != {"schema_version", "measurement_scope", "peak_memory", "output"}:
-        raise BenchmarkConfigError("Efficiency resource measurement has unexpected fields")
-    if (
-        payload.get("schema_version") != "1.0"
-        or payload.get("measurement_scope") != "spathi_container_and_declared_outputs"
-    ):
-        raise BenchmarkConfigError("Efficiency resource measurement has the wrong contract")
     protocol = execution_contract.get("measurement_protocol")
-    peak = payload.get("peak_memory")
-    output = payload.get("output")
+    execution = report.get("execution")
+    measurement = execution.get("measurement") if isinstance(execution, Mapping) else None
+    resources = execution_contract.get("resources")
+    expected_threads = resources.get("cpu_threads") if isinstance(resources, Mapping) else None
+    expected_memory_bytes = (
+        resources.get("memory_bytes") if isinstance(resources, Mapping) else None
+    )
+    if not isinstance(protocol, Mapping) or not isinstance(measurement, Mapping):
+        raise BenchmarkConfigError("Efficiency inference omits canonical ANDREA telemetry")
+    wall_time = measurement.get("wall_time_seconds")
+    peak_bytes = measurement.get("peak_memory_bytes")
+    output_bytes = measurement.get("output_bytes")
+    assigned = measurement.get("assigned_resources")
+    telemetry = measurement.get("telemetry")
     if (
-        not isinstance(protocol, Mapping)
-        or not isinstance(peak, dict)
-        or not isinstance(output, dict)
-    ):
-        raise BenchmarkConfigError("Efficiency resource measurement is incomplete")
-    if set(peak) != {"bytes", "method", "sample_interval_milliseconds", "samples"} or set(
-        output
-    ) != {"bytes", "method"}:
-        raise BenchmarkConfigError("Efficiency resource measurement structure is invalid")
-    if (
-        peak.get("method") != protocol.get("peak_memory")
-        or peak.get("sample_interval_milliseconds") != protocol.get("sample_interval_milliseconds")
-        or output.get("method") != protocol.get("output_bytes")
-    ):
-        raise BenchmarkConfigError("Resource measurement differs from the declared protocol")
-    peak_bytes = peak.get("bytes")
-    samples = peak.get("samples")
-    output_bytes = output.get("bytes")
-    if (
-        isinstance(peak_bytes, bool)
+        protocol.get("source") != "andrea_execution_measurement"
+        or protocol.get("scope") != "andrea_execution"
+        or protocol.get("wall_time")
+        != "andrea_execution_end_to_end_including_input_verification_preparation_"
+        "scheduling_merging_and_requested_output_materialization"
+        or protocol.get("peak_memory")
+        != "physical_container_peak_overlap_upper_bound_excluding_andrea_host"
+        or protocol.get("output_bytes") != "andrea_execution_output_tree_at_measurement"
+        or protocol.get("telemetry_status") != "complete_required"
+        or measurement.get("schema_version") != "1.0"
+        or measurement.get("scope") != "andrea_execution"
+        or isinstance(wall_time, bool)
+        or not isinstance(wall_time, (int, float))
+        or not math.isfinite(float(wall_time))
+        or float(wall_time) <= 0
+        or isinstance(peak_bytes, bool)
         or not isinstance(peak_bytes, int)
         or peak_bytes < 1
-        or isinstance(samples, bool)
-        or not isinstance(samples, int)
-        or samples < 1
         or isinstance(output_bytes, bool)
         or not isinstance(output_bytes, int)
         or output_bytes < 1
+        or not isinstance(assigned, Mapping)
+        or assigned.get("threads_peak") != expected_threads
+        or assigned.get("ram_limit_peak_bytes") != expected_memory_bytes
+        or not isinstance(telemetry, Mapping)
+        or telemetry.get("status") != "complete"
+        or telemetry.get("wall_source") != "andrea_monotonic_clock"
+        or telemetry.get("wall_semantics")
+        != "andrea_execution_end_to_end_including_input_verification_preparation_"
+        "scheduling_merging_and_requested_output_materialization"
+        or telemetry.get("memory_source") != "child_container_cgroup_peaks"
+        or telemetry.get("memory_semantics")
+        != "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"
     ):
-        raise BenchmarkConfigError("Efficiency resource measurement contains invalid values")
-    observed_output_bytes = sum(
-        int(entry["size"])
-        for entry in artifact.manifest["files"]
-        if "/io/out/" in f"/{entry['path']}"
-    )
-    if output_bytes != observed_output_bytes:
-        raise BenchmarkConfigError(
-            "Measured SPATHI output bytes do not match the immutable artifact"
-        )
+        raise BenchmarkConfigError("Efficiency canonical ANDREA telemetry is invalid")
     return {
         **dict(metadata_counts),
-        "wall_time_seconds": runtime_seconds,
+        "wall_time_seconds": float(wall_time),
         "peak_memory_bytes": peak_bytes,
         "output_bytes": output_bytes,
     }
@@ -774,6 +773,16 @@ def _validate_inference_binding(
     run = spec.get("run")
     if not isinstance(run, dict) or run.get("execution") != {"mode": "group_native"}:
         raise BenchmarkConfigError("Non-inferiority inference must use group_native execution")
+    resources = execution_contract.get("resources")
+    expected_threads = resources.get("cpu_threads") if isinstance(resources, Mapping) else None
+    expected_memory_gib = resources.get("memory_gib") if isinstance(resources, Mapping) else None
+    if run.get("resources") != {
+        "threads": expected_threads,
+        "ram_gb": expected_memory_gib,
+    }:
+        raise BenchmarkConfigError(
+            "Non-inferiority inference resources differ from the execution plan"
+        )
     expected_params = {**parameters, "random_seed": algorithm_seed}
     if run.get("params") != expected_params:
         raise BenchmarkConfigError("Inference artifact parameters differ from the frozen plan")
@@ -820,6 +829,7 @@ def _validate_inference_binding(
         or custom.get("execution_mode") != "group_native"
         or custom.get("extra_inputs") != ["groups", "tf_list"]
         or custom.get("outputs") != {"directed": True, "sign": "none"}
+        or custom.get("runtime_resources") != spathi_runtime_resources()
     ):
         raise BenchmarkConfigError("Inference artifact lacks the group-native SPATHI definition")
     forbidden = [
@@ -892,7 +902,10 @@ def _execution_failure_from_artifact(
         "tool_status",
         "failure_message",
         "run_report_sha256",
-        "elapsed_seconds",
+        "measurement_sha256",
+        "wall_time_seconds",
+        "peak_memory_bytes",
+        "oom_killed",
     }
     if set(marker) != expected_keys or marker.get("schema_version") != "1.0":
         raise BenchmarkConfigError("Efficiency execution-failure marker has an invalid contract")
@@ -904,7 +917,14 @@ def _execution_failure_from_artifact(
     tool_status = (
         tools.get("status_by_tool", {}).get(run_id) if isinstance(tools, Mapping) else None
     )
-    elapsed = report.get("execution", {}).get("elapsed_seconds")
+    execution = report.get("execution")
+    measurement = execution.get("measurement") if isinstance(execution, Mapping) else None
+    wall_time = measurement.get("wall_time_seconds") if isinstance(measurement, Mapping) else None
+    peak_memory = measurement.get("peak_memory_bytes") if isinstance(measurement, Mapping) else None
+    result = (
+        tools.get("results", {}).get(run_id) if isinstance(tools, Mapping) else None
+    )
+
     if (
         marker.get("status") != "tool_execution_failed"
         or marker.get("dataset_id") != dataset.dataset_id
@@ -912,8 +932,14 @@ def _execution_failure_from_artifact(
         or marker.get("tool_status") != tool_status
         or marker.get("failure_message") != failure_message
         or marker.get("run_report_sha256") != sha256_file(report_path)
-        or marker.get("elapsed_seconds") != elapsed
+        or not isinstance(measurement, Mapping)
+        or marker.get("measurement_sha256") != canonical_json_sha256(measurement)
+        or marker.get("wall_time_seconds") != wall_time
+        or marker.get("peak_memory_bytes") != peak_memory
+        or marker.get("oom_killed")
+        != (isinstance(result, Mapping) and oom_observed(result))
         or report.get("status") != "executed"
+        or report.get("output_profile") != execution_contract["resources"]["output_profile"]
         or report.get("run_id") != run_id
         or report.get("dataset", {}).get("id") != dataset.dataset_id
         or report.get("dataset", {}).get("fingerprint", {}).get("value") != dataset.fingerprint
@@ -925,9 +951,10 @@ def _execution_failure_from_artifact(
         or tool_status in {"completed", "completed_with_warnings"}
         or not isinstance(failure_message, str)
         or not failure_message.strip()
-        or isinstance(elapsed, bool)
-        or not isinstance(elapsed, (int, float))
-        or elapsed < 0
+        or not isinstance(wall_time, (int, float))
+        or isinstance(wall_time, bool)
+        or not math.isfinite(float(wall_time))
+        or wall_time < 0
     ):
         raise BenchmarkConfigError(
             "Execution-failure artifact does not prove one bound SPATHI tool failure"
@@ -990,15 +1017,11 @@ def _inference_from_artifact(
         artifact, "io/out/model_diagnostics.tsv.gz", "model diagnostics sidecar"
     )
     metadata_path = _single_member(artifact, "io/out/run_metadata.json", "SPATHI metadata sidecar")
-    resource_path = _single_member(
-        artifact,
-        "efficiency-resource-measurement.json",
-        "efficiency resource measurement",
-    )
     report_path = _single_member(artifact, "run_report.json", "ANDREA inference report")
     report = load_json_object(report_path, "ANDREA inference report")
     if (
         report.get("status") != "executed"
+        or report.get("output_profile") != execution_contract["resources"]["output_profile"]
         or report.get("dataset", {}).get("id") != dataset.dataset_id
     ):
         raise BenchmarkConfigError("ANDREA report does not describe the expected completed dataset")
@@ -1024,15 +1047,6 @@ def _inference_from_artifact(
         raise BenchmarkConfigError(
             "ANDREA report does not prove complete execution of every context"
         )
-    runtime = report.get("execution", {}).get("elapsed_seconds")
-    if (
-        isinstance(runtime, bool)
-        or not isinstance(runtime, (int, float))
-        or not math.isfinite(runtime)
-        or runtime <= 0
-    ):
-        raise BenchmarkConfigError("ANDREA report has no valid whole-run elapsed time")
-
     inputs = _input_members(artifact)
     expected_input_hashes = {
         "expression": sha256_file(dataset.expression_path),
@@ -1072,9 +1086,7 @@ def _inference_from_artifact(
             "SPATHI metadata accounting differs from validated eligibility/diagnostics"
         )
     measurements = _resource_measurements(
-        artifact,
-        resource_path,
-        runtime_seconds=float(runtime),
+        report,
         metadata_counts=metadata_counts,
         execution_contract=execution_contract,
     )
@@ -1084,7 +1096,7 @@ def _inference_from_artifact(
         eligibility_path=eligibility_path,
         diagnostics_path=diagnostics_path,
         metadata_path=metadata_path,
-        resource_path=resource_path,
+        report_path=report_path,
         measurements=measurements,
         network=_network(network_path, dataset),
         eligible_targets=eligible_targets,
@@ -1621,9 +1633,7 @@ def construct_noninferiority_evidence(
                                 reference.diagnostics_path
                             ),
                             "reference_run_metadata_sha256": sha256_file(reference.metadata_path),
-                            "reference_resource_measurement_sha256": sha256_file(
-                                reference.resource_path
-                            ),
+                            "reference_run_report_sha256": sha256_file(reference.report_path),
                             "candidate_target_eligibility_sha256": sha256_file(
                                 inferred.eligibility_path
                             ),
@@ -1631,9 +1641,7 @@ def construct_noninferiority_evidence(
                                 inferred.diagnostics_path
                             ),
                             "candidate_run_metadata_sha256": sha256_file(inferred.metadata_path),
-                            "candidate_resource_measurement_sha256": sha256_file(
-                                inferred.resource_path
-                            ),
+                            "candidate_run_report_sha256": sha256_file(inferred.report_path),
                         },
                     }
                 )

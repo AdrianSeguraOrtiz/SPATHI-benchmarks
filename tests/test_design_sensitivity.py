@@ -40,6 +40,8 @@ def test_committed_efficiency_design_sensitivity_is_valid_and_deterministic() ->
     second = evaluate_design_sensitivity(contract)
 
     assert contract["method"]["random_sampling"] is False
+    assert contract["method"]["confirmatory_candidate_count"] == 1
+    assert contract["method"]["per_candidate_one_sided_alpha"] == 0.05
     assert contract["target_design"]["expected_independent_datasets"] == 25
     assert contract["target_design"]["expected_effective_sample_size"] == 16.0
     assert {item["replicates"] for item in contract["target_design"]["strata"]} == {5}
@@ -73,7 +75,7 @@ def test_design_sensitivity_rejects_drift_from_the_frozen_study(
     elif mutation == "stratum_replication":
         changed["target_design"]["strata"][0]["replicates"] -= 1
     elif mutation == "multiplicity":
-        changed["method"]["per_candidate_one_sided_alpha"] = 0.02
+        changed["method"]["per_candidate_one_sided_alpha"] = 0.04
     elif mutation == "accuracy_margin":
         changed["scenario_grid"]["accuracy"]["noninferiority_margin"] = 0.003
     else:

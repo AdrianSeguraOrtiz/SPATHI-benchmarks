@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import math
-import random
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
@@ -31,6 +30,7 @@ from .noninferiority import (
 from .safe_io import write_idempotent_json
 from .seeds import derive_plan_seed, load_seed_plan
 from .state import state_path
+from .tool_contract import spathi_runtime_resources
 
 CONTRACT_PATH = Path("experiments/v1/spathi/efficiency-development.json")
 
@@ -60,7 +60,6 @@ def load_efficiency_development_contract(repo_root: Path) -> dict[str, Any]:
     expected_parameters = {
         "target_eligibility": TARGET_ELIGIBILITY_PARAMETERS,
         "adaptive_trees": ADAPTIVE_TREE_PARAMETERS,
-        "combined": TARGET_ELIGIBILITY_PARAMETERS | ADAPTIVE_TREE_PARAMETERS,
     }
     for candidate in candidates:
         component = str(candidate["component"])
@@ -72,7 +71,9 @@ def load_efficiency_development_contract(repo_root: Path) -> dict[str, Any]:
     if set(by_component) != set(expected_parameters) or any(
         len(items) != 3 for items in by_component.values()
     ):
-        raise BenchmarkConfigError("Efficiency development requires three candidates per component")
+        raise BenchmarkConfigError(
+            "Efficiency development requires three candidates for each primitive component"
+        )
 
     seed_plan = load_seed_plan(root / "experiments/v1/seeds/seed-plan.json")
     all_generation_seeds: set[int] = set()
@@ -91,21 +92,37 @@ def load_efficiency_development_contract(repo_root: Path) -> dict[str, Any]:
             raise BenchmarkConfigError(
                 f"{budget_id.title()} efficiency-development algorithm seeds are stale"
             )
-        expected_order_seed = derive_plan_seed(
-            seed_plan,
-            namespace=namespace,
-            stream="execution_order",
-            coordinates={"purpose": "counterbalanced_execution_order"},
-        )
-        if budget["execution_order_seed"] != expected_order_seed:
+        timing_index = int(budget["timing_seed_index"])
+        accuracy_indices = tuple(int(item) for item in budget["accuracy_seed_indices"])
+        if timing_index != 1 or tuple(sorted(accuracy_indices)) != tuple(
+            range(2, len(expected_seeds) + 1)
+        ):
             raise BenchmarkConfigError(
-                f"{budget_id.title()} efficiency-development execution-order seed is stale"
+                f"{budget_id.title()} must reserve seed 1 for timing and every later seed "
+                "for held-back accuracy"
+            )
+        expected_order_seeds = {
+            step: derive_plan_seed(
+                seed_plan,
+                namespace=namespace,
+                stream="execution_order",
+                coordinates={
+                    "purpose": "counterbalanced_execution_order",
+                    "step": step,
+                },
+            )
+            for step in ("component_scout", "joint_confirmation")
+        }
+        if budget["execution_order_seeds"] != expected_order_seeds:
+            raise BenchmarkConfigError(
+                f"{budget_id.title()} efficiency-development execution-order seeds are stale"
             )
         profile = load_profile(root, budget["profile"])
         if (
             profile["purpose"] != "efficiency_development"
             or profile["status"] != "planned"
             or profile["inference_batches"]
+            or profile["execution_class"] != "efficiency_development_canonical"
         ):
             raise BenchmarkConfigError("Efficiency-development template profile is not canonical")
         jobs = profile["generation_jobs"]
@@ -130,6 +147,26 @@ def load_efficiency_development_contract(repo_root: Path) -> dict[str, Any]:
             all_generation_seeds.update(seeds)
         if dataset_count != budget["expected_independent_datasets"]:
             raise BenchmarkConfigError("Efficiency-development profile has the wrong dataset count")
+        scout = budget["steps"]["component_scout"]
+        confirmation = budget["steps"]["joint_confirmation"]
+        expected_confirmation_indices = [timing_index, *accuracy_indices]
+        if (
+            scout["algorithm_seed_indices"] != [timing_index]
+            or confirmation["algorithm_seed_indices"] != expected_confirmation_indices
+        ):
+            raise BenchmarkConfigError(
+                f"{budget_id.title()} efficiency-development step seed ledger is stale"
+            )
+        expected_scout = dataset_count * 7
+        expected_confirmation = dataset_count * 4 * (1 + len(accuracy_indices))
+        if (
+            scout["expected_physical_fits"] != expected_scout
+            or confirmation["expected_physical_fits"] != expected_confirmation
+            or budget["expected_physical_fits"] != expected_scout + expected_confirmation
+        ):
+            raise BenchmarkConfigError(
+                f"{budget_id.title()} efficiency-development physical-fit ledger is stale"
+            )
     return contract
 
 
@@ -138,13 +175,27 @@ def materialize_efficiency_development(
     repo_root: Path,
     selected_config_path: Path,
     budget: str,
+    step: str,
+    component_selection_path: Path | None,
     output_dir: Path,
     profile_output: Path,
 ) -> tuple[Path, Path]:
-    """Bind every development candidate and the exact reference to one frozen selection."""
+    """Materialize one prospective efficiency-development step.
+
+    The component scout executes the exact reference and all six primitive
+    candidates with the designated timing seed.  Joint confirmation is
+    outcome-bound to that scout: it reruns the exact reference, both primitive
+    nominees and their combined policy with one common timing seed and every
+    held-back accuracy seed. The pipeline executes those blocks serially in a
+    deterministic counterbalanced order.
+    """
 
     if budget not in {"reduced", "full"}:
         raise BenchmarkConfigError("Efficiency-development budget must be reduced or full")
+    if step not in {"component_scout", "joint_confirmation"}:
+        raise BenchmarkConfigError(
+            "Efficiency-development step must be component_scout or joint_confirmation"
+        )
     root = repo_root.resolve()
     contract = load_efficiency_development_contract(root)
     selected_path = selected_config_path.resolve()
@@ -154,36 +205,91 @@ def materialize_efficiency_development(
         raise BenchmarkConfigError("Efficiency development requires the current SPATHI selection")
     budget_contract = contract["budgets"][budget]
     image = load_image_lock(root)["images"]["spathi"]["tag"]
-    seeds = budget_contract["algorithm_seeds"]
-    definitions = [
-        {
-            "id": "spathi_exact_reference",
-            "component": "reference",
-            "group_policy": reference["group_policy"],
-            "selection_role": "base",
-        },
-        *[
-            {
-                **candidate,
-                "group_policy": _policy_with_overrides(
-                    reference["group_policy"], candidate["execution_overrides"]
-                ),
-                "selection_role": "candidate",
-            }
-            for candidate in contract["candidates"]
-        ],
-    ]
+    seeds = tuple(int(seed) for seed in budget_contract["algorithm_seeds"])
+    reference_definition = {
+        "id": "spathi_exact_reference",
+        "component": "reference",
+        "group_policy": reference["group_policy"],
+        "selection_role": "base",
+        "execution_overrides": {},
+    }
+    if step == "component_scout":
+        if component_selection_path is not None:
+            raise BenchmarkConfigError("Component scout cannot consume a prior selection")
+        definitions = [
+            reference_definition,
+            *[
+                {
+                    **candidate,
+                    "group_policy": _policy_with_overrides(
+                        reference["group_policy"], candidate["execution_overrides"]
+                    ),
+                    "selection_role": "candidate",
+                }
+                for candidate in contract["candidates"]
+            ],
+        ]
+        scheduled = [(definition, 1, seeds[0]) for definition in definitions]
+    else:
+        if component_selection_path is None:
+            raise BenchmarkConfigError(
+                "Joint confirmation requires the content-bound component scout selection"
+            )
+        component_selection = load_efficiency_component_selection(
+            root,
+            component_selection_path,
+            budget=budget,
+            selected_config_path=selected_path,
+        )
+        nominees = {
+            str(item["component"]): item for item in component_selection["component_nominees"]
+        }
+        if set(nominees) != {"target_eligibility", "adaptive_trees"}:
+            raise BenchmarkConfigError("Component scout did not nominate both primitive policies")
+        eligibility = nominees["target_eligibility"]
+        adaptive = nominees["adaptive_trees"]
+        combined_overrides = {
+            **deepcopy(eligibility["execution_overrides"]),
+            **deepcopy(adaptive["execution_overrides"]),
+        }
+        combined = {
+            "id": "combined_scout_nominees",
+            "component": "combined",
+            "execution_overrides": combined_overrides,
+            "group_policy": _policy_with_overrides(reference["group_policy"], combined_overrides),
+            "selection_role": "candidate",
+        }
+        definitions = [
+            reference_definition,
+            *[
+                {
+                    **deepcopy(nominee),
+                    "group_policy": _policy_with_overrides(
+                        reference["group_policy"], nominee["execution_overrides"]
+                    ),
+                    "selection_role": "candidate",
+                }
+                for nominee in (eligibility, adaptive)
+            ],
+            combined,
+        ]
+        scheduled = [
+            (definition, position, seeds[position - 1])
+            for position in range(1, len(seeds) + 1)
+            for definition in definitions
+        ]
+
+    expected_fit_count = int(budget_contract["steps"][step]["expected_physical_fits"])
+    dataset_count = int(budget_contract["expected_independent_datasets"])
+    if len(scheduled) * dataset_count != expected_fit_count:
+        raise BenchmarkConfigError(
+            f"Efficiency-development {step} schedule does not match its physical-fit ledger"
+        )
     runs: list[dict[str, Any]] = []
     custom: list[dict[str, Any]] = []
     metadata: list[dict[str, Any]] = []
-    scheduled = [
-        (definition, index, seed)
-        for definition in definitions
-        for index, seed in enumerate(seeds, start=1)
-    ]
-    random.Random(budget_contract["execution_order_seed"]).shuffle(scheduled)
     for definition, index, seed in scheduled:
-        run_id = f"effdev_{definition['id']}_seed_{seed}"
+        run_id = f"effdev_{step}_{definition['id']}_seed_{seed}"
         runs.append(
             {
                 "run_id": run_id,
@@ -195,11 +301,12 @@ def materialize_efficiency_development(
         custom.append(
             {
                 "run_id": run_id,
-                "name": f"SPATHI efficiency development {definition['id']} seed {seed}",
+                "name": (f"SPATHI efficiency development {step} {definition['id']} seed {seed}"),
                 "docker_image": image,
                 "execution_mode": "group_native",
                 "extra_inputs": ["groups", "tf_list"],
                 "outputs": {"directed": True, "sign": "none"},
+                "runtime_resources": spathi_runtime_resources(),
             }
         )
         metadata.append(
@@ -210,10 +317,17 @@ def materialize_efficiency_development(
                 "algorithm_seed": seed,
                 "algorithm_seed_parameter": "random_seed",
                 "family": "spathi_efficiency_development",
+                "efficiency_development_step": step,
+                "efficiency_component": definition["component"],
+                "seed_role": "timing" if index == 1 else "accuracy",
+                "execution_order_seed": budget_contract["execution_order_seeds"][step],
                 "seed_derivation": {
                     "namespace": f"{budget}.efficiency_development",
                     "stream": "inference",
-                    "coordinates": {"purpose": "algorithm_replicate", "replicate_index": index},
+                    "coordinates": {
+                        "purpose": "algorithm_replicate",
+                        "replicate_index": index,
+                    },
                 },
             }
         )
@@ -233,10 +347,11 @@ def materialize_efficiency_development(
         publish_new_json_directory(output_dir, payloads)
     template = load_profile(root, budget_contract["profile"])
     profile = deepcopy(template)
+    profile["id"] = f"efficiency-development-{budget}-{step.replace('_', '-')}"
     profile["status"] = "runnable"
     profile["inference_batches"] = [
         {
-            "id": "spathi_efficiency_development",
+            "id": f"spathi_efficiency_development_{step}",
             "kind": "spathi",
             "dataset_role": "efficiency_development",
             "generation_jobs": [job["id"] for job in profile["generation_jobs"]],
@@ -272,7 +387,7 @@ def _validated_metric_rows(
     repo_root: Path,
     metrics_file: Path,
     budget_contract: Mapping[str, Any],
-    configuration_ids: set[str],
+    configuration_seeds: Mapping[str, set[int]],
 ) -> tuple[list[dict[str, str]], Path]:
     """Bind every selected CSV row to the completed content-addressed pipeline state."""
 
@@ -304,17 +419,17 @@ def _validated_metric_rows(
         raise BenchmarkConfigError(
             "Efficiency-development execution state has the wrong dataset panel"
         )
-    expected_seeds = {int(seed) for seed in budget_contract["algorithm_seeds"]}
     expected_executions = {
         (configuration, dataset, seed)
-        for configuration in configuration_ids
+        for configuration, seeds in configuration_seeds.items()
         for dataset in datasets
-        for seed in expected_seeds
+        for seed in seeds
     }
     evaluations = [
         item
         for item in state.get("evaluations", [])
-        if item.get("configuration_id") in configuration_ids and item.get("dataset_id") in datasets
+        if item.get("configuration_id") in configuration_seeds
+        and item.get("dataset_id") in datasets
     ]
     observed_executions = [
         (
@@ -373,11 +488,16 @@ def _validated_metric_rows(
             for context in names
         )
     for dataset_id in datasets:
-        for seed in expected_seeds:
+        for seed in configuration_seeds.get("spathi_exact_reference", set()):
             reference_contexts = contexts_by_execution[("spathi_exact_reference", dataset_id, seed)]
+            same_seed_candidates = {
+                configuration
+                for configuration, seeds in configuration_seeds.items()
+                if configuration != "spathi_exact_reference" and seed in seeds
+            }
             if any(
                 contexts_by_execution[(configuration, dataset_id, seed)] != reference_contexts
-                for configuration in configuration_ids - {"spathi_exact_reference"}
+                for configuration in same_seed_candidates
             ):
                 raise BenchmarkConfigError(
                     "Efficiency-development candidate and reference group contexts differ"
@@ -421,47 +541,15 @@ def _validated_metric_rows(
     return rows, execution_state_path
 
 
-def select_efficiency_development(
-    *,
-    repo_root: Path,
-    selected_config_path: Path,
-    budget: str,
-    metrics_path: Path,
-    output_path: Path,
-) -> Path:
-    """Select one reproducible development finalist per component from metrics.csv."""
-
-    root = repo_root.resolve()
-    contract = load_efficiency_development_contract(root)
-    selected_path = selected_config_path.resolve()
-    _selected_policy(root, selected_path, budget)
-    metrics_file = metrics_path.resolve()
-    _inside(root, metrics_file, "Efficiency-development metrics")
-    budget_contract = contract["budgets"][budget]
-    expected_seeds = {str(seed) for seed in budget_contract["algorithm_seeds"]}
-    configuration_ids = {"spathi_exact_reference", *[item["id"] for item in contract["candidates"]]}
-    rows, execution_state_path = _validated_metric_rows(
-        repo_root=root,
-        metrics_file=metrics_file,
-        budget_contract=budget_contract,
-        configuration_ids=configuration_ids,
-    )
-    grouped: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+def _execution_summaries(
+    rows: Sequence[Mapping[str, str]],
+) -> dict[str, dict[tuple[str, int], tuple[str, str, float, float]]]:
+    grouped: dict[tuple[str, str, int], list[Mapping[str, str]]] = defaultdict(list)
     for row in rows:
-        grouped[(row["configuration_id"], row["dataset_id"], row["algorithm_seed"])].append(row)
-    reference_keys = {
-        (dataset, seed)
-        for configuration, dataset, seed in grouped
-        if configuration == "spathi_exact_reference"
-    }
-    if (
-        len({dataset for dataset, _seed in reference_keys})
-        != budget_contract["expected_independent_datasets"]
-        or {seed for _dataset, seed in reference_keys} != expected_seeds
-    ):
-        raise BenchmarkConfigError("Efficiency-development reference evidence is incomplete")
-
-    summaries: dict[str, dict[tuple[str, str], tuple[str, str, float, float]]] = defaultdict(dict)
+        grouped[(row["configuration_id"], row["dataset_id"], int(row["algorithm_seed"]))].append(
+            row
+        )
+    summaries: dict[str, dict[tuple[str, int], tuple[str, str, float, float]]] = defaultdict(dict)
     for (configuration, dataset, seed), context_rows in grouped.items():
         try:
             aupr = fmean(float(row["aupr"]) for row in context_rows)
@@ -479,93 +567,358 @@ def select_efficiency_development(
             for row in context_rows
         ):
             raise BenchmarkConfigError("One development execution mixes dataset strata")
-        summaries[configuration][(dataset, seed)] = (simulator, condition, aupr, median(wall_times))
-
-    rule = contract["selection_rule"]
-    results: list[dict[str, Any]] = []
-    for candidate in contract["candidates"]:
-        candidate_rows = summaries[candidate["id"]]
-        complete = set(candidate_rows) == reference_keys
-        if not complete:
-            raise BenchmarkConfigError(
-                f"Efficiency-development candidate {candidate['id']!r} has incomplete paired evidence"
-            )
-        accuracy_values: list[tuple[str, str, str, float]] = []
-        runtime_values: list[tuple[str, str, str, float]] = []
-        for key in sorted(reference_keys):
-            simulator, condition, reference_aupr, reference_time = summaries[
-                "spathi_exact_reference"
-            ][key]
-            candidate_simulator, candidate_condition, candidate_aupr, candidate_time = (
-                candidate_rows[key]
-            )
-            if (candidate_simulator, candidate_condition) != (simulator, condition):
-                raise BenchmarkConfigError("Candidate/reference development strata differ")
-            accuracy_values.append((simulator, condition, key[0], reference_aupr - candidate_aupr))
-            runtime_values.append(
-                (simulator, condition, key[0], math.log(candidate_time / reference_time))
-            )
-        mean_loss = _hierarchical_mean(accuracy_values)
-        runtime_ratio = math.exp(_hierarchical_mean(runtime_values))
-        results.append(
-            {
-                "candidate_id": candidate["id"],
-                "component": candidate["component"],
-                "mean_aupr_loss": mean_loss,
-                "wall_time_ratio": runtime_ratio,
-                "complete": True,
-                "accuracy_eligible": mean_loss <= rule["maximum_mean_absolute_aupr_loss"],
-                "dataset_count": budget_contract["expected_independent_datasets"],
-                "algorithm_seed_count": len(expected_seeds),
-            }
+        summaries[configuration][(dataset, seed)] = (
+            simulator,
+            condition,
+            aupr,
+            median(wall_times),
         )
+    return summaries
+
+
+def _candidate_result(
+    *,
+    candidate: Mapping[str, Any],
+    summaries: Mapping[str, Mapping[tuple[str, int], tuple[str, str, float, float]]],
+    dataset_ids: set[str],
+    accuracy_seeds: tuple[int, ...],
+    timing_seed: int,
+    maximum_loss: float,
+) -> dict[str, Any]:
+    reference = summaries.get("spathi_exact_reference", {})
+    observed = summaries.get(str(candidate["id"]), {})
+    accuracy_values: list[tuple[str, str, str, float]] = []
+    runtime_values: list[tuple[str, str, str, float]] = []
+    for dataset_id in sorted(dataset_ids):
+        losses: list[float] = []
+        simulator: str | None = None
+        condition: str | None = None
+        for seed in accuracy_seeds:
+            key = (dataset_id, seed)
+            if key not in reference or key not in observed:
+                raise BenchmarkConfigError(
+                    f"Efficiency candidate {candidate['id']!r} lacks paired accuracy evidence"
+                )
+            ref_simulator, ref_condition, ref_aupr, _ref_time = reference[key]
+            cand_simulator, cand_condition, cand_aupr, _cand_time = observed[key]
+            if (ref_simulator, ref_condition) != (cand_simulator, cand_condition):
+                raise BenchmarkConfigError("Candidate/reference development strata differ")
+            simulator, condition = ref_simulator, ref_condition
+            losses.append(ref_aupr - cand_aupr)
+        if simulator is None or condition is None:
+            raise AssertionError("Accuracy seed contract produced no evidence")
+        accuracy_values.append((simulator, condition, dataset_id, fmean(losses)))
+
+        timing_key = (dataset_id, timing_seed)
+        if timing_key not in reference or timing_key not in observed:
+            raise BenchmarkConfigError(
+                f"Efficiency candidate {candidate['id']!r} lacks paired timing evidence"
+            )
+        ref_simulator, ref_condition, _ref_aupr, ref_time = reference[timing_key]
+        cand_simulator, cand_condition, _cand_aupr, cand_time = observed[timing_key]
+        if (ref_simulator, ref_condition) != (cand_simulator, cand_condition):
+            raise BenchmarkConfigError("Candidate/reference timing strata differ")
+        runtime_values.append(
+            (ref_simulator, ref_condition, dataset_id, math.log(cand_time / ref_time))
+        )
+    mean_loss = _hierarchical_mean(accuracy_values)
+    runtime_ratio = math.exp(_hierarchical_mean(runtime_values))
+    return {
+        "candidate_id": candidate["id"],
+        "component": candidate["component"],
+        "mean_aupr_loss": mean_loss,
+        "wall_time_ratio": runtime_ratio,
+        "complete": True,
+        "accuracy_eligible": mean_loss <= maximum_loss,
+        "dataset_count": len(dataset_ids),
+        "accuracy_seed_count": len(accuracy_seeds),
+        "timing_seed_count": 1,
+    }
+
+
+def _reference(path: Path, root: Path, label: str) -> dict[str, str]:
+    return {"path": _inside(root, path, label), "sha256": sha256_file(path)}
+
+
+def _verify_selection_digest(selection: Mapping[str, Any], label: str) -> None:
+    digest_payload = dict(selection)
+    recorded = digest_payload.pop("selection_sha256", None)
+    if canonical_json_sha256(digest_payload) != recorded:
+        raise BenchmarkConfigError(f"{label} digest is stale")
+
+
+def select_efficiency_components(
+    *,
+    repo_root: Path,
+    selected_config_path: Path,
+    budget: str,
+    scout_metrics_path: Path,
+    output_path: Path,
+) -> Path:
+    """Nominate one eligibility and one adaptive policy from the timing-seed scout."""
+
+    root = repo_root.resolve()
+    contract = load_efficiency_development_contract(root)
+    selected_path = selected_config_path.resolve()
+    _selected_policy(root, selected_path, budget)
+    metrics_file = scout_metrics_path.resolve()
+    _inside(root, metrics_file, "Component-scout metrics")
+    budget_contract = contract["budgets"][budget]
+    timing_seed = int(budget_contract["algorithm_seeds"][0])
+    configuration_seeds = {
+        "spathi_exact_reference": {timing_seed},
+        **{item["id"]: {timing_seed} for item in contract["candidates"]},
+    }
+    rows, state_path_value = _validated_metric_rows(
+        repo_root=root,
+        metrics_file=metrics_file,
+        budget_contract=budget_contract,
+        configuration_seeds=configuration_seeds,
+    )
+    summaries = _execution_summaries(rows)
+    dataset_ids = {dataset for dataset, _seed in summaries["spathi_exact_reference"]}
+    rule = contract["selection_rule"]
+    results = [
+        _candidate_result(
+            candidate=candidate,
+            summaries=summaries,
+            dataset_ids=dataset_ids,
+            accuracy_seeds=(timing_seed,),
+            timing_seed=timing_seed,
+            maximum_loss=float(rule["maximum_mean_absolute_aupr_loss"]),
+        )
+        for candidate in contract["candidates"]
+    ]
     result_by_id = {item["candidate_id"]: item for item in results}
-    selected_candidates: list[dict[str, Any]] = []
-    retained_reference_components: list[str] = []
-    for component in ("target_eligibility", "adaptive_trees", "combined"):
-        eligible = [
-            item
-            for item in results
-            if item["component"] == component
-            and item["accuracy_eligible"]
-            and item["wall_time_ratio"] < 1.0
-        ]
-        if not eligible:
-            retained_reference_components.append(component)
-            continue
-        winner = min(eligible, key=lambda item: (item["wall_time_ratio"], item["candidate_id"]))
+    nominees: list[dict[str, Any]] = []
+    for component in ("target_eligibility", "adaptive_trees"):
+        component_results = [item for item in results if item["component"] == component]
+        eligible = [item for item in component_results if item["accuracy_eligible"]]
+        winner = (
+            min(
+                eligible,
+                key=lambda item: (
+                    item["wall_time_ratio"],
+                    item["mean_aupr_loss"],
+                    item["candidate_id"],
+                ),
+            )
+            if eligible
+            else min(
+                component_results,
+                key=lambda item: (
+                    item["mean_aupr_loss"],
+                    item["wall_time_ratio"],
+                    item["candidate_id"],
+                ),
+            )
+        )
         candidate = next(
             item for item in contract["candidates"] if item["id"] == winner["candidate_id"]
         )
-        selected_candidates.append(
+        nominees.append(
             {
                 **deepcopy(candidate),
-                "development_result": result_by_id[candidate["id"]],
+                "scout_result": result_by_id[candidate["id"]],
                 "candidate_sha256": canonical_json_sha256(candidate),
             }
         )
     payload = {
         "schema_version": "1.0",
-        "artifact_type": "spathi_efficiency_development_selection",
-        "contract": {"path": CONTRACT_PATH.as_posix(), "sha256": sha256_file(root / CONTRACT_PATH)},
+        "artifact_type": "spathi_efficiency_component_selection",
+        "contract": _reference(root / CONTRACT_PATH, root, "Efficiency contract"),
         "budget": budget,
         "analysis_role": budget_contract["analysis_role"],
-        "selected_config": {
-            "path": _inside(root, selected_path, "Selected config"),
-            "sha256": sha256_file(selected_path),
+        "selected_config": _reference(selected_path, root, "Selected config"),
+        "scout_metrics": _reference(metrics_file, root, "Component-scout metrics"),
+        "scout_execution_state": _reference(
+            state_path_value, root, "Component-scout execution state"
+        ),
+        "selection_rule": rule,
+        "candidate_results": sorted(results, key=lambda item: item["candidate_id"]),
+        "component_nominees": nominees,
+    }
+    payload["selection_sha256"] = canonical_json_sha256(payload)
+    validate_json(
+        payload,
+        root / "schemas/efficiency-component-selection.schema.json",
+        "efficiency component selection",
+    )
+    return write_idempotent_json(
+        output_path, payload, "efficiency component selection", boundary=root
+    ).resolve()
+
+
+def load_efficiency_component_selection(
+    repo_root: Path, path: Path, *, budget: str, selected_config_path: Path
+) -> dict[str, Any]:
+    """Verify the content-bound primitive nominees used to construct confirmation."""
+
+    root = repo_root.resolve()
+    selection = load_json_object(path, "efficiency component selection")
+    validate_json(
+        selection,
+        root / "schemas/efficiency-component-selection.schema.json",
+        "efficiency component selection",
+    )
+    _verify_selection_digest(selection, "Efficiency component selection")
+    contract = load_efficiency_development_contract(root)
+    if (
+        selection["budget"] != budget
+        or selection["contract"] != _reference(root / CONTRACT_PATH, root, "contract")
+        or selection["selected_config"]["sha256"] != sha256_file(selected_config_path)
+        or selection["selection_rule"] != contract["selection_rule"]
+    ):
+        raise BenchmarkConfigError("Efficiency component selection provenance differs")
+    for field in ("scout_metrics", "scout_execution_state"):
+        reference = selection[field]
+        if reference["sha256"] != sha256_file(root / reference["path"]):
+            raise BenchmarkConfigError(f"Efficiency component selection {field} changed")
+    declared = {item["id"]: item for item in contract["candidates"]}
+    nominees = selection["component_nominees"]
+    if {item["component"] for item in nominees} != {
+        "target_eligibility",
+        "adaptive_trees",
+    }:
+        raise BenchmarkConfigError("Efficiency component selection lacks one primitive nominee")
+    for item in nominees:
+        candidate = declared.get(item["id"])
+        if (
+            candidate is None
+            or any(item[key] != value for key, value in candidate.items())
+            or item["candidate_sha256"] != canonical_json_sha256(candidate)
+        ):
+            raise BenchmarkConfigError("Efficiency component nominee differs from its finite grid")
+    return selection
+
+
+def select_efficiency_development(
+    *,
+    repo_root: Path,
+    selected_config_path: Path,
+    budget: str,
+    component_selection_path: Path,
+    confirmation_metrics_path: Path,
+    output_path: Path,
+) -> Path:
+    """Choose at most one global policy using held-back accuracy and timing-only cost."""
+
+    root = repo_root.resolve()
+    contract = load_efficiency_development_contract(root)
+    selected_path = selected_config_path.resolve()
+    _selected_policy(root, selected_path, budget)
+    component_selection = load_efficiency_component_selection(
+        root,
+        component_selection_path,
+        budget=budget,
+        selected_config_path=selected_path,
+    )
+    budget_contract = contract["budgets"][budget]
+    seeds = tuple(int(seed) for seed in budget_contract["algorithm_seeds"])
+    timing_seed = seeds[0]
+    accuracy_seeds = tuple(seeds[index - 1] for index in budget_contract["accuracy_seed_indices"])
+    nominees = {str(item["component"]): item for item in component_selection["component_nominees"]}
+    combined_candidate = {
+        "id": "combined_scout_nominees",
+        "component": "combined",
+        "execution_overrides": {
+            **deepcopy(nominees["target_eligibility"]["execution_overrides"]),
+            **deepcopy(nominees["adaptive_trees"]["execution_overrides"]),
         },
-        "metrics": {
-            "path": _inside(root, metrics_file, "Development metrics"),
-            "sha256": sha256_file(metrics_file),
+    }
+    candidates = (
+        {key: deepcopy(value) for key, value in nominees.items()},
+        combined_candidate,
+    )
+    candidate_list = [*candidates[0].values(), candidates[1]]
+
+    scout_metrics = root / component_selection["scout_metrics"]["path"]
+    _scout_rows, scout_state = _validated_metric_rows(
+        repo_root=root,
+        metrics_file=scout_metrics,
+        budget_contract=budget_contract,
+        configuration_seeds={
+            "spathi_exact_reference": {timing_seed},
+            **{item["id"]: {timing_seed} for item in contract["candidates"]},
         },
-        "execution_state": {
-            "path": _inside(root, execution_state_path, "Development execution state"),
-            "sha256": sha256_file(execution_state_path),
+    )
+    confirmation_metrics = confirmation_metrics_path.resolve()
+    _inside(root, confirmation_metrics, "Joint-confirmation metrics")
+    confirmation_rows, confirmation_state = _validated_metric_rows(
+        repo_root=root,
+        metrics_file=confirmation_metrics,
+        budget_contract=budget_contract,
+        configuration_seeds={
+            "spathi_exact_reference": {timing_seed, *accuracy_seeds},
+            nominees["target_eligibility"]["id"]: {timing_seed, *accuracy_seeds},
+            nominees["adaptive_trees"]["id"]: {timing_seed, *accuracy_seeds},
+            combined_candidate["id"]: {timing_seed, *accuracy_seeds},
+        },
+    )
+    summaries = _execution_summaries(confirmation_rows)
+    reference_keys = set(summaries["spathi_exact_reference"])
+    dataset_ids = {dataset for dataset, seed in reference_keys if seed == timing_seed}
+    if not dataset_ids or any(
+        (dataset, seed) not in reference_keys for dataset in dataset_ids for seed in accuracy_seeds
+    ):
+        raise BenchmarkConfigError("Efficiency development reference panel is incomplete")
+    rule = contract["selection_rule"]
+    results = [
+        _candidate_result(
+            candidate=candidate,
+            summaries=summaries,
+            dataset_ids=dataset_ids,
+            accuracy_seeds=accuracy_seeds,
+            timing_seed=timing_seed,
+            maximum_loss=float(rule["maximum_mean_absolute_aupr_loss"]),
+        )
+        for candidate in candidate_list
+    ]
+    eligible = [
+        result
+        for result in results
+        if result["accuracy_eligible"] and result["wall_time_ratio"] < 1.0
+    ]
+    nominee: dict[str, Any] | None = None
+    if eligible:
+        winner = min(eligible, key=lambda item: (item["wall_time_ratio"], item["candidate_id"]))
+        candidate = next(item for item in candidate_list if item["id"] == winner["candidate_id"])
+        canonical_candidate = {
+            "id": candidate["id"],
+            "component": candidate["component"],
+            "execution_overrides": deepcopy(candidate["execution_overrides"]),
+        }
+        nominee = {
+            **canonical_candidate,
+            "development_result": winner,
+            "candidate_sha256": canonical_json_sha256(canonical_candidate),
+        }
+    payload = {
+        "schema_version": "1.0",
+        "artifact_type": "spathi_efficiency_development_selection",
+        "contract": _reference(root / CONTRACT_PATH, root, "Efficiency contract"),
+        "budget": budget,
+        "analysis_role": budget_contract["analysis_role"],
+        "selected_config": _reference(selected_path, root, "Selected config"),
+        "component_selection": _reference(
+            component_selection_path.resolve(), root, "Component selection"
+        ),
+        "evidence": {
+            "component_scout_metrics": _reference(scout_metrics, root, "Component-scout metrics"),
+            "component_scout_execution_state": _reference(
+                scout_state, root, "Component-scout state"
+            ),
+            "joint_confirmation_metrics": _reference(
+                confirmation_metrics, root, "Joint-confirmation metrics"
+            ),
+            "joint_confirmation_execution_state": _reference(
+                confirmation_state, root, "Joint-confirmation state"
+            ),
         },
         "selection_rule": rule,
         "candidate_results": sorted(results, key=lambda item: item["candidate_id"]),
-        "selected_candidates": selected_candidates,
-        "retained_reference_components": retained_reference_components,
+        "nominee": nominee,
+        "reference_retained": nominee is None,
     }
     payload["selection_sha256"] = canonical_json_sha256(payload)
     validate_json(
@@ -581,7 +934,7 @@ def select_efficiency_development(
 def load_efficiency_development_selection(
     repo_root: Path, path: Path, *, budget: str, selected_config_path: Path
 ) -> dict[str, Any]:
-    """Verify an outcome-bound selection before independent validation may use it."""
+    """Verify the single global nominee before independent validation may use it."""
 
     root = repo_root.resolve()
     selection = load_json_object(path, "efficiency-development selection")
@@ -590,51 +943,39 @@ def load_efficiency_development_selection(
         root / "schemas/efficiency-development-selection.schema.json",
         "efficiency-development selection",
     )
-    digest_payload = dict(selection)
-    recorded = digest_payload.pop("selection_sha256")
-    if canonical_json_sha256(digest_payload) != recorded:
-        raise BenchmarkConfigError("Efficiency-development selection digest is stale")
+    _verify_selection_digest(selection, "Efficiency-development selection")
     contract = load_efficiency_development_contract(root)
     if (
         selection["budget"] != budget
-        or selection["contract"]
-        != {"path": CONTRACT_PATH.as_posix(), "sha256": sha256_file(root / CONTRACT_PATH)}
+        or selection["contract"] != _reference(root / CONTRACT_PATH, root, "contract")
         or selection["selected_config"]["sha256"] != sha256_file(selected_config_path)
-        or selection["execution_state"]["sha256"]
-        != sha256_file(root / selection["execution_state"]["path"])
-        or selection["metrics"]["sha256"] != sha256_file(root / selection["metrics"]["path"])
         or selection["selection_rule"] != contract["selection_rule"]
     ):
         raise BenchmarkConfigError("Efficiency-development selection provenance differs")
-    declared = {item["id"]: item for item in contract["candidates"]}
-    selected_components = [item["component"] for item in selection["selected_candidates"]]
-    retained_components = selection["retained_reference_components"]
-    all_components = {"target_eligibility", "adaptive_trees", "combined"}
-    if (
-        len(selected_components) != len(set(selected_components))
-        or set(selected_components) & set(retained_components)
-        or set(selected_components) | set(retained_components) != all_components
-    ):
-        raise BenchmarkConfigError(
-            "Efficiency-development selection must resolve every component exactly once"
-        )
-    for item in selection["selected_candidates"]:
-        candidate = declared.get(item["id"])
-        if (
-            candidate is None
-            or item["execution_overrides"] != candidate["execution_overrides"]
-            or item["candidate_sha256"] != canonical_json_sha256(candidate)
-        ):
-            raise BenchmarkConfigError(
-                "Efficiency-development finalist differs from the finite grid"
-            )
+    for reference in selection["evidence"].values():
+        if reference["sha256"] != sha256_file(root / reference["path"]):
+            raise BenchmarkConfigError("Efficiency-development evidence changed after selection")
+    component_reference = selection["component_selection"]
+    if component_reference["sha256"] != sha256_file(root / component_reference["path"]):
+        raise BenchmarkConfigError("Efficiency component selection changed after confirmation")
+    nominee = selection["nominee"]
+    if (nominee is None) != bool(selection["reference_retained"]):
+        raise BenchmarkConfigError("Efficiency global decision is inconsistent")
+    if nominee is not None:
+        canonical_candidate = {
+            key: nominee[key] for key in ("id", "component", "execution_overrides")
+        }
+        if nominee["candidate_sha256"] != canonical_json_sha256(canonical_candidate):
+            raise BenchmarkConfigError("Efficiency nominee digest is stale")
     return selection
 
 
 __all__ = [
     "CONTRACT_PATH",
+    "load_efficiency_component_selection",
     "load_efficiency_development_contract",
     "load_efficiency_development_selection",
     "materialize_efficiency_development",
+    "select_efficiency_components",
     "select_efficiency_development",
 ]

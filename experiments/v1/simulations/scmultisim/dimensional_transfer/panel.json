@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "id": "scmultisim_dimensional_transfer_v1",
-  "description": "Post-freeze synthetic accuracy transfer along one dimensional axis at a time, using dynamic group-specific truth and prospectively admitted endpoints under the frozen resource ceiling.",
+  "description": "Post-freeze synthetic accuracy transfer along one dimensional axis at a time, using dynamic group-specific truth and prospectively admitted endpoints under a portable execution policy resolved on the measured host.",
   "seed_plan": "experiments/v1/seeds/seed-plan.json",
   "claim_scope": "truth_bearing_synthetic_dimensional_transfer",
   "design": {
@@ -130,11 +130,7 @@
     }
   ],
   "feasibility_basis": {
-    "resource_ceiling": {
-      "max_cores": 8,
-      "max_ram_gb": 48,
-      "serial_execution": true
-    },
+    "execution_policy": "portable_machine_resolved",
     "endpoint_admission": "The one-axis endpoints are prospectively declared, rounded engineering stress levels that change only one axis from its paired anchor. Their scheduled execution is the sole evidence: completion and attributable failure are both retained.",
     "joint_condition_rule": "No condition combines the three scale maxima because this phase estimates separate one-axis contrasts only. The single-group and declared imbalance controls test frozen routing decisions. The scale-stress phase is the only conjunctive dimensional envelope and remains computational-only."
   }

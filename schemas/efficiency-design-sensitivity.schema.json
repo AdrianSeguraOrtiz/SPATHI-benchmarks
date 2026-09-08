@@ -26,9 +26,9 @@
       "properties": {
         "id": {"const": "closed_form_normal_location_sensitivity"},
         "random_sampling": {"const": false},
-        "familywise_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
-        "confirmatory_candidate_count": {"type": "integer", "minimum": 1},
-        "per_candidate_one_sided_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
+        "familywise_alpha": {"const": 0.05},
+        "confirmatory_candidate_count": {"const": 1},
+        "per_candidate_one_sided_alpha": {"const": 0.05},
         "weighting": {"const": "equal_simulator_equal_condition_equal_dataset"},
         "assumptions": {
           "type": "array", "minItems": 1, "uniqueItems": true,

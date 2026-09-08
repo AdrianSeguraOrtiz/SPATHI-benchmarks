@@ -1,17 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spathi.dev/benchmarks/efficiency-development.schema.json",
-  "type": "object", "additionalProperties": false,
-  "required": ["schema_version", "id", "status", "timing", "purpose", "selection_rule", "budgets", "candidates"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "status", "timing", "purpose", "outcome_separation", "selection_rule", "budgets", "candidates"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "id": {"const": "spathi_efficiency_development_v1"},
     "status": {"const": "predeclared"},
     "timing": {"const": "after_calibration_before_efficiency_validation"},
     "purpose": {"type": "string", "minLength": 1},
+    "outcome_separation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_scout_inputs", "global_selection_accuracy_inputs", "global_selection_cost_inputs", "forbidden_inputs"],
+      "properties": {
+        "component_scout_inputs": {"const": ["timing_seed_accuracy", "timing_seed_wall_time"]},
+        "global_selection_accuracy_inputs": {"const": ["held_back_accuracy_seeds"]},
+        "global_selection_cost_inputs": {"const": ["joint_confirmation_designated_timing_seed"]},
+        "forbidden_inputs": {"const": ["efficiency_validation_outcomes", "external_comparison_outcomes", "test_outcomes"]}
+      }
+    },
     "selection_rule": {
-      "type": "object", "additionalProperties": false,
-      "required": ["primary_accuracy_metric", "level", "aggregation", "maximum_mean_absolute_aupr_loss", "required_completion_fraction", "requires_observed_speedup", "cost_estimand", "decision", "failure_policy"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_accuracy_metric", "level", "aggregation", "maximum_mean_absolute_aupr_loss", "required_completion_fraction", "requires_observed_speedup", "cost_estimand", "component_scout_decision", "global_decision", "failure_policy"],
       "properties": {
         "primary_accuracy_metric": {"const": "aupr"},
         "level": {"const": "directed"},
@@ -20,73 +33,86 @@
         "required_completion_fraction": {"const": 1.0},
         "requires_observed_speedup": {"const": true},
         "cost_estimand": {"const": "hierarchical_geometric_mean_candidate_over_reference_wall_time_ratio"},
-        "decision": {"const": "minimum_cost_ratio_then_candidate_id_among_accuracy_eligible_per_component"},
+        "component_scout_decision": {"const": "minimum_cost_ratio_then_mean_aupr_loss_then_candidate_id_among_accuracy_eligible_else_minimum_mean_aupr_loss_then_cost_ratio_then_candidate_id"},
+        "global_decision": {"const": "minimum_cost_ratio_then_candidate_id_among_accuracy_eligible_and_faster_candidates_else_exact_reference"},
         "failure_policy": {"type": "string", "minLength": 1}
       }
     },
     "budgets": {
-      "type": "object", "additionalProperties": false, "required": ["reduced", "full"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reduced", "full"],
       "properties": {
-        "reduced": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "descriptive"}, "profile": {"const": "efficiency-development-reduced"}, "replicates_per_stratum": {"const": 1}, "authorizes_validation": {"const": "descriptive_only"}}}]},
-        "full": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "selection"}, "profile": {"const": "efficiency-development-full"}, "replicates_per_stratum": {"const": 3}, "authorizes_validation": {"const": "confirmatory"}}}]}
+        "reduced": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "descriptive"}, "profile": {"const": "efficiency-development-reduced"}, "algorithm_seeds": {"minItems": 2, "maxItems": 2}, "accuracy_seed_indices": {"const": [2]}, "expected_independent_datasets": {"const": 5}, "replicates_per_stratum": {"const": 1}, "expected_physical_fits": {"const": 75}, "authorizes_validation": {"const": "descriptive_only"}}}]},
+        "full": {"allOf": [{"$ref": "#/$defs/budget"}, {"properties": {"analysis_role": {"const": "selection"}, "profile": {"const": "efficiency-development-full"}, "algorithm_seeds": {"minItems": 3, "maxItems": 3}, "accuracy_seed_indices": {"const": [2, 3]}, "expected_independent_datasets": {"const": 15}, "replicates_per_stratum": {"const": 3}, "expected_physical_fits": {"const": 285}, "authorizes_validation": {"const": "confirmatory"}}}]}
       }
     },
-    "candidates": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"$ref": "#/$defs/candidate"}}
+    "candidates": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"$ref": "#/$defs/candidate"}}
   },
   "$defs": {
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_source", "expected_candidate_count", "algorithm_seed_indices", "expected_physical_fits"],
+      "properties": {
+        "candidate_source": {"type": "string", "minLength": 1},
+        "expected_candidate_count": {"type": "integer", "minimum": 1},
+        "algorithm_seed_indices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "expected_physical_fits": {"type": "integer", "minimum": 1}
+      }
+    },
     "budget": {
-      "type": "object", "additionalProperties": false,
-      "required": ["analysis_role", "profile", "dataset_role", "split_id", "algorithm_seeds", "execution_order_seed", "expected_independent_datasets", "replicates_per_stratum", "authorizes_validation"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["analysis_role", "profile", "dataset_role", "split_id", "algorithm_seeds", "timing_seed_index", "accuracy_seed_indices", "execution_order_seeds", "expected_independent_datasets", "replicates_per_stratum", "expected_physical_fits", "steps", "authorizes_validation"],
       "properties": {
         "analysis_role": {"enum": ["descriptive", "selection"]},
         "profile": {"$ref": "#/$defs/id"},
         "dataset_role": {"const": "efficiency_development"},
         "split_id": {"$ref": "#/$defs/id"},
-        "algorithm_seeds": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 2147483646}},
-        "execution_order_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+        "algorithm_seeds": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 2147483646}},
+        "timing_seed_index": {"const": 1},
+        "accuracy_seed_indices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 2}},
+        "execution_order_seeds": {
+          "type": "object", "additionalProperties": false,
+          "required": ["component_scout", "joint_confirmation"],
+          "properties": {
+            "component_scout": {"type": "integer", "minimum": 1, "maximum": 2147483646},
+            "joint_confirmation": {"type": "integer", "minimum": 1, "maximum": 2147483646}
+          }
+        },
         "expected_independent_datasets": {"type": "integer", "minimum": 5},
         "replicates_per_stratum": {"type": "integer", "minimum": 1},
+        "expected_physical_fits": {"type": "integer", "minimum": 1},
+        "steps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["component_scout", "joint_confirmation"],
+          "properties": {
+            "component_scout": {"allOf": [{"$ref": "#/$defs/step"}, {"properties": {"candidate_source": {"const": "exact_plus_all_six_component_candidates"}, "expected_candidate_count": {"const": 7}, "algorithm_seed_indices": {"const": [1]}}}]},
+            "joint_confirmation": {"allOf": [{"$ref": "#/$defs/step"}, {"properties": {"candidate_source": {"const": "exact_plus_two_component_nominees_plus_constructed_combined"}, "expected_candidate_count": {"const": 4}}}]}
+          }
+        },
         "authorizes_validation": {"enum": ["descriptive_only", "confirmatory"]}
       }
     },
     "eligibility": {
       "type": "object", "additionalProperties": false,
       "required": ["target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess"],
-      "properties": {
-        "target_eligibility": {"const": "automatic"},
-        "min_target_detected_cells": {"enum": [10, 20, 50]},
-        "min_target_detected_fraction": {"enum": [0.005, 0.01, 0.02]},
-        "min_target_weighted_detected_fraction": {"enum": [0.005, 0.01, 0.02]},
-        "min_target_weighted_detected_ess": {"enum": [5, 10, 20]}
-      }
+      "properties": {"target_eligibility": {"const": "automatic"}, "min_target_detected_cells": {"enum": [10, 20, 50]}, "min_target_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_ess": {"enum": [5, 10, 20]}}
     },
     "adaptive": {
       "type": "object", "additionalProperties": false,
       "required": ["adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"],
-      "properties": {
-        "adaptive_trees": {"const": true},
-        "adaptive_min_estimators": {"enum": [100, 200]},
-        "adaptive_tree_step": {"enum": [25, 50, 100]},
-        "adaptive_tolerance": {"enum": [0.005, 0.01, 0.02]},
-        "adaptive_patience": {"enum": [2, 3]}
-      }
-    },
-    "combined": {
-      "type": "object", "additionalProperties": false,
-      "required": ["target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess", "adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"],
-      "properties": {
-        "target_eligibility": {"const": "automatic"}, "min_target_detected_cells": {"enum": [10, 20, 50]}, "min_target_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_fraction": {"enum": [0.005, 0.01, 0.02]}, "min_target_weighted_detected_ess": {"enum": [5, 10, 20]},
-        "adaptive_trees": {"const": true}, "adaptive_min_estimators": {"enum": [100, 200]}, "adaptive_tree_step": {"enum": [25, 50, 100]}, "adaptive_tolerance": {"enum": [0.005, 0.01, 0.02]}, "adaptive_patience": {"enum": [2, 3]}
-      }
+      "properties": {"adaptive_trees": {"const": true}, "adaptive_min_estimators": {"enum": [100, 200]}, "adaptive_tree_step": {"enum": [25, 50, 100]}, "adaptive_tolerance": {"enum": [0.005, 0.01, 0.02]}, "adaptive_patience": {"enum": [2, 3]}}
     },
     "candidate": {
       "type": "object", "additionalProperties": false, "required": ["id", "component", "execution_overrides"],
-      "properties": {"id": {"$ref": "#/$defs/id"}, "component": {"enum": ["target_eligibility", "adaptive_trees", "combined"]}, "execution_overrides": {"type": "object"}},
+      "properties": {"id": {"$ref": "#/$defs/id"}, "component": {"enum": ["target_eligibility", "adaptive_trees"]}, "execution_overrides": {"type": "object"}},
       "allOf": [
         {"if": {"properties": {"component": {"const": "target_eligibility"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/eligibility"}}}},
-        {"if": {"properties": {"component": {"const": "adaptive_trees"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/adaptive"}}}},
-        {"if": {"properties": {"component": {"const": "combined"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/combined"}}}}
+        {"if": {"properties": {"component": {"const": "adaptive_trees"}}, "required": ["component"]}, "then": {"properties": {"execution_overrides": {"$ref": "#/$defs/adaptive"}}}}
       ]
     }
   }

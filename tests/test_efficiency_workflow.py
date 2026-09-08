@@ -12,10 +12,28 @@ import spathi_bench.efficiency_workflow as workflow
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.calibration import locked_spathi_identity
 from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.efficiency_development import load_efficiency_development_contract
 from spathi_bench.efficiency_order import counterbalanced_execution_orders
 from spathi_bench.state import state_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_efficiency_development_joint_confirmation_reruns_every_arm() -> None:
+    contract = load_efficiency_development_contract(REPO_ROOT)
+
+    for budget_id, expected_fits in (("reduced", 75), ("full", 285)):
+        budget = contract["budgets"][budget_id]
+        confirmation = budget["steps"]["joint_confirmation"]
+        assert confirmation["algorithm_seed_indices"] == list(
+            range(1, len(budget["algorithm_seeds"]) + 1)
+        )
+        assert confirmation["expected_physical_fits"] == (
+            budget["expected_independent_datasets"]
+            * confirmation["expected_candidate_count"]
+            * len(budget["algorithm_seeds"])
+        )
+        assert budget["expected_physical_fits"] == expected_fits
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> Path:
@@ -209,6 +227,129 @@ def _fake_development_paths(**kwargs: Any) -> tuple[Path, Path, Path]:
     selection = _write_json(root / "selection.json", {"selected": True})
     run.mkdir(parents=True, exist_ok=True)
     return run, profile, selection
+
+
+def test_efficiency_development_executes_the_frozen_two_step_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    work = root / "work"
+    workflow_root = work / "v1/workflows/efficiency/reduced/flow"
+    selected_path = _write_json(root / "selected.json", {"status": "selected"})
+    andrea = root / "ANDREA"
+    spathi = root / "SPATHI"
+    events: list[tuple[str, str]] = []
+
+    def fake_materialize(
+        *,
+        repo_root: Path,
+        selected_config_path: Path,
+        budget: str,
+        step: str,
+        component_selection_path: Path | None,
+        output_dir: Path,
+        profile_output: Path,
+    ) -> tuple[Path, Path]:
+        assert (repo_root, selected_config_path, budget) == (root, selected_path, "reduced")
+        if step == "component_scout":
+            assert component_selection_path is None
+        else:
+            assert step == "joint_confirmation"
+            assert component_selection_path == workflow_root / (
+                "efficiency-development/component-selection.json"
+            )
+            assert component_selection_path.is_file()
+        events.append(("materialize", step))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(profile_output, {"id": step})
+        return output_dir, profile_output
+
+    def fake_run_profile_pipeline(
+        *,
+        repo_root: Path,
+        profile_id: str,
+        profile_file: Path,
+        run_root: Path,
+        andrea_repo: Path,
+        spathi_repo: Path,
+        statistics: bool,
+        runtime_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        assert (repo_root, andrea_repo, spathi_repo) == (root, andrea, spathi)
+        assert statistics is False
+        assert runtime_plan == {"frozen": True}
+        assert profile_file.is_file()
+        step = "component_scout" if profile_id.endswith("component-scout") else "joint_confirmation"
+        events.append(("run", step))
+        reports = run_root / "reports"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "metrics.csv").write_text("metric\n", encoding="utf-8")
+        return {"status": "summarized"}
+
+    def fake_select_components(
+        *,
+        repo_root: Path,
+        selected_config_path: Path,
+        budget: str,
+        scout_metrics_path: Path,
+        output_path: Path,
+    ) -> Path:
+        assert (repo_root, selected_config_path, budget) == (root, selected_path, "reduced")
+        assert "component-scout" in scout_metrics_path.as_posix()
+        assert scout_metrics_path.is_file()
+        events.append(("select", "component_scout"))
+        return _write_json(output_path, {"component_nominees": ["eligibility", "adaptive"]})
+
+    def fake_select_development(
+        *,
+        repo_root: Path,
+        selected_config_path: Path,
+        budget: str,
+        component_selection_path: Path,
+        confirmation_metrics_path: Path,
+        output_path: Path,
+    ) -> Path:
+        assert (repo_root, selected_config_path, budget) == (root, selected_path, "reduced")
+        assert component_selection_path.is_file()
+        assert "joint-confirmation" in confirmation_metrics_path.as_posix()
+        assert confirmation_metrics_path.is_file()
+        events.append(("select", "joint_confirmation"))
+        return _write_json(output_path, {"nominee": "combined"})
+
+    monkeypatch.setattr(workflow, "materialize_efficiency_development", fake_materialize)
+    monkeypatch.setattr(workflow, "select_efficiency_components", fake_select_components)
+    monkeypatch.setattr(workflow, "select_efficiency_development", fake_select_development)
+    monkeypatch.setattr(
+        "spathi_bench.workflows.run_profile_pipeline",
+        fake_run_profile_pipeline,
+    )
+
+    run_path, profile_path, selection_path = workflow._run_efficiency_development(
+        repo_root=root,
+        andrea_repo=andrea,
+        spathi_repo=spathi,
+        work_root=work,
+        workflow_root=workflow_root,
+        flow_id="flow",
+        budget="reduced",
+        selected_path=selected_path,
+        runtime_plan={"frozen": True},
+    )
+
+    assert events == [
+        ("materialize", "component_scout"),
+        ("run", "component_scout"),
+        ("select", "component_scout"),
+        ("materialize", "joint_confirmation"),
+        ("run", "joint_confirmation"),
+        ("select", "joint_confirmation"),
+    ]
+    assert run_path == work / "v1/efficiency-development-reduced-joint-confirmation/flow"
+    assert profile_path == workflow_root / (
+        "efficiency-development/joint-confirmation/profile.json"
+    )
+    assert selection_path == workflow_root / "efficiency-development/selection.json"
 
 
 @pytest.mark.parametrize(
@@ -530,7 +671,10 @@ def test_high_level_efficiency_workflow_is_complete_and_resumable(
 
     def fake_run(**kwargs: Any) -> Path:
         calls.append("run")
-        assert kwargs["max_parallel_runs"] == 1
+        execution_plan = kwargs["execution_plan"]
+        assert execution_plan["class_id"] == "bulk_full"
+        assert execution_plan["output_profile"] == "full"
+        assert execution_plan["operations"]["inference"]["cpu_threads"] >= 1
         plan = json.loads(kwargs["plan_path"].read_text(encoding="utf-8"))
         assert plan["reference"]["spathi_image_id"] == image_id
         assert {candidate["component"] for candidate in plan["candidates"]} == {
@@ -763,6 +907,19 @@ def test_execution_order_is_deterministic_and_position_balanced() -> None:
         for label in labels
     }
     assert all(max(counts) - min(counts) <= 1 for counts in position_counts.values())
+    for algorithm_seed in (1729, 31415):
+        seed_orders = [
+            order for (_dataset_id, seed), order in orders.items() if seed == algorithm_seed
+        ]
+        seed_position_counts = {
+            label: [
+                sum(order[position] == label for order in seed_orders) for position in range(4)
+            ]
+            for label in labels
+        }
+        assert all(
+            max(counts) - min(counts) <= 1 for counts in seed_position_counts.values()
+        )
     assert orders != counterbalanced_execution_orders(
         (f"dataset_{index}" for index in range(5)),
         (1729, 31415),

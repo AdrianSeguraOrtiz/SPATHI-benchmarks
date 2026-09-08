@@ -165,6 +165,6 @@ def test_search_budget_is_bounded_and_test_is_reserved() -> None:
         "estimator_scale_transfer",
         "convergence",
     ]
-    assert all(stage["candidate_budget_per_parent"] <= 14 for stage in document["stages"])
-    assert document["selection_protocol"]["maximum_validation_finalists"] == 3
+    assert all(stage["candidate_budget_per_parent"] <= 16 for stage in document["stages"])
+    assert document["selection_protocol"]["maximum_validation_finalists"] == 2
     assert document["selection_protocol"]["test_results_can_change_selection"] is False

@@ -64,18 +64,9 @@
     "feasibility_basis": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["resource_ceiling", "endpoint_admission", "joint_condition_rule"],
+      "required": ["execution_policy", "endpoint_admission", "joint_condition_rule"],
       "properties": {
-        "resource_ceiling": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["max_cores", "max_ram_gb", "serial_execution"],
-          "properties": {
-            "max_cores": {"const": 8},
-            "max_ram_gb": {"const": 48},
-            "serial_execution": {"const": true}
-          }
-        },
+        "execution_policy": {"const": "portable_machine_resolved"},
         "endpoint_admission": {"type": "string", "minLength": 1},
         "joint_condition_rule": {"type": "string", "minLength": 1}
       }

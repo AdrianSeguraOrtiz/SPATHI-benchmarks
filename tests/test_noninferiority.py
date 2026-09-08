@@ -24,10 +24,8 @@ from spathi_bench.noninferiority import (
     materialize_noninferiority_plan,
 )
 from spathi_bench.noninferiority_run import (
-    _ContainerMemorySampler,
     _execute_missing_tasks,
     _execute_task,
-    _memory_bytes,
 )
 from spathi_bench.seeds import load_seed_plan, validate_plan_seed_record
 
@@ -205,80 +203,6 @@ def test_noninferiority_result_manifest_rejects_noncanonical_disk_trees(
     )
 
 
-def test_container_memory_sampler_rejects_a_thread_that_does_not_stop(tmp_path: Path) -> None:
-    class AliveThread:
-        def __init__(self) -> None:
-            self.join_timeout: float | None = None
-
-        def join(self, timeout: float) -> None:
-            self.join_timeout = timeout
-
-        @staticmethod
-        def is_alive() -> bool:
-            return True
-
-    sampler = _ContainerMemorySampler(output_root=tmp_path, image_id="sha256:image")
-    thread = AliveThread()
-    sampler._thread = thread  # type: ignore[assignment]
-    sampler._samples = [1024]
-    with pytest.raises(BenchmarkConfigError, match="did not terminate"):
-        sampler.finish()
-    assert sampler._stop.is_set()
-    assert thread.join_timeout == 5
-
-
-def test_sampler_cleanup_error_does_not_mask_andrea_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    finish_calls = 0
-
-    class FailingSampler:
-        def __init__(self, **_kwargs: Any) -> None:
-            pass
-
-        def start(self) -> None:
-            pass
-
-        def finish(self) -> tuple[int, int]:
-            nonlocal finish_calls
-            finish_calls += 1
-            raise BenchmarkConfigError("sampler cleanup failed")
-
-    def fail_andrea(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("ANDREA primary failure")
-
-    monkeypatch.setattr("spathi_bench.noninferiority_run._ContainerMemorySampler", FailingSampler)
-    monkeypatch.setattr("spathi_bench.noninferiority_run.andrea_command", fail_andrea)
-    store = ArtifactStore(tmp_path / "artifacts")
-    task = {
-        "key": store.key_for("inference", {"task": "failure-test"}),
-        "spec": {"task": "failure-test"},
-        "dataset_id": "dataset_a",
-        "dataset_manifest": tmp_path / "dataset-manifest.json",
-        "run": {"run_id": "spathi_test"},
-        "custom": {"docker_image": "sha256:image"},
-        "resources": {
-            "max_cores": 1,
-            "max_ram_gb": 4.0,
-            "planner": "heuristic",
-            "planner_time_limit_seconds": 30,
-        },
-    }
-    with pytest.raises(RuntimeError, match="ANDREA primary failure") as raised:
-        _execute_task(
-            task,
-            store=store,
-            repo_root=tmp_path,
-            andrea_repo=tmp_path / "ANDREA",
-            log_root=tmp_path / "logs",
-        )
-    assert finish_calls == 1
-    assert raised.value.__notes__ == [
-        "The SPATHI memory sampler also failed during cleanup: sampler cleanup failed"
-    ]
-
-
 @pytest.mark.parametrize(
     ("batch_kind", "role", "published"),
     [
@@ -294,16 +218,6 @@ def test_runner_publishes_one_bound_candidate_tool_failure_as_evidence(
     role: str,
     published: bool,
 ) -> None:
-    class Sampler:
-        def __init__(self, **_kwargs: Any) -> None:
-            pass
-
-        def start(self) -> None:
-            pass
-
-        def finish(self) -> tuple[int, int]:
-            return 1024, 1
-
     def failed_andrea(arguments: list[str], **_kwargs: Any) -> None:
         output_root = Path(arguments[arguments.index("--output-dir") + 1])
         run = output_root / "run"
@@ -312,16 +226,60 @@ def test_runner_publishes_one_bound_candidate_tool_failure_as_evidence(
             json.dumps(
                 {
                     "status": "executed",
+                    "output_profile": "full",
                     "run_id": "spathi_candidate",
                     "dataset": {"id": "dataset_a"},
+                    "execution": {
+                        "measurement": {
+                            "schema_version": "1.0",
+                            "scope": "andrea_execution",
+                            "wall_time_seconds": 0.25,
+                            "cpu_time_seconds": 0.1,
+                            "peak_memory_bytes": 1024,
+                            "output_bytes": 0,
+                            "assigned_resources": {
+                                "threads_peak": 1,
+                                "ram_limit_peak_bytes": 4 * 1024**3,
+                            },
+                            "telemetry": {
+                                "status": "complete",
+                                "wall_source": "andrea_monotonic_clock",
+                                "wall_semantics": (
+                                    "andrea_execution_end_to_end_including_input_verification_"
+                                    "preparation_scheduling_merging_and_requested_output_"
+                                    "materialization"
+                                ),
+                                "oom_killed": False,
+                            },
+                        }
+                    },
                     "tools": {
                         "selected": ["spathi_candidate"],
                         "completed": [],
                         "status_by_tool": {"spathi_candidate": "failed"},
                         "tool_origins": {"spathi_candidate": "custom"},
                         "failed": {"spathi_candidate": "model fit failed"},
+                        "results": {
+                            "spathi_candidate": {
+                                "measurement": {
+                                    "schema_version": "1.0",
+                                    "scope": "logical_run",
+                                    "wall_time_seconds": 0.25,
+                                    "cpu_time_seconds": 0.1,
+                                    "peak_memory_bytes": 1024,
+                                    "output_bytes": 0,
+                                    "assigned_resources": {
+                                        "threads_peak": 1,
+                                        "ram_limit_peak_bytes": 4 * 1024**3,
+                                    },
+                                    "telemetry": {
+                                        "status": "complete",
+                                        "oom_killed": False,
+                                    },
+                                }
+                            }
+                        },
                     },
-                    "execution": {"elapsed_seconds": 0.25},
                 },
                 sort_keys=True,
             )
@@ -329,7 +287,6 @@ def test_runner_publishes_one_bound_candidate_tool_failure_as_evidence(
             encoding="utf-8",
         )
 
-    monkeypatch.setattr("spathi_bench.noninferiority_run._ContainerMemorySampler", Sampler)
     monkeypatch.setattr("spathi_bench.noninferiority_run.andrea_command", failed_andrea)
     store = ArtifactStore(tmp_path / "artifacts")
     spec = {"schema_version": "1.0", "batch_kind": batch_kind}
@@ -338,14 +295,17 @@ def test_runner_publishes_one_bound_candidate_tool_failure_as_evidence(
         "spec": spec,
         "dataset_id": "dataset_a",
         "dataset_manifest": tmp_path / "dataset-manifest.json",
-        "run": {"run_id": "spathi_candidate"},
+        "run": {
+            "run_id": "spathi_candidate",
+            "resources": {"threads": 1, "ram_gb": 4.0},
+        },
         "role": role,
         "custom": {"docker_image": "sha256:image"},
         "resources": {
-            "max_cores": 1,
-            "max_ram_gb": 4.0,
+            "memory_gib": 4.0,
             "planner": "heuristic",
             "planner_time_limit_seconds": 30,
+            "output_profile": "full",
         },
     }
 
@@ -573,17 +533,18 @@ def _repository(tmp_path: Path, *, budget: str = "reduced") -> tuple[Path, Path,
     development_metrics.write_text("verified\n", encoding="utf-8")
     development_state = root / "work/efficiency-development/state.json"
     development_state.write_text('{"verified":true}\n', encoding="utf-8")
+    component_selection_path = root / "work/efficiency-development/component-selection.json"
+    component_selection_path.write_text('{"verified":true}\n', encoding="utf-8")
     chosen_ids = {
         "eligible_targets_detect1pct_min20_wdetect1pct_ess10",
         "adaptive_trees_min100_step50_tol01_patience2",
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees",
     }
     chosen = [
         candidate
         for candidate in development_contract["candidates"]
         if candidate["id"] in chosen_ids
     ]
-    selected_candidates = []
+    primitive_nominees = []
     for candidate in chosen:
         result = {
             "candidate_id": candidate["id"],
@@ -595,15 +556,44 @@ def _repository(tmp_path: Path, *, budget: str = "reduced") -> tuple[Path, Path,
             "dataset_count": development_contract["budgets"][budget][
                 "expected_independent_datasets"
             ],
-            "algorithm_seed_count": len(development_contract["budgets"][budget]["algorithm_seeds"]),
+            "accuracy_seed_count": len(
+                development_contract["budgets"][budget]["accuracy_seed_indices"]
+            ),
+            "timing_seed_count": 1,
         }
-        selected_candidates.append(
+        primitive_nominees.append(
             {
                 **candidate,
                 "development_result": result,
                 "candidate_sha256": canonical_json_sha256(candidate),
             }
         )
+    combined_candidate = {
+        "id": "combined_scout_nominees",
+        "component": "combined",
+        "execution_overrides": {
+            **primitive_nominees[0]["execution_overrides"],
+            **primitive_nominees[1]["execution_overrides"],
+        },
+    }
+    combined_result = {
+        "candidate_id": combined_candidate["id"],
+        "component": "combined",
+        "mean_aupr_loss": 0.001,
+        "wall_time_ratio": 0.4,
+        "complete": True,
+        "accuracy_eligible": True,
+        "dataset_count": development_contract["budgets"][budget]["expected_independent_datasets"],
+        "accuracy_seed_count": len(
+            development_contract["budgets"][budget]["accuracy_seed_indices"]
+        ),
+        "timing_seed_count": 1,
+    }
+    nominee = {
+        **combined_candidate,
+        "development_result": combined_result,
+        "candidate_sha256": canonical_json_sha256(combined_candidate),
+    }
     development_selection = {
         "schema_version": "1.0",
         "artifact_type": "spathi_efficiency_development_selection",
@@ -617,36 +607,35 @@ def _repository(tmp_path: Path, *, budget: str = "reduced") -> tuple[Path, Path,
             "path": "work/calibration/selected-config.json",
             "sha256": sha256_file(selected_path),
         },
-        "metrics": {
-            "path": "work/efficiency-development/metrics.csv",
-            "sha256": sha256_file(development_metrics),
+        "component_selection": {
+            "path": "work/efficiency-development/component-selection.json",
+            "sha256": sha256_file(component_selection_path),
         },
-        "execution_state": {
-            "path": "work/efficiency-development/state.json",
-            "sha256": sha256_file(development_state),
+        "evidence": {
+            "component_scout_metrics": {
+                "path": "work/efficiency-development/metrics.csv",
+                "sha256": sha256_file(development_metrics),
+            },
+            "component_scout_execution_state": {
+                "path": "work/efficiency-development/state.json",
+                "sha256": sha256_file(development_state),
+            },
+            "joint_confirmation_metrics": {
+                "path": "work/efficiency-development/metrics.csv",
+                "sha256": sha256_file(development_metrics),
+            },
+            "joint_confirmation_execution_state": {
+                "path": "work/efficiency-development/state.json",
+                "sha256": sha256_file(development_state),
+            },
         },
         "selection_rule": development_contract["selection_rule"],
-        "candidate_results": [item["development_result"] for item in selected_candidates]
-        + [
-            {
-                "candidate_id": candidate["id"],
-                "component": candidate["component"],
-                "mean_aupr_loss": 0.01,
-                "wall_time_ratio": 0.4,
-                "complete": True,
-                "accuracy_eligible": False,
-                "dataset_count": development_contract["budgets"][budget][
-                    "expected_independent_datasets"
-                ],
-                "algorithm_seed_count": len(
-                    development_contract["budgets"][budget]["algorithm_seeds"]
-                ),
-            }
-            for candidate in development_contract["candidates"]
-            if candidate["id"] not in chosen_ids
+        "candidate_results": [
+            *(item["development_result"] for item in primitive_nominees),
+            combined_result,
         ],
-        "selected_candidates": selected_candidates,
-        "retained_reference_components": [],
+        "nominee": nominee,
+        "reference_retained": False,
     }
     development_selection["selection_sha256"] = canonical_json_sha256(development_selection)
     development_selection_path = root / "work/efficiency-development/selection.json"
@@ -764,16 +753,8 @@ def _evidence(plan_path: Path) -> dict[str, Any]:
         )
         for item in panel["datasets"]
     ]
-    differences = {
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10": -0.0004,
-        "adaptive_trees_min100_step50_tol01_patience2": -0.0008,
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees": -0.0012,
-    }
-    runtime_ratios = {
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10": 0.56,
-        "adaptive_trees_min100_step50_tol01_patience2": 0.43,
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees": 0.25,
-    }
+    differences = {"combined_scout_nominees": -0.0012}
+    runtime_ratios = {"combined_scout_nominees": 0.25}
     rows: list[dict[str, Any]] = []
     for candidate_id, candidate in candidates.items():
         candidate_parameters = candidate["group_policy"]["branches"]["multi_group"]["parameters"]
@@ -880,13 +861,11 @@ def _evidence(plan_path: Path) -> dict[str, Any]:
                                     "reference-diagnostics"
                                 ),
                                 "reference_run_metadata_sha256": _digest("reference-metadata"),
-                                "reference_resource_measurement_sha256": _digest(
-                                    "reference-resources"
-                                ),
+                                "reference_run_report_sha256": _digest("reference-resources"),
                                 "candidate_target_eligibility_sha256": _digest("eligibility"),
                                 "candidate_model_diagnostics_sha256": _digest("diagnostics"),
                                 "candidate_run_metadata_sha256": _digest("metadata"),
-                                "candidate_resource_measurement_sha256": _digest("resources"),
+                                "candidate_run_report_sha256": _digest("resources"),
                             },
                         }
                     )
@@ -984,15 +963,15 @@ def test_plan_binds_overrides_to_frozen_reference_and_is_idempotent(tmp_path: Pa
             )
         assert candidate["binding"]["status"] == "bound"
         assert set(candidate["binding"]["parameters"]) == set(candidate["execution_overrides"])
-    by_component = {candidate["component"]: candidate for candidate in plan["candidates"]}
-    assert by_component["target_eligibility"]["execution_overrides"] == {
+    assert len(plan["candidates"]) == 1
+    candidate = plan["candidates"][0]
+    assert candidate["component"] == "combined"
+    assert candidate["execution_overrides"] == {
         "target_eligibility": "automatic",
         "min_target_detected_cells": 20,
         "min_target_detected_fraction": 0.01,
         "min_target_weighted_detected_fraction": 0.01,
         "min_target_weighted_detected_ess": 10.0,
-    }
-    assert by_component["adaptive_trees"]["execution_overrides"] == {
         "adaptive_trees": True,
         "adaptive_min_estimators": 100,
         "adaptive_tree_step": 50,
@@ -1013,12 +992,8 @@ def test_reference_only_efficiency_flow_is_explicit_and_valid(
     root, selected_path, plan_path = _repository(tmp_path, budget=budget)
     selection_path = root / "work/efficiency-development/selection.json"
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    selection["selected_candidates"] = []
-    selection["retained_reference_components"] = [
-        "target_eligibility",
-        "adaptive_trees",
-        "combined",
-    ]
+    selection["nominee"] = None
+    selection["reference_retained"] = True
     for result in selection["candidate_results"]:
         result["mean_aupr_loss"] = 0.01
         result["accuracy_eligible"] = False
@@ -1082,8 +1057,8 @@ def test_analysis_uses_paired_hierarchical_one_sided_intervals(tmp_path: Path) -
     assert result["analysis_role"] == "confirmatory"
     assert result["global_decision"] == "policy_adopted"
     assert result["adoption"]["decision"] == "candidate_adopted"
-    assert result["analysis"]["per_candidate_alpha"] == pytest.approx(0.05 / 3)
-    assert result["analysis"]["one_sided_confidence_level"] == pytest.approx(1 - 0.05 / 3)
+    assert result["analysis"]["per_candidate_alpha"] == pytest.approx(0.05)
+    assert result["analysis"]["one_sided_confidence_level"] == pytest.approx(0.95)
     assert result["analysis"]["algorithm_seed_treatment"] == (
         "fixed_predeclared_ensemble_mean_within_independent_dataset"
     )
@@ -1106,16 +1081,13 @@ def test_analysis_uses_paired_hierarchical_one_sided_intervals(tmp_path: Path) -
             seed=record["seed"],
             seed_derivation=record["seed_derivation"],
         ) == {"seed": record["seed"], "seed_derivation": record["seed_derivation"]}
-    by_component = {item["component"]: item for item in result["comparisons"]}
-    assert by_component["adaptive_trees"]["coverage"] is None
-    assert by_component["target_eligibility"]["coverage"]["target_fraction"]["passed"]
-    assert by_component["combined"]["cost"]["runtime"][
-        "hierarchical_mean_speedup"
-    ] == pytest.approx(4)
-    assert by_component["combined"]["accuracy"]["target_universe"] == (
-        "full_requested_target_universe"
-    )
-    assert by_component["combined"]["intersection_diagnostic"]["interpretation"] == (
+    assert len(result["comparisons"]) == 1
+    combined = result["comparisons"][0]
+    assert combined["component"] == "combined"
+    assert combined["coverage"]["target_fraction"]["passed"]
+    assert combined["cost"]["runtime"]["hierarchical_mean_speedup"] == pytest.approx(4)
+    assert combined["accuracy"]["target_universe"] == ("full_requested_target_universe")
+    assert combined["intersection_diagnostic"]["interpretation"] == (
         "diagnostic_only_not_an_adoption_endpoint"
     )
 
@@ -1223,12 +1195,8 @@ def test_analysis_fails_noninferiority_or_coverage_without_hiding_it(tmp_path: P
     root, _selected_path, plan_path = _repository(tmp_path, budget="full")
     evidence = _evidence(plan_path)
     for row in evidence["rows"]:
-        if row["candidate_id"] == "adaptive_trees_min100_step50_tol01_patience2":
+        if row["candidate_id"] == "combined_scout_nominees":
             row["candidate_value"] = row["reference_value"] - 0.01
-        if row["candidate_id"] in {
-            "eligible_targets_detect1pct_min20_wdetect1pct_ess10",
-            "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees",
-        }:
             row["target_coverage"]["n_retained_truth_edges"] = 70
             row["intersection_diagnostic"]["n_truth_edges"] = 70
     evidence_path = _write_evidence(root, evidence)
@@ -1240,13 +1208,8 @@ def test_analysis_fails_noninferiority_or_coverage_without_hiding_it(tmp_path: P
     )
     result = json.loads(result_path.read_text(encoding="utf-8"))
     by_id = {item["candidate_id"]: item for item in result["comparisons"]}
-    assert by_id["adaptive_trees_min100_step50_tol01_patience2"]["accuracy"]["passed"] is False
-    assert (
-        by_id["eligible_targets_detect1pct_min20_wdetect1pct_ess10"]["coverage"][
-            "truth_edge_fraction"
-        ]["passed"]
-        is False
-    )
+    assert by_id["combined_scout_nominees"]["accuracy"]["passed"] is False
+    assert by_id["combined_scout_nominees"]["coverage"]["truth_edge_fraction"]["passed"] is False
     assert result["global_decision"] == "reference_retained"
 
 
@@ -1255,16 +1218,10 @@ def test_empty_eligibility_is_scored_on_full_universe_and_fails_coverage(
 ) -> None:
     root, _selected_path, plan_path = _repository(tmp_path, budget="full")
     evidence = _evidence(plan_path)
-    candidate_id = "eligible_targets_detect1pct_min20_wdetect1pct_ess10"
-    eligibility_candidates = {
-        candidate_id,
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees",
-    }
+    candidate_id = "combined_scout_nominees"
     empty_targets = _digest("empty-target-universe")
     for row in evidence["rows"]:
-        if row["candidate_id"] == "adaptive_trees_min100_step50_tol01_patience2":
-            row["candidate_value"] = row["reference_value"] - 0.1
-        if row["candidate_id"] not in eligibility_candidates:
+        if row["candidate_id"] != candidate_id:
             continue
         row["candidate_space"]["candidate_target_universe_sha256"] = empty_targets
         row["candidate_space"]["n_candidate_targets"] = 0
@@ -1296,7 +1253,7 @@ def test_analysis_rejects_an_accurate_candidate_without_demonstrated_speedup(
 ) -> None:
     root, _selected_path, plan_path = _repository(tmp_path, budget="full")
     evidence = _evidence(plan_path)
-    candidate_id = "adaptive_trees_min100_step50_tol01_patience2"
+    candidate_id = "combined_scout_nominees"
     for row in evidence["rows"]:
         if row["candidate_id"] == candidate_id:
             row["candidate_value"] = row["reference_value"]
@@ -1324,7 +1281,7 @@ def test_primary_accuracy_cannot_be_replaced_by_better_intersection_accuracy(
 ) -> None:
     root, _selected_path, plan_path = _repository(tmp_path, budget="full")
     evidence = _evidence(plan_path)
-    candidate_id = "eligible_targets_detect1pct_min20_wdetect1pct_ess10"
+    candidate_id = "combined_scout_nominees"
     for row in evidence["rows"]:
         if row["candidate_id"] != candidate_id:
             continue
@@ -1349,10 +1306,10 @@ def test_primary_accuracy_cannot_be_replaced_by_better_intersection_accuracy(
 def test_completion_is_a_mandatory_adoption_gate(tmp_path: Path) -> None:
     root, _selected_path, plan_path = _repository(tmp_path, budget="full")
     evidence = _evidence(plan_path)
-    candidate_id = "adaptive_trees_min100_step50_tol01_patience2"
+    candidate_id = "combined_scout_nominees"
     for row in evidence["rows"]:
         if row["candidate_id"] == candidate_id:
-            row["candidate_measurements"]["models_completed"] = 199
+            row["candidate_measurements"]["models_completed"] = 119
     evidence_path = _write_evidence(root, evidence)
     result_path, _csv, _manifest = analyze_noninferiority(
         repo_root=root,
@@ -1378,7 +1335,7 @@ def test_confirmatory_adoption_is_deterministic_and_falls_back_to_reference(
             "decision": "adoptable",
             "cost": {"runtime": {"hierarchical_mean_ratio": ratio}},
         }
-        for candidate, ratio in zip(plan["candidates"], (0.7, 0.4, 0.4), strict=True)
+        for candidate, ratio in zip(plan["candidates"], (0.4,), strict=True)
     ]
     adopted = decide_efficiency_adoption(plan, comparisons)
     tied = sorted(
@@ -1447,22 +1404,12 @@ def test_coverage_gate_requires_dataset_and_condition_guardrails() -> None:
     assert endpoint["passed"] is False
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [("1KiB / 4GiB", 1024), ("2.5MB / 4GB", 2_500_000), ("3GiB", 3 * 1024**3)],
-)
-def test_docker_memory_values_are_converted_exactly(raw: str, expected: int) -> None:
-    assert _memory_bytes(raw) == expected
-
-
 @pytest.mark.parametrize("drift", ["sources", "evaluation_targets", "combined_targets"])
 def test_analysis_rejects_candidate_space_drift(tmp_path: Path, drift: str) -> None:
     root, _selected_path, plan_path = _repository(tmp_path)
     evidence = _evidence(plan_path)
     target = next(
-        row
-        for row in evidence["rows"]
-        if row["candidate_id"] == "eligible_targets_detect1pct_min20_wdetect1pct_ess10"
+        row for row in evidence["rows"] if row["candidate_id"] == "combined_scout_nominees"
     )
     if drift == "sources":
         target["candidate_space"]["candidate_source_universe_sha256"] = "f" * 64
@@ -1473,8 +1420,7 @@ def test_analysis_rejects_candidate_space_drift(tmp_path: Path, drift: str) -> N
         changed_space = _digest("different-candidate-space")
         for target in evidence["rows"]:
             if (
-                target["candidate_id"]
-                == "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees"
+                target["candidate_id"] == "combined_scout_nominees"
                 and target["dataset_id"] == "dyngen_a1"
             ):
                 target["candidate_space"]["candidate_target_universe_sha256"] = changed
@@ -1487,7 +1433,9 @@ def test_analysis_rejects_candidate_space_drift(tmp_path: Path, drift: str) -> N
                     changed_space
                 )
     evidence_path = _write_evidence(root, evidence)
-    with pytest.raises(BenchmarkConfigError, match="universe|target|different targets"):
+    with pytest.raises(
+        BenchmarkConfigError, match="universe|target|different targets|candidate spaces"
+    ):
         analyze_noninferiority(
             repo_root=root,
             plan_path=plan_path,
@@ -1505,7 +1453,7 @@ def test_analysis_rejects_missing_algorithm_seed(tmp_path: Path) -> None:
         row
         for row in evidence["rows"]
         if not (
-            row["candidate_id"] == "adaptive_trees_min100_step50_tol01_patience2"
+            row["candidate_id"] == "combined_scout_nominees"
             and row["dataset_id"] == "dyngen_a1"
             and row["algorithm_seed"] == omitted_seed
         )
@@ -1527,13 +1475,13 @@ def test_analysis_rejects_an_incomplete_group_context_panel(tmp_path: Path) -> N
         row
         for row in evidence["rows"]
         if not (
-            row["candidate_id"] == "adaptive_trees_min100_step50_tol01_patience2"
+            row["candidate_id"] == "combined_scout_nominees"
             and row["dataset_id"] == "dyngen_a1"
             and row["context_id"] == "group:b"
         )
     ]
     evidence_path = _write_evidence(root, evidence)
-    with pytest.raises(BenchmarkConfigError, match="group-context panel"):
+    with pytest.raises(BenchmarkConfigError, match="group-context panel|group-count policy branch"):
         analyze_noninferiority(
             repo_root=root,
             plan_path=plan_path,

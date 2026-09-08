@@ -32,6 +32,7 @@ from .config import (
     validate_calibration_contracts,
     validate_json,
 )
+from .convergence_fanout import build_convergence_plans
 from .safe_io import atomic_write_json, path_below_no_symlinks, write_idempotent_json
 
 
@@ -82,6 +83,7 @@ def materialize_calibration_stage(
     repo_root: Path,
     stage_id: str,
     calibration_budget: str,
+    fidelity: str,
     parent_ranking_path: Path | None,
     output_dir: Path,
     profile_output: Path,
@@ -96,19 +98,31 @@ def materialize_calibration_stage(
         search,
         stage_id,
         calibration_budget,
+        fidelity,
         parent_ranking_path,
     )
     if stage_id == "validation":
         candidates = parents
         runs = expand_validation_runs(search, candidates, calibration_budget)
         dataset_role = "validation"
-    else:
+    elif fidelity == "scout" or stage_id == "convergence":
         candidates = expand_stage_candidates(search, stage_id, parents=parents)
         runs = expand_stage_runs(
             search,
             stage_id,
             calibration_budget,
+            fidelity,
             parents=parents,
+        )
+        dataset_role = "development"
+    else:
+        candidates = parents
+        runs = expand_stage_runs(
+            search,
+            stage_id,
+            calibration_budget,
+            fidelity,
+            candidates=candidates,
         )
         dataset_role = "development"
     image_tag = load_image_lock(root)["images"]["spathi"]["tag"]
@@ -118,7 +132,7 @@ def materialize_calibration_stage(
         calibration_budget=calibration_budget,
     )
     bundle_path = _repo_relative_path(root, output_dir, "Calibration plan output")
-    profile_id = stage_profile_id(stage_id, calibration_budget)
+    profile_id = stage_profile_id(stage_id, calibration_budget, fidelity)
     _valid_profile_destination(root, profile_output, profile_id)
     template_prefix = "selection" if stage_id == "validation" else "calibration"
     template_name = f"{template_prefix}-{calibration_budget}.json"
@@ -130,6 +144,7 @@ def materialize_calibration_stage(
         template,
         stage_id,
         calibration_budget,
+        fidelity,
         bundle_path=bundle_path,
         search_space=search,
     )
@@ -140,6 +155,7 @@ def materialize_calibration_stage(
         "search_space_id": search["id"],
         "search_space_sha256": sha256_file(root / "experiments/v1/spathi/search-space.json"),
         "stage_id": stage_id,
+        "fidelity": fidelity,
         "dataset_role": dataset_role,
         **spathi_identity,
         "parent_ranking": parent_ranking,
@@ -154,6 +170,12 @@ def materialize_calibration_stage(
         "run-metadata.json": metadata,
         "calibration-manifest.json": manifest,
     }
+    if stage_id == "convergence":
+        payloads["convergence-plans.json"] = build_convergence_plans(root, candidates, runs)
+        profile["inference_batches"][0]["convergence_plans"] = (
+            f"{bundle_path}/convergence-plans.json"
+        )
+        validate_json(profile, root / "schemas/profile.schema.json", f"profile {profile_id}")
 
     bundle_exists = output_dir.exists() or output_dir.is_symlink()
     profile_exists = profile_output.exists() or profile_output.is_symlink()
@@ -194,6 +216,7 @@ def rank_calibration_stage(
     repo_root: Path,
     stage_id: str,
     calibration_budget: str,
+    fidelity: str,
     manifest_path: Path,
     summary_path: Path,
     output_path: Path,
@@ -218,6 +241,7 @@ def rank_calibration_stage(
     if (
         manifest.get("search_space_id") != search["id"]
         or manifest.get("stage_id") != stage_id
+        or manifest.get("fidelity") != fidelity
         or manifest.get("calibration_budget") != calibration_budget
     ):
         raise BenchmarkConfigError("Calibration manifest identity differs from the requested stage")
@@ -243,6 +267,7 @@ def rank_calibration_stage(
     payload = build_calibration_ranking(
         search,
         stage_id,
+        fidelity,
         candidates,
         reconciled_rows,
         calibration_panel=calibration_panel,

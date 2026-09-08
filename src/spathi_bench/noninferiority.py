@@ -441,14 +441,21 @@ def materialize_noninferiority_plan(
         raise BenchmarkConfigError(
             f"Frozen SPATHI reference enables an efficiency policy: {mismatches}"
         )
-    selected_by_component = {
-        item["component"]: item for item in development_selection["selected_candidates"]
-    }
     candidates: list[dict[str, Any]] = []
-    for template in study["validation_components"]:
-        raw = selected_by_component.get(template["component"])
-        if raw is None:
-            continue
+    raw = development_selection["nominee"]
+    if raw is not None:
+        template = next(
+            (
+                item
+                for item in study["validation_components"]
+                if item["component"] == raw["component"]
+            ),
+            None,
+        )
+        if template is None:
+            raise BenchmarkConfigError(
+                f"Efficiency nominee component {raw['component']!r} is not declared for validation"
+            )
         overrides = raw["execution_overrides"]
         override_digest = canonical_json_sha256(overrides)
         group_policy = _policy_with_overrides(reference_policy, overrides)
@@ -633,9 +640,8 @@ def _validate_plan_binding(repo_root: Path, plan: dict[str, Any]) -> dict[str, A
 
     planned = {candidate["component"]: candidate for candidate in plan["candidates"]}
     declared = {candidate["component"]: candidate for candidate in study["validation_components"]}
-    selected = {
-        candidate["component"]: candidate for candidate in development["selected_candidates"]
-    }
+    nominee = development["nominee"]
+    selected = {} if nominee is None else {nominee["component"]: nominee}
     if set(planned) != set(selected) or not set(planned) <= set(declared):
         raise BenchmarkConfigError(
             "Non-inferiority plan components differ from development selection or study"

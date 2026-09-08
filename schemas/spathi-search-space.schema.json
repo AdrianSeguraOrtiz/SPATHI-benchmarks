@@ -158,7 +158,7 @@
         "distance_space": {"enum": ["pca", "expression"]},
         "n_components": {"type": "integer", "minimum": 1},
         "distance_standardization": {"enum": ["none", "standard"]},
-        "pca_svd_solver": {"const": "auto"},
+        "pca_svd_solver": {"enum": ["auto", "randomized", "full"]},
         "distance_metric": {"enum": ["euclidean", "cosine"]},
         "kernel": {"enum": ["gaussian", "exponential"]},
         "bandwidth": {"const": "auto"},
@@ -200,11 +200,10 @@
       "required": ["fixed_parameters", "fixed_parameter_rationales", "excluded_inputs", "purpose"],
       "properties": {
         "fixed_parameters": {
-          "const": {"pca_svd_solver": "auto", "bandwidth": "auto", "target_eligibility": "all", "adaptive_trees": false}
+          "const": {"bandwidth": "auto", "target_eligibility": "all", "adaptive_trees": false}
         },
         "fixed_parameter_rationales": {
           "const": {
-            "pca_svd_solver": "The solver is a numerical implementation choice. auto is frozen for production and separate equivalence tests compare it with full and randomized solvers where feasible; accuracy outcomes never select the solver.",
             "bandwidth": "The automatic bandwidth adapts to each dataset's distance units. The transferable bandwidth_scale parameter varies smoothing intensity without fitting a non-portable absolute width.",
             "target_eligibility": "All requested targets define the exact scientific reference. Automatic target eligibility is developed and independently validated only as an efficiency policy.",
             "adaptive_trees": "Fixed forests define the exact scientific reference. Adaptive stopping is developed and independently validated only as an efficiency policy."
@@ -279,6 +278,98 @@
       "uniqueItems": true,
       "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}
     },
+    "target_scope": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["method"], "properties": {"method": {"const": "all"}}},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "size", "salt"],
+          "properties": {
+            "method": {"const": "sha256_gene_id"},
+            "size": {"const": 256},
+            "salt": {"const": "spathi-calibration-high-tf-v1"}
+          }
+        }
+      ]
+    },
+    "fidelity_dataset_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition_ids", "replicate_indices"],
+      "properties": {
+        "condition_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "replicate_indices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 3}}
+      }
+    },
+    "fidelity_tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_source", "advance_limit", "dataset_selector", "algorithm_seed_indices", "target_scope", "expected_physical_fits"],
+      "properties": {
+        "candidate_source": {"enum": ["all_expanded", "scout_shortlist"]},
+        "advance_limit": {"type": "integer", "minimum": 1, "maximum": 9},
+        "dataset_selector": {"$ref": "#/$defs/fidelity_dataset_selector"},
+        "algorithm_seed_indices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 5}},
+        "target_scope": {"$ref": "#/$defs/target_scope"},
+        "expected_physical_fits": {"type": "integer", "minimum": 1}
+      }
+    },
+    "multifidelity_search_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scout", "confirmation"],
+      "properties": {
+        "scout": {"$ref": "#/$defs/fidelity_tier"},
+        "confirmation": {"$ref": "#/$defs/fidelity_tier"}
+      }
+    },
+    "multifidelity_final_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_source", "advance_limit", "algorithm_seed_indices", "target_scope", "expected_physical_fits"],
+      "properties": {
+        "candidate_source": {"enum": ["confirmation_shortlist", "convergence_shortlist"]},
+        "advance_limit": {"type": "integer", "minimum": 1, "maximum": 2},
+        "dataset_selector": {"$ref": "#/$defs/fidelity_dataset_selector"},
+        "expected_dataset_count": {"type": "integer", "minimum": 1},
+        "algorithm_seed_indices": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 5}},
+        "target_scope": {"$ref": "#/$defs/target_scope"},
+        "execution_primitive": {"const": "largest_forest_with_declared_prefixes"},
+        "logical_results_per_fit": {"const": 4},
+        "expected_logical_results": {"type": "integer", "minimum": 1},
+        "expected_physical_fits": {"type": "integer", "minimum": 1}
+      },
+      "oneOf": [
+        {"required": ["dataset_selector", "execution_primitive", "logical_results_per_fit", "expected_logical_results"], "not": {"required": ["expected_dataset_count"]}},
+        {"required": ["expected_dataset_count"], "not": {"anyOf": [{"required": ["dataset_selector"]}, {"required": ["execution_primitive"]}]}}
+      ]
+    },
+    "multifidelity_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["independent_profile", "may_consume_other_profile_outcomes", "ranking_rule", "panel_assignment", "forbidden_scout_inputs", "stages"],
+      "properties": {
+        "independent_profile": {"const": true},
+        "may_consume_other_profile_outcomes": {"const": false},
+        "ranking_rule": {"const": "primary_metric_then_frozen_tie_breakers"},
+        "panel_assignment": {"const": "predeclared_before_outcomes"},
+        "forbidden_scout_inputs": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["ground_truth_for_target_selection", "expression_values_for_target_selection", "test_outcomes", "reduced_outcomes", "full_outcomes"]}},
+        "stages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"],
+          "properties": {
+            "geometry": {"$ref": "#/$defs/multifidelity_search_stage"},
+            "estimator": {"$ref": "#/$defs/multifidelity_search_stage"},
+            "interaction": {"$ref": "#/$defs/multifidelity_search_stage"},
+            "estimator_scale_transfer": {"$ref": "#/$defs/multifidelity_search_stage"},
+            "convergence": {"$ref": "#/$defs/multifidelity_final_stage"},
+            "validation": {"$ref": "#/$defs/multifidelity_final_stage"}
+          }
+        }
+      }
+    },
     "budget_seed_map": {
       "type": "object",
       "additionalProperties": false,
@@ -297,8 +388,8 @@
       "additionalProperties": false,
       "required": ["full", "reduced"],
       "properties": {
-        "full": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}}},
-        "reduced": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}}}
+        "full": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds", "expected_physical_fits", "expected_logical_results", "multifidelity"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}, "expected_physical_fits": {"const": 1762}, "expected_logical_results": {"const": 2482}, "multifidelity": {"$ref": "#/$defs/multifidelity_contract"}}},
+        "reduced": {"type": "object", "additionalProperties": false, "required": ["algorithmic_seeds", "expected_physical_fits", "expected_logical_results", "multifidelity"], "properties": {"algorithmic_seeds": {"$ref": "#/$defs/budget_seed_map"}, "expected_physical_fits": {"const": 431}, "expected_logical_results": {"const": 527}, "multifidelity": {"$ref": "#/$defs/multifidelity_contract"}}}
       }
     },
     "stage_common": {
@@ -315,10 +406,25 @@
         "dataset_selector": {"$ref": "#/$defs/dataset_selector"},
         "include_inherited_configuration": {"type": "boolean"},
         "maximum_parent_configurations": {"type": "integer", "minimum": 1, "maximum": 3},
-        "candidate_budget_per_parent": {"type": "integer", "minimum": 1, "maximum": 14},
+        "candidate_budget_per_parent": {"type": "integer", "minimum": 1, "maximum": 16},
+        "parent_expansion_identity": {"$ref": "#/$defs/parent_expansion_identity"},
         "selection_rule": {"$ref": "#/$defs/convergence_selection_rule"},
-        "candidates": {"type": "array", "minItems": 0, "maxItems": 13, "items": {"$ref": "#/$defs/candidate"}},
+        "candidates": {"type": "array", "minItems": 0, "maxItems": 15, "items": {"$ref": "#/$defs/candidate"}},
         "advance_limit": {"type": "integer", "minimum": 1, "maximum": 3}
+      }
+    },
+    "parent_expansion_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["excluded_parameters", "required_distinct_parents"],
+      "properties": {
+        "excluded_parameters": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "required_distinct_parents": {"type": "integer", "minimum": 2, "maximum": 3}
       }
     },
     "dataset_selector": {
@@ -337,10 +443,10 @@
       "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "estimator"}, "order": {"const": 2}, "inherits_from": {"const": "shortlist:geometry"}, "strategy": {"const": "bounded_crossed_shortlist"}, "maximum_parent_configurations": {"const": 3}, "candidates": {"minItems": 1}, "advance_limit": {"const": 3}}}]
     },
     "estimator_scale_transfer_stage": {
-      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "estimator_scale_transfer"}, "order": {"const": 4}, "inherits_from": {"const": "shortlist:interaction"}, "strategy": {"const": "crossed_high_tf_feature_transfer"}, "include_inherited_configuration": {"const": false}, "maximum_parent_configurations": {"const": 3}, "candidate_budget_per_parent": {"const": 6}, "candidates": {"minItems": 6, "maxItems": 6}, "advance_limit": {"const": 2}}}]
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"required": ["parent_expansion_identity"], "properties": {"id": {"const": "estimator_scale_transfer"}, "order": {"const": 4}, "inherits_from": {"const": "shortlist:interaction"}, "strategy": {"const": "crossed_high_tf_feature_transfer"}, "include_inherited_configuration": {"const": false}, "maximum_parent_configurations": {"const": 3}, "candidate_budget_per_parent": {"const": 6}, "parent_expansion_identity": {"const": {"excluded_parameters": ["max_features"], "required_distinct_parents": 3}}, "candidates": {"minItems": 6, "maxItems": 6}, "advance_limit": {"const": 2}}}]
     },
     "interaction_stage": {
-      "allOf": [{"$ref": "#/$defs/stage_common"}, {"properties": {"id": {"const": "interaction"}, "order": {"const": 3}, "inherits_from": {"const": "shortlist:estimator"}, "strategy": {"const": "bounded_interaction_design"}, "maximum_parent_configurations": {"const": 3}, "candidates": {"minItems": 1}, "advance_limit": {"const": 3}}}]
+      "allOf": [{"$ref": "#/$defs/stage_common"}, {"required": ["parent_expansion_identity"], "properties": {"id": {"const": "interaction"}, "order": {"const": 3}, "inherits_from": {"const": "shortlist:estimator"}, "strategy": {"const": "bounded_interaction_design"}, "include_inherited_configuration": {"const": false}, "maximum_parent_configurations": {"const": 3}, "candidate_budget_per_parent": {"const": 6}, "parent_expansion_identity": {"const": {"excluded_parameters": ["tree_method", "max_features", "min_samples_leaf", "max_depth", "bootstrap"], "required_distinct_parents": 3}}, "candidates": {"minItems": 6, "maxItems": 6}, "advance_limit": {"const": 3}}}]
     },
     "convergence_stage": {
       "allOf": [{"$ref": "#/$defs/stage_common"}, {"required": ["selection_rule"], "properties": {"id": {"const": "convergence"}, "order": {"const": 5}, "inherits_from": {"const": "shortlist:estimator_scale_transfer"}, "strategy": {"const": "fixed_ceiling_sweep"}, "maximum_parent_configurations": {"const": 2}, "candidates": {"minItems": 1}, "advance_limit": {"const": 2}}}]
@@ -364,7 +470,7 @@
         "development_role": {"const": "search_and_shortlist"},
         "validation_role": {"const": "select_one_conditional_policy"},
         "test_role": {"const": "compare_frozen_policy"},
-        "maximum_validation_finalists": {"const": 3},
+        "maximum_validation_finalists": {"const": 2},
         "freeze_before_test": {"const": true},
         "selection_unit": {"const": "conditional_group_policy"},
         "test_results_can_change_selection": {"const": false}

@@ -95,6 +95,16 @@
       "id": "full.test",
       "budget": "full",
       "dataset_role": "test"
+    },
+    {
+      "id": "reduced.performance",
+      "budget": "reduced",
+      "dataset_role": "performance"
+    },
+    {
+      "id": "full.performance",
+      "budget": "full",
+      "dataset_role": "performance"
     }
   ],
   "allocations": [
@@ -1017,6 +1027,68 @@
       },
       "span": 1,
       "seed": 2128034748
+    },
+    {
+      "id": "seed.reduced.performance.generation",
+      "namespace": "reduced.performance",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 1,
+      "seed": 2091640982,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/scmultisim/performance/medium-reduced-runs.json",
+          "run_id": "scmultisim_performance_medium_reduced",
+          "offset": 0,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.reduced.performance.inference",
+      "namespace": "reduced.performance",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1623707587
+    },
+    {
+      "id": "seed.full.performance.generation",
+      "namespace": "full.performance",
+      "stream": "generation",
+      "coordinates": {
+        "purpose": "simulator_runs"
+      },
+      "span": 2,
+      "seed": 1357289335,
+      "consumers": [
+        {
+          "path": "experiments/v1/simulations/scmultisim/performance/small-runs.json",
+          "run_id": "scmultisim_performance_small",
+          "offset": 0,
+          "span": 1
+        },
+        {
+          "path": "experiments/v1/simulations/scmultisim/performance/medium-runs.json",
+          "run_id": "scmultisim_performance_medium",
+          "offset": 1,
+          "span": 1
+        }
+      ]
+    },
+    {
+      "id": "seed.full.performance.inference",
+      "namespace": "full.performance",
+      "stream": "inference",
+      "coordinates": {
+        "purpose": "phase_root"
+      },
+      "span": 1,
+      "seed": 1512881216
     }
   ]
 }

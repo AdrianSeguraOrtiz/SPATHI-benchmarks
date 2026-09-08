@@ -22,8 +22,8 @@ def counterbalanced_execution_orders(
     ordered_labels = list(labels)
     if not ordered_labels or len(set(ordered_labels)) != len(ordered_labels):
         raise ValueError("Counterbalancing requires at least one unique label")
-    datasets = tuple(dataset_ids)
-    seeds = tuple(algorithm_seeds)
+    datasets = tuple(sorted(dataset_ids))
+    seeds = tuple(sorted(algorithm_seeds))
     blocks = [(dataset_id, seed) for dataset_id in datasets for seed in seeds]
     if not blocks or len(set(blocks)) != len(blocks):
         raise ValueError("Counterbalancing requires unique dataset-by-seed blocks")
@@ -33,22 +33,26 @@ def counterbalanced_execution_orders(
         or not 1 <= execution_order_seed <= MAX_SEED
     ):
         raise ValueError(f"execution_order_seed must be between 1 and {MAX_SEED}")
-    ranked = sorted(
-        blocks,
-        key=lambda block: hashlib.sha256(
-            canonical_json_bytes(
-                {
-                    "algorithm_seed": block[1],
-                    "dataset_id": block[0],
-                    "execution_order_seed": execution_order_seed,
-                }
-            )
-        ).digest(),
-    )
     orders: dict[tuple[str, int], list[str]] = {}
-    for index, block in enumerate(ranked):
-        offset = index % len(ordered_labels)
-        orders[block] = ordered_labels[offset:] + ordered_labels[:offset]
+    for seed_index, algorithm_seed in enumerate(seeds):
+        ranked_datasets = sorted(
+            datasets,
+            key=lambda dataset_id: hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        "algorithm_seed": algorithm_seed,
+                        "dataset_id": dataset_id,
+                        "execution_order_seed": execution_order_seed,
+                    }
+                )
+            ).digest(),
+        )
+        initial_offset = seed_index * len(datasets)
+        for dataset_index, dataset_id in enumerate(ranked_datasets):
+            offset = (initial_offset + dataset_index) % len(ordered_labels)
+            orders[(dataset_id, algorithm_seed)] = (
+                ordered_labels[offset:] + ordered_labels[:offset]
+            )
     return orders
 
 

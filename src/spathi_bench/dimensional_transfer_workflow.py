@@ -31,6 +31,8 @@ from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_dimensional_transfer_report
+from .resource_plan import detect_host_capacity, load_or_create_runtime_plan
+from .resource_scheduler import host_execution_lease
 from .runtime import (
     andrea_host_environment,
     benchmark_host_environment,
@@ -41,10 +43,12 @@ from .state import run_lock
 from .workflows import run_profile_pipeline
 
 _IDENTITY_INPUTS = (
+    "experiments/v1/execution/policy.json",
     "experiments/v1/seeds/seed-plan.json",
     "images.lock.json",
     "repos.lock.json",
     "schemas/dimensional-transfer-panel.schema.json",
+    "schemas/execution-policy.schema.json",
     "schemas/dimensional-transfer-results.schema.json",
     "schemas/profile.schema.json",
     "schemas/spathi-production-config.schema.json",
@@ -307,6 +311,10 @@ def run_dimensional_transfer_workflow(
     work_root: Path,
     profile: str,
     efficiency_run_id: str | None = None,
+    max_cores: int | None = None,
+    max_ram_gb: float | None = None,
+    reserve_cores: int = 0,
+    reserve_ram_gb: float = 0.0,
 ) -> dict[str, Any]:
     """Run or resume one post-freeze dimensional accuracy-transfer study."""
 
@@ -349,7 +357,16 @@ def run_dimensional_transfer_workflow(
     flow_id = identity[:20]
     workflow_root = work / "v1/workflows/dimensional_transfer" / profile / flow_id
     workflow_path = workflow_root / "workflow.json"
-    with run_lock(workflow_root):
+    runtime_plan = load_or_create_runtime_plan(
+        workflow_root / "runtime-plan.json",
+        boundary=workflow_root,
+        max_cores=max_cores,
+        max_ram_gb=max_ram_gb,
+        reserve_cores=reserve_cores,
+        reserve_ram_gb=reserve_ram_gb,
+        detected=detect_host_capacity(workspace_path=work),
+    )
+    with host_execution_lease(workload=f"dimensional-transfer:{flow_id}"), run_lock(workflow_root):
         materialized = materialize_dimensional_transfer_profile(
             repo_root=root,
             budget=profile,
@@ -370,6 +387,7 @@ def run_dimensional_transfer_workflow(
             andrea_repo=andrea_repo,
             spathi_repo=spathi_repo,
             statistics=False,
+            runtime_plan=runtime_plan,
         )
         results_path = analyze_dimensional_transfer(
             repo_root=root,
@@ -388,6 +406,7 @@ def run_dimensional_transfer_workflow(
             "flow_id": flow_id,
             "identity": {"fingerprint": identity},
             "status": "publishing",
+            "runtime_plan": runtime_plan,
             "production_config": _relative(root, production_path, "production policy"),
             "production_config_sha256": sha256_file(production_path),
             "template_profile": _relative(root, template_path, "template profile"),

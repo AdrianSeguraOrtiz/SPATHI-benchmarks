@@ -17,7 +17,7 @@ from spathi_bench.artifacts import (
     sha256_file,
 )
 from spathi_bench.calibration import locked_spathi_identity, resolve_group_policy
-from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.config import BenchmarkConfigError, load_json_object
 from spathi_bench.efficiency_order import (
     counterbalanced_execution_orders,
     runner_implementation_sha256,
@@ -31,6 +31,7 @@ from spathi_bench.noninferiority_evidence import (
     verify_noninferiority_evidence,
     write_noninferiority_evidence,
 )
+from spathi_bench.tool_contract import spathi_runtime_resources
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCKED_SPATHI = locked_spathi_identity(REPO_ROOT)
@@ -291,6 +292,38 @@ def _write_diagnostics(path: Path, *, parameters: dict[str, Any], seed: int) -> 
                 )
 
 
+def _andrea_execution_measurement(
+    *, execution: dict[str, Any], runtime: float, output_bytes: int
+) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0",
+        "scope": "andrea_execution",
+        "wall_time_seconds": runtime,
+        "cpu_time_seconds": runtime / 2,
+        "peak_memory_bytes": 100_000_000,
+        "output_bytes": output_bytes,
+        "assigned_resources": {
+            "threads_peak": execution["resources"]["cpu_threads"],
+            "ram_limit_peak_bytes": execution["resources"]["memory_bytes"],
+            "cpuset_cpus_requested_sets": [],
+            "cpuset_cpus_effective_sets": [],
+        },
+        "telemetry": {
+            "status": "complete",
+            "wall_source": "andrea_monotonic_clock",
+            "wall_semantics": (
+                "andrea_execution_end_to_end_including_input_verification_preparation_"
+                "scheduling_merging_and_requested_output_materialization"
+            ),
+            "memory_source": "child_container_cgroup_peaks",
+            "memory_semantics": (
+                "overlap_upper_bound_from_physical_container_peaks_excludes_andrea_host_process"
+            ),
+            "oom_killed": False,
+        },
+    }
+
+
 def _publish_inference(
     store: ArtifactStore,
     *,
@@ -327,6 +360,10 @@ def _publish_inference(
             "tool_id": f"custom_{run_id}",
             "params": {**parameters, "random_seed": seed},
             "execution": {"mode": "group_native"},
+            "resources": {
+                "threads": execution["resources"]["cpu_threads"],
+                "ram_gb": execution["resources"]["memory_gib"],
+            },
         },
         "run_metadata": {
             "configuration_id": configuration_id,
@@ -346,6 +383,7 @@ def _publish_inference(
             "execution_mode": "group_native",
             "extra_inputs": ["groups", "tf_list"],
             "outputs": {"directed": True, "sign": "none"},
+            "runtime_resources": spathi_runtime_resources(),
         },
         "tool_image": {
             "kind": "spathi",
@@ -372,22 +410,37 @@ def _publish_inference(
     with store.staging_directory(key) as staging:
         output = staging / "output" / "run"
         if failure:
+            measurement = _andrea_execution_measurement(
+                execution=execution,
+                runtime=runtime,
+                output_bytes=0,
+            )
             _json(
                 output / "run_report.json",
                 {
                     "status": "executed",
+                    "output_profile": "full",
                     "dataset": {
                         "id": dataset_id,
                         "fingerprint": {"algorithm": "sha256", "value": fingerprint},
                     },
+                    "execution": {"measurement": measurement},
                     "tools": {
                         "selected": [run_id],
                         "completed": [],
                         "status_by_tool": {run_id: "failed"},
                         "tool_origins": {run_id: "custom"},
                         "failed": {run_id: "model fit failed"},
+                        "results": {
+                            run_id: {
+                                "measurement": {
+                                    "schema_version": "1.0",
+                                    "scope": "logical_run",
+                                    "telemetry": {"status": "complete", "oom_killed": False},
+                                },
+                            }
+                        },
                     },
-                    "execution": {"elapsed_seconds": runtime},
                     "run_id": run_id,
                 },
             )
@@ -402,7 +455,12 @@ def _publish_inference(
                     "tool_status": "failed",
                     "failure_message": "model fit failed",
                     "run_report_sha256": sha256_file(report_path),
-                    "elapsed_seconds": runtime,
+                    "measurement_sha256": canonical_json_sha256(
+                        load_json_object(report_path)["execution"]["measurement"]
+                    ),
+                    "wall_time_seconds": runtime,
+                    "peak_memory_bytes": 100_000_000,
+                    "oom_killed": False,
                 },
             )
             return store.publish_from_temp(staging, kind="inference", spec=spec)
@@ -460,14 +518,25 @@ def _publish_inference(
                 },
             },
         )
+        if truth_leak:
+            (output / "truth").mkdir()
+            (output / "truth" / "networks.csv").write_text("leak\n", encoding="utf-8")
+        output_bytes = sum(path.stat().st_size for path in tool_out.rglob("*") if path.is_file())
+        measurement = _andrea_execution_measurement(
+            execution=execution,
+            runtime=runtime,
+            output_bytes=output_bytes,
+        )
         _json(
             output / "run_report.json",
             {
                 "status": "executed",
+                "output_profile": "full",
                 "dataset": {
                     "id": dataset_id,
                     "fingerprint": {"algorithm": "sha256", "value": fingerprint},
                 },
+                "execution": {"measurement": measurement},
                 "tools": {
                     "selected": [run_id],
                     "completed": [run_id],
@@ -475,27 +544,17 @@ def _publish_inference(
                     "completed_contexts": {run_id: contexts},
                     "tool_origins": {run_id: "custom"},
                     "failed": {},
+                    "results": {
+                        run_id: {
+                            "measurement": {
+                                "schema_version": "1.0",
+                                "scope": "logical_run",
+                                "telemetry": {"status": "complete", "oom_killed": False},
+                            },
+                        }
+                    },
                 },
-                "execution": {"elapsed_seconds": runtime},
                 "run_id": run_id,
-            },
-        )
-        if truth_leak:
-            (output / "truth").mkdir()
-            (output / "truth" / "networks.csv").write_text("leak\n", encoding="utf-8")
-        output_bytes = sum(path.stat().st_size for path in tool_out.rglob("*") if path.is_file())
-        _json(
-            staging / "efficiency-resource-measurement.json",
-            {
-                "schema_version": "1.0",
-                "measurement_scope": "spathi_container_and_declared_outputs",
-                "peak_memory": {
-                    "bytes": 100_000_000,
-                    "method": "docker_stats_sampled_container_memory",
-                    "sample_interval_milliseconds": 100,
-                    "samples": 10,
-                },
-                "output": {"bytes": output_bytes, "method": "exact_spathi_output_tree"},
             },
         )
         return store.publish_from_temp(staging, kind="inference", spec=spec)
@@ -572,38 +631,63 @@ def _repository(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     development_metrics.write_text("fixture\n", encoding="utf-8")
     development_state = root / "work/efficiency-development/state.json"
     _json(development_state, {"status": "completed"})
+    component_selection_path = root / "work/efficiency-development/component-selection.json"
+    _json(component_selection_path, {"status": "completed"})
     selected_development_ids = {
         "eligible_targets_detect1pct_min20_wdetect1pct_ess10",
         "adaptive_trees_min100_step50_tol01_patience2",
-        "eligible_targets_detect1pct_min20_wdetect1pct_ess10_adaptive_trees",
     }
-    candidate_results: list[dict[str, Any]] = []
-    selected_candidates: list[dict[str, Any]] = []
+    primitive_nominees: list[dict[str, Any]] = []
     for candidate in development_contract["candidates"]:
         selected_candidate = candidate["id"] in selected_development_ids
+        if not selected_candidate:
+            continue
         result = {
             "candidate_id": candidate["id"],
             "component": candidate["component"],
-            "mean_aupr_loss": 0.001 if selected_candidate else 0.01,
-            "wall_time_ratio": 0.5 if selected_candidate else 0.4,
+            "mean_aupr_loss": 0.001,
+            "wall_time_ratio": 0.5,
             "complete": True,
-            "accuracy_eligible": selected_candidate,
+            "accuracy_eligible": True,
             "dataset_count": development_contract["budgets"]["reduced"][
                 "expected_independent_datasets"
             ],
-            "algorithm_seed_count": len(
-                development_contract["budgets"]["reduced"]["algorithm_seeds"]
-            ),
+            "accuracy_seed_count": 1,
+            "timing_seed_count": 1,
         }
-        candidate_results.append(result)
-        if selected_candidate:
-            selected_candidates.append(
-                {
-                    **candidate,
-                    "development_result": result,
-                    "candidate_sha256": canonical_json_sha256(candidate),
-                }
-            )
+        primitive_nominees.append(
+            {
+                **candidate,
+                "development_result": result,
+                "candidate_sha256": canonical_json_sha256(candidate),
+            }
+        )
+    combined_candidate = {
+        "id": "combined_scout_nominees",
+        "component": "combined",
+        "execution_overrides": {
+            **primitive_nominees[0]["execution_overrides"],
+            **primitive_nominees[1]["execution_overrides"],
+        },
+    }
+    combined_result = {
+        "candidate_id": combined_candidate["id"],
+        "component": "combined",
+        "mean_aupr_loss": 0.001,
+        "wall_time_ratio": 0.4,
+        "complete": True,
+        "accuracy_eligible": True,
+        "dataset_count": development_contract["budgets"]["reduced"][
+            "expected_independent_datasets"
+        ],
+        "accuracy_seed_count": 1,
+        "timing_seed_count": 1,
+    }
+    nominee = {
+        **combined_candidate,
+        "development_result": combined_result,
+        "candidate_sha256": canonical_json_sha256(combined_candidate),
+    }
     development_selection = {
         "schema_version": "1.0",
         "artifact_type": "spathi_efficiency_development_selection",
@@ -617,18 +701,35 @@ def _repository(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             "path": "work/calibration/selected-config.json",
             "sha256": sha256_file(selected_path),
         },
-        "metrics": {
-            "path": "work/efficiency-development/metrics.csv",
-            "sha256": sha256_file(development_metrics),
+        "component_selection": {
+            "path": "work/efficiency-development/component-selection.json",
+            "sha256": sha256_file(component_selection_path),
         },
-        "execution_state": {
-            "path": "work/efficiency-development/state.json",
-            "sha256": sha256_file(development_state),
+        "evidence": {
+            "component_scout_metrics": {
+                "path": "work/efficiency-development/metrics.csv",
+                "sha256": sha256_file(development_metrics),
+            },
+            "component_scout_execution_state": {
+                "path": "work/efficiency-development/state.json",
+                "sha256": sha256_file(development_state),
+            },
+            "joint_confirmation_metrics": {
+                "path": "work/efficiency-development/metrics.csv",
+                "sha256": sha256_file(development_metrics),
+            },
+            "joint_confirmation_execution_state": {
+                "path": "work/efficiency-development/state.json",
+                "sha256": sha256_file(development_state),
+            },
         },
         "selection_rule": development_contract["selection_rule"],
-        "candidate_results": candidate_results,
-        "selected_candidates": selected_candidates,
-        "retained_reference_components": [],
+        "candidate_results": [
+            *(item["development_result"] for item in primitive_nominees),
+            combined_result,
+        ],
+        "nominee": nominee,
+        "reference_retained": False,
     }
     development_selection["selection_sha256"] = canonical_json_sha256(development_selection)
     development_selection_path = root / "work/efficiency-development/selection.json"
@@ -698,16 +799,24 @@ def _repository(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             "coordinates": {"purpose": "counterbalanced_execution_order"},
         },
         "resources": {
-            "max_parallel_runs": 1,
-            "max_cores": 1,
-            "max_ram_gb": 4.0,
+            "cpu_threads": 1,
+            "memory_bytes": 4 * 1024**3,
+            "memory_gib": 4.0,
             "planner": "heuristic",
             "planner_time_limit_seconds": 30,
+            "output_profile": "full",
+            "execution_plan_fingerprint": "e" * 64,
         },
         "measurement_protocol": {
-            "peak_memory": "docker_stats_sampled_container_memory",
-            "sample_interval_milliseconds": 100,
-            "output_bytes": "exact_spathi_output_tree",
+            "source": "andrea_execution_measurement",
+            "scope": "andrea_execution",
+            "wall_time": (
+                "andrea_execution_end_to_end_including_input_verification_preparation_"
+                "scheduling_merging_and_requested_output_materialization"
+            ),
+            "peak_memory": "physical_container_peak_overlap_upper_bound_excluding_andrea_host",
+            "output_bytes": "andrea_execution_output_tree_at_measurement",
+            "telemetry_status": "complete_required",
             "model_counts": "validated_spathi_run_metadata",
             "tree_counts": "validated_spathi_model_diagnostics",
         },
@@ -812,10 +921,10 @@ def test_builder_recalculates_metrics_spaces_hashes_and_shared_references(tmp_pa
         artifact_index_path=index_path,
     )
 
-    assert len(evidence["rows"]) == 60
+    assert len(evidence["rows"]) == 20
     assert {row["reference_value"] for row in evidence["rows"]} == {1.0}
     candidate_values = sorted({row["candidate_value"] for row in evidence["rows"]})
-    assert candidate_values == pytest.approx([5 / 6, 1.0])
+    assert candidate_values == pytest.approx([5 / 6])
     per_run: dict[tuple[str, int], set[str]] = {}
     for row in evidence["rows"]:
         per_run.setdefault((row["dataset_id"], row["algorithm_seed"]), set()).add(
@@ -825,7 +934,7 @@ def test_builder_recalculates_metrics_spaces_hashes_and_shared_references(tmp_pa
         assert row["candidate_space"]["n_reference_evaluation_candidates"] == 3
         assert row["candidate_space"]["policy"] == "full_requested_universe"
         assert row["reference_measurements"]["peak_memory_bytes"] == 100_000_000
-        assert row["candidate_measurements"]["models_requested"] in {4, 8}
+        assert row["candidate_measurements"]["models_requested"] == 4
     assert all(len(references) == 1 for references in per_run.values())
 
 
@@ -1087,6 +1196,33 @@ def test_builder_rejects_tampered_content_addressed_artifact(tmp_path: Path) -> 
     network.write_text(network.read_text(encoding="utf-8") + "corrupt\n", encoding="utf-8")
 
     with pytest.raises(BenchmarkConfigError, match="hash differs|size differs"):
+        construct_noninferiority_evidence(
+            repo_root=root,
+            plan_path=plan_path,
+            artifact_index_path=index_path,
+        )
+
+
+def test_builder_requires_exact_canonical_ram_limit_telemetry(tmp_path: Path) -> None:
+    root, plan_path, _panel, index_path = _repository(tmp_path)
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    digest = index["runs"][0]["reference"]["digest"]
+    artifact_root = root / "work/v1/artifacts/inference" / digest
+    report_path = next(artifact_root.glob("output/*/run_report.json"))
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    del report["execution"]["measurement"]["assigned_resources"]["ram_limit_peak_bytes"]
+    _json(report_path, report)
+
+    # Repair the immutable file inventory so this test isolates semantic telemetry validation.
+    manifest_path = artifact_root / "artifact.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    relative_report = report_path.relative_to(artifact_root).as_posix()
+    entry = next(item for item in manifest["files"] if item["path"] == relative_report)
+    entry["size"] = report_path.stat().st_size
+    entry["sha256"] = sha256_file(report_path)
+    _json(manifest_path, manifest)
+
+    with pytest.raises(BenchmarkConfigError, match="canonical ANDREA telemetry is invalid"):
         construct_noninferiority_evidence(
             repo_root=root,
             plan_path=plan_path,

@@ -114,7 +114,7 @@
         },
         "claim_scope": {"const": "conditional_to_predeclared_synthetic_panel_and_fixed_algorithm_seed_ensemble"},
         "familywise_alpha": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.1},
-        "multiplicity": {"const": "bonferroni_across_confirmatory_candidates"},
+        "multiplicity": {"const": "single_hypothesis_no_adjustment"},
         "multiplicity_rationale": {"type": "string", "minLength": 1},
         "candidate_decision": {"const": "accuracy_coverage_completion_and_runtime_gates"},
         "confidence_interval_method": {"const": "one_sided_percentile_fixed_strata_hierarchical_bootstrap"},
