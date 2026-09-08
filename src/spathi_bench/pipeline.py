@@ -3677,26 +3677,7 @@ def evaluate(
         if task["scope"] == "individual":
             evaluations.append(
                 {
-                    **{
-                        key: inference[key]
-                        for key in (
-                            "dataset_id",
-                            "batch_id",
-                            "batch_kind",
-                            "regime",
-                            "run_id",
-                            "tool_id",
-                            "tool_origin",
-                            "configuration_id",
-                            "selection_role",
-                            "algorithm_seed",
-                            "algorithm_seed_parameter",
-                            "family",
-                            "configuration_sha256",
-                            "execution_sha256",
-                            "tool_image",
-                        )
-                    },
+                    **{key: inference[key] for key in _INFERENCE_ATTRIBUTION_FIELDS},
                     **common,
                 }
             )
