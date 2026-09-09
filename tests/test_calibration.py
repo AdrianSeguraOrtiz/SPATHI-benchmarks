@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import spathi_bench.calibration_materialization as calibration_materialization_module
 from spathi_bench.calibration import (
     CalibrationError,
     CandidateConfiguration,
@@ -418,6 +419,45 @@ def test_materialized_geometry_profile_validates_the_complete_canonical_run(
     )
     with pytest.raises(BenchmarkConfigError, match="differs from its canonical calibration run"):
         validate_profile_references(repo, profile)
+
+
+def test_materialized_convergence_profile_attaches_its_plan_before_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _copy_calibration_repository(tmp_path)
+    parents = _stage_chain(load_search_space(repo))["estimator_scale_transfer"][:2]
+    monkeypatch.setattr(
+        calibration_materialization_module,
+        "load_parent_ranking",
+        lambda *args, **kwargs: (parents, None),
+    )
+    monkeypatch.setattr(
+        calibration_materialization_module,
+        "validate_calibration_manifest",
+        lambda *args, **kwargs: None,
+    )
+    bundle = repo / "work/calibration/reduced/convergence/requests"
+    profile_path = repo / "work/calibration/reduced/convergence/profile.json"
+
+    materialize_calibration_stage(
+        repo_root=repo,
+        stage_id="convergence",
+        calibration_budget="reduced",
+        fidelity="final",
+        parent_ranking_path=repo / "work/parent-ranking.json",
+        output_dir=bundle,
+        profile_output=profile_path,
+    )
+
+    profile = load_json_object(profile_path, "materialized convergence profile")
+    assert profile["inference_batches"][0]["convergence_plans"] == (
+        "work/calibration/reduced/convergence/requests/convergence-plans.json"
+    )
+    plans = load_json_object(bundle / "convergence-plans.json", "convergence plans")
+    assert plans["artifact_type"] == "spathi_calibration_convergence_plans"
+    assert plans["physical_plans_per_dataset"] == 4
+    assert plans["logical_results_per_dataset"] == 16
 
 
 def test_reduced_and_full_algorithmic_seed_domains_are_disjoint() -> None:

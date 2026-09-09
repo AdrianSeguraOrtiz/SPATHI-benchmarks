@@ -163,7 +163,6 @@ def materialize_calibration_stage(
         "runs": canonical_run_records(runs),
     }
     validate_calibration_manifest(root, search, manifest)
-    validate_json(profile, root / "schemas/profile.schema.json", f"profile {profile_id}")
     payloads = {
         "tools-params.json": tools,
         "custom-tools.json": custom,
@@ -175,7 +174,7 @@ def materialize_calibration_stage(
         profile["inference_batches"][0]["convergence_plans"] = (
             f"{bundle_path}/convergence-plans.json"
         )
-        validate_json(profile, root / "schemas/profile.schema.json", f"profile {profile_id}")
+    validate_json(profile, root / "schemas/profile.schema.json", f"profile {profile_id}")
 
     bundle_exists = output_dir.exists() or output_dir.is_symlink()
     profile_exists = profile_output.exists() or profile_output.is_symlink()
