@@ -5,6 +5,11 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
+import spathi_bench.convergence_execution as convergence_execution
+from spathi_bench.runtime import CommandExecutionError
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPATHI_ROOT = REPO_ROOT.parent / "SPATHI"
 
@@ -39,6 +44,54 @@ def _model() -> dict[str, object]:
         "bootstrap": None,
         "random_seed": 1729,
     }
+
+
+def test_container_installs_the_adapter_under_its_importable_module_name() -> None:
+    dockerfile = (REPO_ROOT / "containers/spathi/Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY containers/spathi/run_tool.py /usr/local/bin/run_tool.py" in dockerfile
+    assert 'ENTRYPOINT ["python", "/usr/local/bin/run_tool.py"]' in dockerfile
+
+
+def test_physical_command_failure_preserves_its_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temporary_log = tmp_path / "temporary/physical.log"
+    durable_log = tmp_path / "logs/physical.log"
+    command = ["example", "--flag"]
+
+    def fail(
+        observed_command: list[str],
+        *,
+        cwd: Path,
+        log_path: Path,
+        environment: dict[str, str] | None = None,
+    ) -> None:
+        assert observed_command == command
+        assert cwd == tmp_path
+        assert environment is None
+        log_path.parent.mkdir(parents=True)
+        log_path.write_text("durable diagnostic\n", encoding="utf-8")
+        raise CommandExecutionError(
+            command=observed_command,
+            return_code=17,
+            log_path=log_path,
+        )
+
+    monkeypatch.setattr(convergence_execution, "stream_command", fail)
+
+    with pytest.raises(CommandExecutionError) as captured:
+        convergence_execution._run_physical_command(
+            command,
+            cwd=tmp_path,
+            temporary_log=temporary_log,
+            durable_log=durable_log,
+        )
+
+    assert captured.value.return_code == 17
+    assert captured.value.log_path == durable_log.resolve()
+    assert durable_log.read_text(encoding="utf-8") == "durable diagnostic\n"
 
 
 def test_runner_fits_one_forest_and_publishes_four_canonical_prefixes(

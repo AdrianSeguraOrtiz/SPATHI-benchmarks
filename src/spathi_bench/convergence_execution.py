@@ -28,7 +28,7 @@ from .resource_scheduler import (
     ScheduledTask,
     execute_resource_schedule,
 )
-from .runtime import andrea_command, stream_command
+from .runtime import CommandExecutionError, andrea_command, stream_command
 from .safe_io import atomic_write_json
 
 _ESTIMATOR_COUNTS = (250, 500, 750, 1000)
@@ -535,6 +535,25 @@ def _publish_physical_provenance(
         return store.publish_from_temp(staging, kind="convergence-execution", spec=spec)
 
 
+def _run_physical_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    temporary_log: Path,
+    durable_log: Path,
+) -> None:
+    try:
+        stream_command(command, cwd=cwd, log_path=temporary_log)
+    except CommandExecutionError as exc:
+        durable_log.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(temporary_log, durable_log)
+        raise CommandExecutionError(
+            command=exc.command,
+            return_code=exc.return_code,
+            log_path=durable_log,
+        ) from exc
+
+
 def _execute_group(
     tasks: Sequence[dict[str, Any]],
     *,
@@ -650,10 +669,16 @@ def _execute_group(
             str(threads),
         ]
         started = perf_counter()
-        stream_command(
+        physical_log = runtime_root / "physical.log"
+        _run_physical_command(
             command,
             cwd=repo_root,
-            log_path=runtime_root / "physical.log",
+            temporary_log=physical_log,
+            durable_log=(
+                run_root
+                / "logs"
+                / f"19-convergence-physical-{canonical_json_sha256(physical_spec)[:16]}.log"
+            ),
         )
         elapsed = perf_counter() - started
         manifest, prefix_by_run = _validate_fanout(output, plan=binding.plan)

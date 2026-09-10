@@ -93,7 +93,7 @@
       "source_repository": "spathi",
       "source_commit": "c4e91f4f4e1f13861fad5ff55e7e35496fd978f8",
       "build_inputs": {
-        "containers/spathi/Dockerfile": "1cea89df437f65795b9126c54ffac19f75ac07e67511ab0311c000e8bb3f5d2e",
+        "containers/spathi/Dockerfile": "80b659ef17e24dbadf8c3fd1249c1389feb47dd62b23f6621e6031e830eb0226",
         "containers/spathi/constraints.txt": "126c6303c0e86c1d4ebee6c96dfbaf9d0d154181e447e779ece7c9779d4581da",
         "containers/spathi/run_convergence.py": "f3779233772de60ef49a37791ec37280bd066c0516a2fa78d54727907107dd0b",
         "containers/spathi/run_tool.py": "c53065562d1488fe7a80f908ee8f90529c6ca5d776b5575d65b8a6182979d9e6"

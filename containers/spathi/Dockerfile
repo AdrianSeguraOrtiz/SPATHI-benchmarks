@@ -15,7 +15,7 @@ RUN python -m pip install --no-cache-dir -r /tmp/constraints.txt \
     && rm /tmp/constraints.txt
 
 COPY --from=spathi src /opt/spathi/src
-COPY containers/spathi/run_tool.py /usr/local/bin/run_spathi_tool.py
+COPY containers/spathi/run_tool.py /usr/local/bin/run_tool.py
 COPY containers/spathi/run_convergence.py /usr/local/bin/run_spathi_convergence.py
 
 LABEL org.opencontainers.image.title="SPATHI ANDREA adapter" \
@@ -24,4 +24,4 @@ LABEL org.opencontainers.image.title="SPATHI ANDREA adapter" \
       dev.spathi.adapter.source="https://github.com/AdrianSeguraOrtiz/SPATHI-benchmarks" \
       dev.spathi.benchmark.build-fingerprint="${BENCH_BUILD_FINGERPRINT}"
 
-ENTRYPOINT ["python", "/usr/local/bin/run_spathi_tool.py"]
+ENTRYPOINT ["python", "/usr/local/bin/run_tool.py"]
