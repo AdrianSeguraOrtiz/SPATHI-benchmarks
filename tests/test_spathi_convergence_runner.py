@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 import spathi_bench.convergence_execution as convergence_execution
+from spathi_bench.artifacts import Artifact, ArtifactKey
+from spathi_bench.convergence_execution import ConvergenceBinding
 from spathi_bench.runtime import CommandExecutionError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +94,89 @@ def test_physical_command_failure_preserves_its_log(
     assert captured.value.return_code == 17
     assert captured.value.log_path == durable_log.resolve()
     assert durable_log.read_text(encoding="utf-8") == "durable diagnostic\n"
+
+
+def test_convergence_fanout_emits_canonical_physical_telemetry(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "network.csv").write_text("source,target,score\n", encoding="utf-8")
+
+    measurement = convergence_execution._physical_measurement(
+        started_monotonic_ns=1_000_000_000,
+        started_at_utc="2026-09-10T10:00:00Z",
+        finished_monotonic_ns=3_500_000_000,
+        finished_at_utc="2026-09-10T10:00:02.5Z",
+        output_dir=output,
+        threads=8,
+        memory_bytes=16 * 1024**3,
+        cpuset_cpus=(2, 4, 6, 8, 10, 12, 14, 16),
+    )
+
+    assert measurement["schema_version"] == "1.0"
+    assert measurement["scope"] == "physical_task"
+    assert measurement["wall_time_seconds"] == 2.5
+    assert measurement["output_bytes"] == (output / "network.csv").stat().st_size
+    assert measurement["peak_memory_bytes"] is None
+    assert measurement["assigned_resources"] == {
+        "threads": 8,
+        "ram_limit_bytes": 16 * 1024**3,
+        "cpuset_cpus_requested": [2, 4, 6, 8, 10, 12, 14, 16],
+        "cpuset_cpus_configured": None,
+        "cpuset_cpus_effective": None,
+        "cpu_quota_cores_effective": None,
+        "ram_limit_bytes_effective": None,
+    }
+    assert measurement["telemetry"]["status"] == "unavailable"
+    assert measurement["telemetry"]["memory_semantics"] == "unavailable"
+
+
+def test_logical_fanout_report_carries_the_physical_measurement() -> None:
+    run_id = "convergence__trees_250"
+    binding = ConvergenceBinding(
+        plan={"physical_run_id": "physical-run"},
+        prefix={"run_id": run_id, "n_estimators": 250},
+    )
+    task = {
+        "run": {"run_id": run_id},
+        "dataset": {"dataset_id": "dataset-1"},
+        "spec": {"output_profile": "analysis"},
+        "convergence_binding": binding,
+    }
+    measurement = {
+        "schema_version": "1.0",
+        "scope": "physical_task",
+        "wall_time_seconds": 12.5,
+        "peak_memory_bytes": None,
+    }
+    physical = Artifact(
+        key=ArtifactKey("convergence-execution", "a" * 64),
+        path=Path("/unused"),
+        manifest={},
+    )
+    report = convergence_execution._logical_report(
+        task,
+        preflight={
+            "runs": {"catalog_tool_ids": {run_id: "spathi"}},
+            "dataset": {
+                "column_kind": "cells",
+                "expression_profile": "counts",
+                "genes": 10,
+                "columns": 20,
+            },
+        },
+        fingerprint={"sha256": "b" * 64},
+        contexts=("pop_1", "pop_2"),
+        rows=42,
+        physical_artifact=physical,
+        prefix_record={"files": [{"path": "network.csv", "sha256": "c" * 64}]},
+        measurement=measurement,
+    )
+
+    result = report["tools"]["results"][run_id]
+    assert result["measurement"] == measurement
+    assert result["measurement"] is not measurement
+    assert result["network_path"] == "merged_network_raw.csv"
+    assert report["execution"]["measurement_contract"].endswith("telemetry_v1")
 
 
 def test_runner_fits_one_forest_and_publishes_four_canonical_prefixes(

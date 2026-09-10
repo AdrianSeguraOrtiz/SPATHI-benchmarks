@@ -12,8 +12,9 @@ import tempfile
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter_ns
 from typing import Any
 
 from .andrea_contracts import validate_inference_analysis_contract
@@ -35,6 +36,10 @@ _ESTIMATOR_COUNTS = (250, 500, 750, 1000)
 _NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
 _MERGED_COLUMNS = (*_NETWORK_COLUMNS, "tool_id")
 _CONTRACT_ID = "spathi_fixed_forest_prefix_fanout_v1"
+_MEASUREMENT_CONTRACT = "spathi_benchmarks_physical_task_telemetry_v1"
+_PHYSICAL_WALL_SEMANTICS = (
+    "physical_task_end_to_end_including_container_launch_and_exit_collection"
+)
 _GIB = 1024**3
 
 
@@ -99,6 +104,7 @@ def logical_execution_contract(binding: ConvergenceBinding) -> dict[str, Any]:
 
     return {
         "kind": _CONTRACT_ID,
+        "measurement_contract": _MEASUREMENT_CONTRACT,
         "physical_run_id": binding.plan["physical_run_id"],
         "physical_plan_sha256": canonical_json_sha256(binding.plan),
         "logical_run_id": binding.prefix["run_id"],
@@ -114,6 +120,7 @@ def _physical_spec(task: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "execution_contract": _CONTRACT_ID,
+        "measurement_contract": _MEASUREMENT_CONTRACT,
         "dataset_artifact": logical_spec["dataset_artifact"],
         "dataset_id": logical_spec["dataset_id"],
         "andrea_commit": logical_spec["andrea_commit"],
@@ -444,7 +451,7 @@ def _logical_report(
     rows: int,
     physical_artifact: Artifact,
     prefix_record: Mapping[str, Any],
-    elapsed_seconds: float,
+    measurement: Mapping[str, Any],
 ) -> dict[str, Any]:
     run_id = str(task["run"]["run_id"])
     preflight_runs = preflight["runs"]
@@ -486,6 +493,13 @@ def _logical_report(
                     "status": "completed",
                     "exit_code": 0,
                     "execution": {"mode": "group_native"},
+                    "measurement": copy.deepcopy(dict(measurement)),
+                    "network_path": "merged_network_raw.csv",
+                    "progress_path": None,
+                    "logs_path": None,
+                    "error": None,
+                    "warnings": [],
+                    "physical_tasks_total": 1,
                     "convergence_fanout": {
                         "contract": _CONTRACT_ID,
                         "physical_artifact": physical_artifact.key.value,
@@ -508,7 +522,8 @@ def _logical_report(
         "issues": [],
         "execution": {
             "contract": _CONTRACT_ID,
-            "elapsed_seconds": elapsed_seconds,
+            "measurement_contract": _MEASUREMENT_CONTRACT,
+            "elapsed_seconds": measurement["wall_time_seconds"],
             "physical_fits": 1,
             "logical_results": 4,
             "physical_artifact": physical_artifact.key.value,
@@ -532,7 +547,80 @@ def _publish_physical_provenance(
             runtime_root / "output/fanout-manifest.json", staging / "fanout-manifest.json"
         )
         shutil.copyfile(runtime_root / "physical.log", staging / "physical.log")
+        shutil.copyfile(runtime_root / "measurement.json", staging / "measurement.json")
         return store.publish_from_temp(staging, kind="convergence-execution", spec=spec)
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _directory_size_bytes(root: Path) -> int:
+    return sum(
+        path.stat().st_size
+        for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    )
+
+
+def _physical_measurement(
+    *,
+    started_monotonic_ns: int,
+    started_at_utc: str,
+    finished_monotonic_ns: int,
+    finished_at_utc: str,
+    output_dir: Path,
+    threads: int,
+    memory_bytes: int,
+    cpuset_cpus: Sequence[int],
+) -> dict[str, Any]:
+    """Describe a benchmark-owned physical fan-out without inventing cgroup counters."""
+
+    return {
+        "schema_version": "1.0",
+        "scope": "physical_task",
+        "wall_time_seconds": round(
+            max(0, finished_monotonic_ns - started_monotonic_ns) / 1_000_000_000.0,
+            6,
+        ),
+        "container_wall_time_seconds": None,
+        "cpu_time_seconds": None,
+        "peak_memory_bytes": None,
+        "output_bytes": _directory_size_bytes(output_dir),
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "task_started_at_utc": started_at_utc,
+        "task_finished_at_utc": finished_at_utc,
+        "task_started_monotonic_ns": started_monotonic_ns,
+        "task_finished_monotonic_ns": finished_monotonic_ns,
+        "container_started_at_utc": None,
+        "container_finished_at_utc": None,
+        "assigned_resources": {
+            "threads": threads,
+            "ram_limit_bytes": memory_bytes,
+            "cpuset_cpus_requested": list(cpuset_cpus),
+            "cpuset_cpus_configured": None,
+            "cpuset_cpus_effective": None,
+            "cpu_quota_cores_effective": None,
+            "ram_limit_bytes_effective": None,
+        },
+        "telemetry": {
+            "status": "unavailable",
+            "wall_source": "spathi_benchmarks_monotonic_clock",
+            "wall_semantics": _PHYSICAL_WALL_SEMANTICS,
+            "container_wall_source": None,
+            "cpu_source": None,
+            "memory_source": None,
+            "memory_semantics": "unavailable",
+            "io_source": None,
+            "io_semantics": "unavailable",
+            "throttled_time_seconds": None,
+            "oom_events": None,
+            "oom_kill_events": None,
+            "memory_limit_events": None,
+            "oom_killed": False,
+        },
+    }
 
 
 def _run_physical_command(
@@ -668,7 +756,8 @@ def _execute_group(
             "--threads",
             str(threads),
         ]
-        started = perf_counter()
+        started_monotonic_ns = perf_counter_ns()
+        started_at_utc = _utc_now()
         physical_log = runtime_root / "physical.log"
         _run_physical_command(
             command,
@@ -680,7 +769,24 @@ def _execute_group(
                 / f"19-convergence-physical-{canonical_json_sha256(physical_spec)[:16]}.log"
             ),
         )
-        elapsed = perf_counter() - started
+        finished_monotonic_ns = perf_counter_ns()
+        finished_at_utc = _utc_now()
+        measurement = _physical_measurement(
+            started_monotonic_ns=started_monotonic_ns,
+            started_at_utc=started_at_utc,
+            finished_monotonic_ns=finished_monotonic_ns,
+            finished_at_utc=finished_at_utc,
+            output_dir=output,
+            threads=threads,
+            memory_bytes=memory_bytes,
+            cpuset_cpus=cpuset_cpus,
+        )
+        atomic_write_json(
+            runtime_root / "measurement.json",
+            measurement,
+            "convergence physical measurement",
+            boundary=runtime_root,
+        )
         manifest, prefix_by_run = _validate_fanout(output, plan=binding.plan)
         physical_artifact = _publish_physical_provenance(
             store=store,
@@ -716,6 +822,8 @@ def _execute_group(
                     "schema_version": "1.0",
                     "artifact_type": "spathi_convergence_logical_result",
                     "execution_contract": _CONTRACT_ID,
+                    "measurement_contract": _MEASUREMENT_CONTRACT,
+                    "measurement_sha256": canonical_json_sha256(measurement),
                     "physical_artifact": physical_artifact.key.value,
                     "physical_run_id": binding.plan["physical_run_id"],
                     "physical_plan_sha256": canonical_json_sha256(binding.plan),
@@ -747,7 +855,7 @@ def _execute_group(
                     rows=rows,
                     physical_artifact=physical_artifact,
                     prefix_record=prefix_record,
-                    elapsed_seconds=elapsed,
+                    measurement=measurement,
                 )
                 atomic_write_json(
                     logical_output / "run_report.json",
@@ -897,6 +1005,8 @@ def validate_logical_convergence_artifact(
         "schema_version": "1.0",
         "artifact_type": "spathi_convergence_logical_result",
         "execution_contract": _CONTRACT_ID,
+        "measurement_contract": _MEASUREMENT_CONTRACT,
+        "measurement_sha256": provenance.get("measurement_sha256"),
         "physical_artifact": physical_key.value,
         "physical_run_id": binding.plan["physical_run_id"],
         "physical_plan_sha256": canonical_json_sha256(binding.plan),
@@ -912,6 +1022,18 @@ def validate_logical_convergence_artifact(
         raise BenchmarkConfigError("Convergence logical provenance differs from its frozen plan")
     if physical is None or physical.manifest.get("spec") != physical_spec:
         raise BenchmarkConfigError("Convergence physical execution evidence is missing")
+    physical_measurement = load_json_object(
+        physical.file("measurement.json"),
+        "convergence physical measurement",
+    )
+    if canonical_json_sha256(physical_measurement) != provenance["measurement_sha256"]:
+        raise BenchmarkConfigError("Convergence telemetry differs from physical evidence")
+    run_report = load_json_object(output / "run_report.json", "convergence logical run report")
+    tool_result = (run_report.get("tools") or {}).get("results", {}).get(
+        str(task["run"]["run_id"])
+    )
+    if not isinstance(tool_result, dict) or tool_result.get("measurement") != physical_measurement:
+        raise BenchmarkConfigError("Convergence logical report omits physical telemetry")
     fanout = load_json_object(
         physical.file("fanout-manifest.json"),
         "convergence physical fan-out evidence",
