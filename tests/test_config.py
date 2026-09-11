@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from spathi_bench.config import (
+    _PROFILE_DATASET_ROLES,
     BenchmarkConfigError,
     _validate_run_identity,
     load_image_lock,
@@ -71,6 +72,25 @@ def test_repository_contracts_and_all_profiles_are_valid() -> None:
     assert status_by_id["selection-reduced"] == "planned"
     assert status_by_id["reduced"] == "planned"
     assert status_by_id["full"] == "planned"
+
+
+def test_every_schema_profile_purpose_has_an_explicit_dataset_role_contract() -> None:
+    schema = load_json_object(REPO_ROOT / "schemas/profile.schema.json")
+
+    assert set(schema["properties"]["purpose"]["enum"]) == set(_PROFILE_DATASET_ROLES)
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    ("efficiency-development-reduced", "efficiency-development-full"),
+)
+def test_materialized_efficiency_development_profile_is_role_valid(
+    profile_id: str,
+) -> None:
+    profile = deepcopy(load_profile(REPO_ROOT, profile_id))
+    profile["status"] = "runnable"
+
+    validate_profile_references(REPO_ROOT, profile)
 
 
 def test_design_validation_treats_seed_audit_as_a_mandatory_gate(

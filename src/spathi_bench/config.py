@@ -19,6 +19,21 @@ class BenchmarkConfigError(ValueError):
     """Raised when a committed benchmark contract is invalid."""
 
 
+_PROFILE_DATASET_ROLES = {
+    "smoke": frozenset({"smoke"}),
+    "calibration": frozenset({"development"}),
+    "selection": frozenset({"validation"}),
+    "regression": frozenset({"test"}),
+    "benchmark": frozenset({"test"}),
+    "efficiency_development": frozenset({"efficiency_development"}),
+    "efficiency": frozenset({"efficiency_validation"}),
+    "efficiency_safety": frozenset({"efficiency_safety"}),
+    "scalability": frozenset({"scalability"}),
+    "dimensional_transfer": frozenset({"dimensional_transfer"}),
+    "performance": frozenset({"performance"}),
+}
+
+
 def load_json_object(path: Path, label: str | None = None) -> dict[str, Any]:
     label = label or path.name
     try:
@@ -438,26 +453,18 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             allowed_roles={str(role) for role in comparison["dataset_roles"]},
             generation_roles_by_id=generation_roles_by_id,
         )
-    if profile.get("status") != "runnable":
-        return
     generation_roles = {str(job["dataset_role"]) for job in profile["generation_jobs"]}
-    expected_roles = {
-        "smoke": {"smoke"},
-        "calibration": {"development"},
-        "selection": {"validation"},
-        "regression": {"test"},
-        "benchmark": {"test"},
-        "efficiency": {"efficiency_validation"},
-        "efficiency_safety": {"efficiency_safety"},
-        "scalability": {"scalability"},
-        "dimensional_transfer": {"dimensional_transfer"},
-        "performance": {"performance"},
-    }[str(profile["purpose"])]
+    purpose = str(profile["purpose"])
+    expected_roles = _PROFILE_DATASET_ROLES.get(purpose)
+    if expected_roles is None:
+        raise BenchmarkConfigError(f"Profile {profile['id']} has unsupported purpose {purpose!r}")
     if generation_roles != expected_roles:
         raise BenchmarkConfigError(
-            f"Runnable {profile['purpose']} profile {profile['id']} must contain exactly "
+            f"{profile['purpose']} profile {profile['id']} must contain exactly "
             f"dataset roles {sorted(expected_roles)}, found {sorted(generation_roles)}"
         )
+    if profile.get("status") != "runnable":
+        return
     production: dict[str, Any] | None = None
     raw_production = profile.get("production_config")
     if raw_production is not None and profile["purpose"] not in {
@@ -511,6 +518,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 "generic statistics stage not_applicable; the calibration workflow owns selection"
             )
     elif profile["purpose"] in {
+        "efficiency_development",
         "efficiency",
         "efficiency_safety",
         "scalability",
