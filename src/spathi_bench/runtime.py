@@ -17,6 +17,31 @@ from typing import Any
 from .artifacts import canonical_json_sha256, sha256_file
 from .config import BenchmarkConfigError
 
+_SKLEARN_PARALLEL_WARNING = (
+    "`sklearn.utils.parallel.delayed` should be used with "
+    "`sklearn.utils.parallel.Parallel` to make it possible to propagate the "
+    "scikit-learn configuration of the current thread to the joblib workers."
+)
+
+
+class _CommandOutputFilter:
+    """Collapse one known upstream warning while preserving every other line."""
+
+    def __init__(self) -> None:
+        self.suppressed_sklearn_parallel_warnings = 0
+        self._may_suppress_source_line = False
+
+    def keep(self, line: str) -> bool:
+        if _SKLEARN_PARALLEL_WARNING in line:
+            self.suppressed_sklearn_parallel_warnings += 1
+            self._may_suppress_source_line = True
+            return False
+        if self._may_suppress_source_line:
+            self._may_suppress_source_line = False
+            if line.strip() == "warnings.warn(":
+                return False
+        return True
+
 
 class CommandExecutionError(RuntimeError):
     """A streamed external command exited unsuccessfully.
@@ -194,10 +219,22 @@ def stream_command(
             bufsize=1,
         )
         assert process.stdout is not None
+        output_filter = _CommandOutputFilter()
         for line in process.stdout:
+            if not output_filter.keep(line):
+                continue
             print(line, end="", flush=True)
             log.write(line)
         return_code = process.wait()
+        warning_count = output_filter.suppressed_sklearn_parallel_warnings
+        if warning_count:
+            summary = (
+                "[spathi-benchmarks] Suppressed "
+                f"{warning_count} repeated scikit-learn parallel warning(s); "
+                "all other command output was retained.\n"
+            )
+            print(summary, end="", flush=True)
+            log.write(summary)
     if return_code != 0:
         raise CommandExecutionError(
             command=command,

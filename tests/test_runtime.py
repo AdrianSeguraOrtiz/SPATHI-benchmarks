@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import threading
 from copy import deepcopy
 from pathlib import Path
@@ -20,6 +22,44 @@ def _details(image_id: str, repo_digest: str) -> dict[str, Any]:
         "created": "2026-08-28T00:00:00Z",
         "labels": {},
     }
+
+
+def test_stream_command_collapses_only_the_repeated_sklearn_warning(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    warning = (
+        "`sklearn.utils.parallel.delayed` should be used with "
+        "`sklearn.utils.parallel.Parallel` to make it possible to propagate the "
+        "scikit-learn configuration of the current thread to the joblib workers."
+    )
+    script = (
+        "import os, sys\n"
+        "warning = os.environ['SP_TEST_WARNING']\n"
+        "sys.stdout.write('/usr/lib/sklearn/utils/parallel.py:144: UserWarning: ' + warning + '\\n')\n"
+        "sys.stdout.write(os.environ['SP_TEST_SOURCE_LINE'] + '\\n')\n"
+        "sys.stdout.write('unrelated warning remains visible\\n')\n"
+    )
+    log_path = tmp_path / "physical.log"
+
+    runtime.stream_command(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        log_path=log_path,
+        environment={
+            **os.environ,
+            "SP_TEST_WARNING": warning,
+            "SP_TEST_SOURCE_LINE": "  warnings.warn(",
+        },
+    )
+
+    console = capsys.readouterr().out
+    log = log_path.read_text(encoding="utf-8")
+    for observed in (console, log):
+        assert warning not in observed
+        assert "warnings.warn(" not in observed
+        assert "unrelated warning remains visible" in observed
+        assert "Suppressed 1 repeated scikit-learn parallel warning(s)" in observed
 
 
 def test_matching_catalog_image_leases_run_concurrently(
