@@ -45,6 +45,66 @@ def test_run_all_help_describes_the_low_level_stage_contract() -> None:
     assert "preflight, image, generate" in completed.stdout
 
 
+def test_study_script_exposes_the_identity_handoff_contract() -> None:
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts/study.sh"), "--help"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "complete content-bound SPATHI benchmark study" in completed.stdout
+    assert "workflow IDs are carried automatically" in completed.stdout
+
+
+def test_study_cli_forwards_budget_and_resource_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cli,
+        "run_study_workflow",
+        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
+    )
+    repo = tmp_path / "repo"
+
+    assert (
+        main(
+            [
+                "study",
+                "--repo-root",
+                str(repo),
+                "--andrea-repo",
+                str(tmp_path / "ANDREA"),
+                "--spathi-repo",
+                str(tmp_path / "SPATHI"),
+                "--profile",
+                "reduced",
+                "--max-cores",
+                "12",
+                "--reserve-ram-gb",
+                "4",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        {
+            "repo_root": repo.resolve(),
+            "andrea_repo": (tmp_path / "ANDREA").resolve(),
+            "spathi_repo": (tmp_path / "SPATHI").resolve(),
+            "work_root": repo.resolve() / "work",
+            "profile": "reduced",
+            "max_cores": 12,
+            "max_ram_gb": None,
+            "reserve_cores": 0,
+            "reserve_ram_gb": 4.0,
+        }
+    ]
+
+
 def test_run_all_rejects_unknown_flags_with_usage() -> None:
     completed = subprocess.run(
         [

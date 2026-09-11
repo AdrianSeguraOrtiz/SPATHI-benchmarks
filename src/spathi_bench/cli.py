@@ -29,6 +29,7 @@ from .reproducibility import write_reproducibility_audit
 from .scalability_workflow import run_scalability_workflow
 from .state import run_lock
 from .statistics import analyze_statistics
+from .study_workflow import run_study_workflow
 from .summarize import summarize
 from .workflows import (
     rebuild_calibration_report,
@@ -94,6 +95,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--python", default=sys.executable, help="benchmark Python executable"
     )
     doctor_parser.add_argument("--output", type=_path)
+
+    study = subparsers.add_parser(
+        "study",
+        help="run or resume the complete benchmark and carry exact workflow identities",
+    )
+    study.add_argument("--repo-root", type=_path, required=True)
+    study.add_argument("--andrea-repo", type=_path, required=True)
+    study.add_argument("--spathi-repo", type=_path, required=True)
+    study.add_argument("--work-root", type=_path)
+    study.add_argument("--profile", choices=("reduced", "full"), default="full")
+    _add_resource_options(study)
 
     calibrate_parser = subparsers.add_parser(
         "calibrate",
@@ -244,6 +256,15 @@ def _dispatch(
             report_path=args.output,
         )
         return "Environment diagnostics", report
+    if args.command == "study":
+        return "Complete SPATHI benchmark study finished", run_study_workflow(
+            repo_root=args.repo_root,
+            andrea_repo=args.andrea_repo,
+            spathi_repo=args.spathi_repo,
+            work_root=args.work_root or args.repo_root / "work",
+            profile=args.profile,
+            **_resource_options(args),
+        )
     if args.command == "calibrate":
         if args.report_only:
             return "SPATHI calibration report rebuilt", rebuild_calibration_report(
@@ -387,6 +408,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command in {
             "doctor",
+            "study",
             "calibrate",
             "compare",
             "justify-efficiency",

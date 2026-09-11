@@ -23,7 +23,17 @@ The publication workflow is deliberately sequential:
 | Scalability | public synthetic scale grid | completion, attributable failures and resource evidence across declared engineering stress levels |
 | Performance | fixed small and medium synthetic inputs | isolated cross-tool runtime, memory, output size and parallel-scaling evidence |
 
-The six natural commands are:
+The natural end-to-end command is:
+
+```bash
+scripts/study.sh --profile reduced
+```
+
+It runs or resumes the complete budget and carries the exact calibration and efficiency workflow
+identities between phases. Historical runs remain safely in `work/`; they neither need to be
+deleted nor create ambiguity. Use `--profile full` for the publication budget.
+
+The six phase-specific commands remain available for development, inspection and report recovery:
 
 ```bash
 scripts/calibrate.sh
