@@ -7,9 +7,12 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from .config import BenchmarkConfigError
+
+_EXACT_IMPORT_LOCK = RLock()
 
 
 def _module_belongs_to(module: Any, repository: Path) -> bool:
@@ -31,39 +34,44 @@ def _exact_andrea_import(andrea_repo: Path) -> Iterator[None]:
     caller's shell, so an already imported checkout must match exactly.
     """
 
-    repository = andrea_repo.resolve()
-    package_init = repository / "andrea" / "__init__.py"
-    if not package_init.is_file():
-        raise BenchmarkConfigError(f"ANDREA package is missing from {repository}")
+    # Both sys.path and sys.modules are process-global. Keep their complete
+    # temporary lifetime atomic so concurrent artifact validation cannot remove
+    # ANDREA while another worker is importing or using it.
+    with _EXACT_IMPORT_LOCK:
+        repository = andrea_repo.resolve()
+        package_init = repository / "andrea" / "__init__.py"
+        if not package_init.is_file():
+            raise BenchmarkConfigError(f"ANDREA package is missing from {repository}")
 
-    existing_names = {
-        name for name in sys.modules if name == "andrea" or name.startswith("andrea.")
-    }
-    existing_root = sys.modules.get("andrea")
-    if existing_root is not None and not _module_belongs_to(existing_root, repository):
-        raise BenchmarkConfigError(
-            "A different ANDREA checkout is already imported in the benchmark process"
-        )
-
-    sys.path.insert(0, str(repository))
-    importlib.invalidate_caches()
-    try:
-        module = importlib.import_module("andrea")
-        if not _module_belongs_to(module, repository):
+        existing_names = {
+            name for name in sys.modules if name == "andrea" or name.startswith("andrea.")
+        }
+        existing_root = sys.modules.get("andrea")
+        if existing_root is not None and not _module_belongs_to(existing_root, repository):
             raise BenchmarkConfigError(
-                f"ANDREA imported from an unexpected location: {getattr(module, '__file__', None)}"
+                "A different ANDREA checkout is already imported in the benchmark process"
             )
-        yield
-    finally:
-        try:
-            sys.path.remove(str(repository))
-        except ValueError:
-            pass
-        if not existing_names:
-            for name in list(sys.modules):
-                if name == "andrea" or name.startswith("andrea."):
-                    del sys.modules[name]
+
+        sys.path.insert(0, str(repository))
         importlib.invalidate_caches()
+        try:
+            module = importlib.import_module("andrea")
+            if not _module_belongs_to(module, repository):
+                raise BenchmarkConfigError(
+                    "ANDREA imported from an unexpected location: "
+                    f"{getattr(module, '__file__', None)}"
+                )
+            yield
+        finally:
+            try:
+                sys.path.remove(str(repository))
+            except ValueError:
+                pass
+            if not existing_names:
+                for name in list(sys.modules):
+                    if name == "andrea" or name.startswith("andrea."):
+                        del sys.modules[name]
+            importlib.invalidate_caches()
 
 
 def validate_inference_analysis_contract(andrea_repo: Path, run_report: Path) -> None:
