@@ -325,7 +325,15 @@ def _calibration_fixture(
                 "profile_id": ranking["profile_id"],
                 "artifact_store": str((version_root / "artifacts").resolve()),
                 "datasets": [
-                    validation_dataset if stage_id == "validation" else development_dataset
+                    {
+                        **(validation_dataset if stage_id == "validation" else development_dataset),
+                        "dataset_artifact": {
+                            **(validation_dataset if stage_id == "validation" else development_dataset)[
+                                "dataset_artifact"
+                            ],
+                            "cache_hit": stage_id != "validation" and phase_id != "geometry__scout",
+                        },
+                    }
                 ],
             },
         )
@@ -1008,6 +1016,81 @@ def test_reporting_rejects_a_flow_id_that_disagrees_with_its_workflow_directory(
 
     with pytest.raises(BenchmarkConfigError, match="path disagrees with its flow ID"):
         renderer(repo_root=repo_root, workflow_root=workflow_root, **kwargs)
+
+
+@pytest.mark.parametrize("first_cache_hit", [False, True], ids=["miss-then-hit", "hit-then-miss"])
+def test_calibration_report_reconciles_cache_access_without_changing_phase_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_cache_hit: bool,
+) -> None:
+    repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
+    version_root = workflow_root.parents[3]
+    recorded_states = {}
+    for index, (stage_id, fidelity) in enumerate(calibration_reporting.CALIBRATION_PHASE_ORDER):
+        path = version_root / f"calibration-{stage_id}__{fidelity}" / "state.json"
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state["datasets"][0]["dataset_artifact"]["cache_hit"] = (
+            first_cache_hit if index == 0 else not first_cache_hit
+        )
+        _write_json(path, state)
+        recorded_states[path] = path.read_bytes()
+    captured: dict[str, Any] = {}
+
+    def capture_bundle(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"captured": True}
+
+    monkeypatch.setattr(calibration_reporting, "write_report_bundle", capture_bundle)
+    calibration_reporting.render_calibration_report(
+        repo_root=repo_root, version_root=version_root, workflow_root=workflow_root,
+    )
+    assert captured["payload"]["datasets"]["summary"]["dataset_count"] == 2
+    assert {path: path.read_bytes() for path in recorded_states} == recorded_states
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("seed", 999),
+        ("split_id", "different-split"),
+        ("condition_id", "different-condition"),
+        ("dataset_manifest", "/different/manifest.json"),
+        ("dataset_artifact.digest", "f" * 64),
+        ("dataset_artifact.path", "/different/artifact"),
+    ],
+)
+def test_calibration_report_still_rejects_real_dataset_disagreements(
+    tmp_path: Path, field: str, replacement: Any,
+) -> None:
+    repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
+    version_root = workflow_root.parents[3]
+    state_path = version_root / "calibration-geometry__confirmation/state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    target = state["datasets"][0]
+    parts = field.split(".")
+    for part in parts[:-1]:
+        target = target[part]
+    target[parts[-1]] = replacement
+    _write_json(state_path, state)
+
+    with pytest.raises(BenchmarkConfigError, match="disagree on dataset.*geometry__confirmation"):
+        calibration_reporting.render_calibration_report(
+            repo_root=repo_root, version_root=version_root, workflow_root=workflow_root,
+        )
+
+
+@pytest.mark.parametrize("cache_hit", [None, 0, 1, "false"])
+def test_calibration_report_rejects_invalid_cache_telemetry(tmp_path: Path, cache_hit: Any) -> None:
+    repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
+    version_root = workflow_root.parents[3]
+    state_path = version_root / "calibration-geometry__confirmation/state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["datasets"][0]["dataset_artifact"]["cache_hit"] = cache_hit
+    _write_json(state_path, state)
+
+    with pytest.raises(BenchmarkConfigError, match="cache_hit must be boolean"):
+        calibration_reporting.render_calibration_report(
+            repo_root=repo_root, version_root=version_root, workflow_root=workflow_root,
+        )
 
 
 def test_calibration_report_rejects_a_ranking_changed_after_workflow_completion(

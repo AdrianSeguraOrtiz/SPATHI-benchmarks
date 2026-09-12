@@ -412,11 +412,24 @@ def render_calibration_report(
         elif artifact_store != raw_artifact_store:
             raise BenchmarkConfigError("Calibration phases use different artifact stores")
         for raw_dataset in require_array(stage_state.get("datasets"), "benchmark datasets"):
-            dataset = require_mapping(raw_dataset, "benchmark dataset")
+            dataset = dict(require_mapping(raw_dataset, "benchmark dataset"))
+            reference = dict(require_mapping(dataset.get("dataset_artifact"), "dataset artifact"))
+            # Cache access belongs to a phase, not to the immutable dataset identity.
+            # Copy both mappings so the recorded phase provenance remains untouched.
+            if not isinstance(reference.pop("cache_hit", None), bool):
+                raise BenchmarkConfigError(f"{phase_id} dataset artifact cache_hit must be boolean")
+            dataset["dataset_artifact"] = reference
             key = (str(dataset.get("dataset_role")), str(dataset.get("dataset_id")))
-            existing = dataset_records.setdefault(key, dict(dataset))
+            existing = dataset_records.setdefault(key, dataset)
             if existing != dataset:
-                raise BenchmarkConfigError(f"Calibration phases disagree on dataset {key!r}")
+                fields = sorted(
+                    field for field in existing.keys() | dataset.keys()
+                    if existing.get(field) != dataset.get(field)
+                )
+                raise BenchmarkConfigError(
+                    f"Calibration phases disagree on dataset {key!r} in {phase_id}: "
+                    f"differing fields: {', '.join(fields)}"
+                )
         dataset_state_paths.append(stage_state_path)
         stages.append(
             _stage_payload(

@@ -140,9 +140,11 @@ def test_workflow_identity_includes_the_docker_runtime(
     assert first["fingerprint"] != second["fingerprint"]
 
 
+@pytest.mark.parametrize("fail_first_publication", [False, True])
 def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    fail_first_publication: bool,
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
@@ -232,6 +234,8 @@ def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
         state = json.loads((workflow_root / "workflow.json").read_text(encoding="utf-8"))
         assert state["status"] in {"publishing", "complete"}
         rendered.append(workflow_root)
+        if fail_first_publication and len(rendered) == 1:
+            raise BenchmarkConfigError("Simulated calibration report failure")
         return _fake_report_bundle(
             repo=repo,
             version_root=version_root,
@@ -242,22 +246,23 @@ def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
 
     monkeypatch.setattr(workflows, "render_calibration_report", fake_report)
 
-    first = workflows.run_calibration_workflow(
-        repo_root=repo,
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        work_root=work,
-        calibration_budget="reduced",
-        run_id="calibration-test",
-    )
-    second = workflows.run_calibration_workflow(
-        repo_root=repo,
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        work_root=work,
-        calibration_budget="reduced",
-        run_id="calibration-test",
-    )
+    workflow_args = {
+        "repo_root": repo,
+        "andrea_repo": andrea,
+        "spathi_repo": spathi,
+        "work_root": work,
+        "calibration_budget": "reduced",
+        "run_id": "calibration-test",
+    }
+    if fail_first_publication:
+        with pytest.raises(BenchmarkConfigError, match="Simulated calibration report failure"):
+            workflows.run_calibration_workflow(**workflow_args)
+        state = json.loads((rendered[0] / "workflow.json").read_text(encoding="utf-8"))
+        assert state["status"] == "publishing"
+        assert state["selected_config_sha256"] == sha256_file(repo / state["selected_config"])
+
+    first = workflows.run_calibration_workflow(**workflow_args)
+    second = workflows.run_calibration_workflow(**workflow_args)
 
     expected_phases = list(workflows.CALIBRATION_PHASES)
     phase_ids = [f"{stage}__{fidelity}" for stage, fidelity in expected_phases]
@@ -282,7 +287,7 @@ def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
     assert selected.is_file()
     assert second["selected_config_sha256"] == sha256_file(selected)
     assert len(materialized) == len(pipelines) == len(ranked) == stage_count
-    assert len(rendered) == 2
+    assert len(rendered) == 2 + int(fail_first_publication)
     assert second["reports"]["html"]["path"] == (
         "work/v1/reports/reduced/calibration-test/calibration.html"
     )
