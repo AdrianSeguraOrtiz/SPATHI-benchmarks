@@ -72,7 +72,7 @@ def setup_study(tmp_path: Path, monkeypatch):
     return common, events, fail, qualification_calls
 
 
-def test_named_study_carries_upstream_ids_and_completed_resume_runs_nothing(setup_study):
+def test_named_study_carries_upstream_ids_and_completed_resume_runs_nothing(setup_study, monkeypatch):
     common, events, _, qualifications = setup_study
     first = study.run_study_workflow(**common, profile="reduced", run_id="pilot", max_cores=4)
     assert first["status"] == "complete"
@@ -81,12 +81,15 @@ def test_named_study_carries_upstream_ids_and_completed_resume_runs_nothing(setu
     assert all(args["work_root"] == common["work_root"] / "studies/pilot" for _, args in events)
     assert events[1][1]["calibration_run_id"] == "pilot"
     assert all(args["efficiency_run_id"] == "pilot" for _, args in events[2:])
+    completed_at = load_study(common["work_root"] / "studies/pilot")["completed_at"]
+    monkeypatch.setattr(study, "now", lambda: "2099-01-01T00:00:00+00:00")
     second = study.run_study_workflow(**common, run_id="pilot")
     assert second["status"] == "complete"
     assert len(events) == 6
     assert len(qualifications) == 1
     journal = load_study(common["work_root"] / "studies/pilot")
     assert len(journal["invocations"]) == 2
+    assert journal["completed_at"] == completed_at
     assert journal["resources"]["max_cores"] == 4
     assert Path(second["report_path"]).is_file()
 

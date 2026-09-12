@@ -156,7 +156,10 @@ def run_study_workflow(
                     state["phases"][name] = phase_receipt(repo_root, root, workflow_root, result)
                     save_study(root, state)
                     render_study_index(repo_root=repo_root, study_root=root, state=state)
-                state.update(status="complete", current_phase=None, completed_at=now())
+                state.update(
+                    status="complete", current_phase=None,
+                    completed_at=state.get("completed_at") or now(),
+                )
                 state["invocations"][-1].update(status="complete", finished_at=now())
             except BaseException as exc:
                 state["status"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed"
