@@ -199,6 +199,7 @@ def _publish_dataset(
             for context in ("group:a", "group:b"):
                 writer.writerow(["TF1", "G1", "1", "+", "simulated_truth", context])
                 writer.writerow(["TF1", "G2", "1", "+", "simulated_truth", context])
+                writer.writerow(["G3", "G1", "1", "+", "simulated_truth", context])
         fingerprint = canonical_json_sha256({"dataset": dataset_id})
         _json(
             root / "dataset-manifest.json",
@@ -933,6 +934,11 @@ def test_builder_recalculates_metrics_spaces_hashes_and_shared_references(tmp_pa
         assert row["source_artifacts"]["dataset"]
         assert row["candidate_space"]["n_reference_evaluation_candidates"] == 3
         assert row["candidate_space"]["policy"] == "full_requested_universe"
+        assert row["candidate_space"]["n_truth_edges_in_candidate_space"] == 2
+        assert row["candidate_space"]["n_truth_edges_outside_candidate_space"] == 1
+        assert row["candidate_space"]["truth_outside_candidate_space_examples"] == [
+            "G3->G1"
+        ]
         assert row["reference_measurements"]["peak_memory_bytes"] == 100_000_000
         assert row["candidate_measurements"]["models_requested"] == 4
     assert all(len(references) == 1 for references in per_run.values())
@@ -1196,6 +1202,33 @@ def test_builder_rejects_tampered_content_addressed_artifact(tmp_path: Path) -> 
     network.write_text(network.read_text(encoding="utf-8") + "corrupt\n", encoding="utf-8")
 
     with pytest.raises(BenchmarkConfigError, match="hash differs|size differs"):
+        construct_noninferiority_evidence(
+            repo_root=root,
+            plan_path=plan_path,
+            artifact_index_path=index_path,
+        )
+
+
+def test_builder_still_rejects_truth_genes_outside_the_gene_universe(tmp_path: Path) -> None:
+    root, plan_path, panel_path, index_path = _repository(tmp_path)
+    panel = json.loads(panel_path.read_text(encoding="utf-8"))
+    digest = panel["datasets"][0]["dataset_artifact"]["digest"]
+    artifact_root = root / "work/v1/artifacts/dataset" / digest
+    truth_path = next(artifact_root.glob("output/*/datasets/*/truth/networks.csv"))
+    with truth_path.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(["UNKNOWN", "G1", 1, "+", "simulated_truth", "group:a"])
+
+    # Repair the immutable inventory so the assertion isolates semantic truth validation.
+    manifest_path = artifact_root / "artifact.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    relative_truth = truth_path.relative_to(artifact_root).as_posix()
+    entry = next(item for item in manifest["files"] if item["path"] == relative_truth)
+    entry["size"] = truth_path.stat().st_size
+    entry["sha256"] = sha256_file(truth_path)
+    _json(manifest_path, manifest)
+
+    with pytest.raises(BenchmarkConfigError, match="outside the declared gene universe"):
         construct_noninferiority_evidence(
             repo_root=root,
             plan_path=plan_path,

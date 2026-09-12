@@ -358,7 +358,10 @@ validate percentile-bootstrap coverage with five replicates per stratum.
 Evidence is reconstructed from immutable artifacts rather than trusted from self-declared result
 fields. It verifies SPATHI identity, input fingerprints, the absence of truth-bearing inference
 inputs, context-specific target eligibility, complete directed TF-by-target candidate-space counts
-minus self-edges, and the original simulator truth.
+minus self-edges, and the original simulator truth. Simulator truth may contain regulatory edges
+outside the manifest-declared TF-by-gene candidate space; exactly as in ANDREA evaluation, those
+edges are retained in provenance, excluded from AUPR, and reported with per-context counts and
+bounded examples rather than being mistaken for malformed data.
 
 ## Phase 3: post-freeze dimensional transfer
 

@@ -104,6 +104,7 @@ class _Dataset:
     sources: tuple[str, ...]
     targets: tuple[str, ...]
     truth: dict[str, frozenset[tuple[str, str]]]
+    truth_outside_candidate_space: dict[str, frozenset[tuple[str, str]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,18 +308,26 @@ def _dataset_from_artifact(
     if tuple(header) != _NETWORK_COLUMNS:
         raise BenchmarkConfigError(f"Truth network has an unexpected header: {truth_path}")
     truth: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    truth_outside_candidate_space: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    seen_truth: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    source_set = set(sources)
+    gene_universe = set(targets)
     for row in rows:
         context = row["context"]
         edge = (row["source"], row["target"])
         if context not in declared_contexts and context != "global":
             raise BenchmarkConfigError(f"Truth contains undeclared context {context!r}")
-        if edge[0] not in sources or edge[1] not in targets or edge[0] == edge[1]:
+        if edge[0] not in gene_universe or edge[1] not in gene_universe:
             raise BenchmarkConfigError(
-                f"Truth edge is outside the declared candidate space: {edge}"
+                f"Truth edge references a gene outside the declared gene universe: {edge}"
             )
-        if edge in truth[context]:
+        if edge in seen_truth[context]:
             raise BenchmarkConfigError(f"Truth contains duplicate edge {edge} in {context!r}")
-        truth[context].add(edge)
+        seen_truth[context].add(edge)
+        if edge[0] in source_set and edge[0] != edge[1]:
+            truth[context].add(edge)
+        else:
+            truth_outside_candidate_space[context].add(edge)
     for context in declared_contexts:
         if not truth.get(context):
             raise BenchmarkConfigError(
@@ -344,6 +353,10 @@ def _dataset_from_artifact(
         sources=sources,
         targets=targets,
         truth={context: frozenset(edges) for context, edges in truth.items()},
+        truth_outside_candidate_space={
+            context: frozenset(edges)
+            for context, edges in truth_outside_candidate_space.items()
+        },
     )
 
 
@@ -1517,6 +1530,9 @@ def construct_noninferiority_evidence(
                 candidate_target_hash = _semantic_list_hash(candidate_targets)
                 full_space_hash, full_overlap, full_count = _space(sources, full_targets)
                 truth = dataset.truth[context]
+                truth_outside_candidate_space = dataset.truth_outside_candidate_space.get(
+                    context, frozenset()
+                )
                 retained_truth = {edge for edge in truth if edge[1] in set(candidate_targets)}
                 target_coverage = None
                 intersection_diagnostic = None
@@ -1617,6 +1633,14 @@ def construct_noninferiority_evidence(
                             "n_candidate_evaluation_source_target_overlaps": full_overlap,
                             "n_reference_evaluation_candidates": full_count,
                             "n_candidate_evaluation_candidates": full_count,
+                            "n_truth_edges_in_candidate_space": len(truth),
+                            "n_truth_edges_outside_candidate_space": len(
+                                truth_outside_candidate_space
+                            ),
+                            "truth_outside_candidate_space_examples": [
+                                f"{source}->{target}"
+                                for source, target in sorted(truth_outside_candidate_space)[:8]
+                            ],
                         },
                         "target_coverage": target_coverage,
                         "intersection_diagnostic": intersection_diagnostic,

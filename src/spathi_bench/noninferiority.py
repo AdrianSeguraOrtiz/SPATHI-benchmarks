@@ -836,6 +836,14 @@ def _validate_candidate_space(
             f"Evidence for {candidate_id!r} is not the complete directed TF-by-target "
             "candidate space excluding self-edges"
         )
+    outside_truth_count = space["n_truth_edges_outside_candidate_space"]
+    outside_truth_examples = space["truth_outside_candidate_space_examples"]
+    if len(outside_truth_examples) > outside_truth_count or (
+        outside_truth_count == 0 and outside_truth_examples
+    ):
+        raise BenchmarkConfigError(
+            f"Evidence for {candidate_id!r} has inconsistent out-of-space truth diagnostics"
+        )
     if policy != "full_requested_universe" or not (
         reference_target == reference_evaluation_target == candidate_evaluation_target
         and reference_count == reference_evaluation_count == candidate_evaluation_count
@@ -851,6 +859,10 @@ def _validate_candidate_space(
     if intersection_diagnostic:
         if coverage is None:
             raise BenchmarkConfigError(f"Eligibility evidence for {candidate_id!r} lacks coverage")
+        if coverage["n_reference_truth_edges"] != space["n_truth_edges_in_candidate_space"]:
+            raise BenchmarkConfigError(
+                f"Eligibility evidence for {candidate_id!r} uses a different evaluable truth set"
+            )
         if coverage["n_retained_truth_edges"] > coverage["n_reference_truth_edges"]:
             raise BenchmarkConfigError(
                 f"Eligibility evidence for {candidate_id!r} retains impossible truth-edge counts"

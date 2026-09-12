@@ -113,7 +113,9 @@
         "n_reference_sources", "n_candidate_sources", "n_reference_targets", "n_candidate_targets",
         "n_reference_evaluation_targets", "n_candidate_evaluation_targets",
         "n_reference_evaluation_source_target_overlaps", "n_candidate_evaluation_source_target_overlaps",
-        "n_reference_evaluation_candidates", "n_candidate_evaluation_candidates"
+        "n_reference_evaluation_candidates", "n_candidate_evaluation_candidates",
+        "n_truth_edges_in_candidate_space", "n_truth_edges_outside_candidate_space",
+        "truth_outside_candidate_space_examples"
       ],
       "properties": {
         "policy": {"const": "full_requested_universe"},
@@ -136,7 +138,13 @@
         "n_reference_evaluation_source_target_overlaps": {"type": "integer", "minimum": 0},
         "n_candidate_evaluation_source_target_overlaps": {"type": "integer", "minimum": 0},
         "n_reference_evaluation_candidates": {"type": "integer", "minimum": 1},
-        "n_candidate_evaluation_candidates": {"type": "integer", "minimum": 1}
+        "n_candidate_evaluation_candidates": {"type": "integer", "minimum": 1},
+        "n_truth_edges_in_candidate_space": {"type": "integer", "minimum": 1},
+        "n_truth_edges_outside_candidate_space": {"type": "integer", "minimum": 0},
+        "truth_outside_candidate_space_examples": {
+          "type": "array", "maxItems": 8, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 4}
+        }
       }
     },
     "target_coverage": {

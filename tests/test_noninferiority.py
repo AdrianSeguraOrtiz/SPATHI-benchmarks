@@ -733,6 +733,9 @@ def _space(dataset_id: str, context_id: str, *, eligible: bool) -> dict[str, Any
         "n_candidate_evaluation_source_target_overlaps": overlaps,
         "n_reference_evaluation_candidates": evaluation_candidates,
         "n_candidate_evaluation_candidates": evaluation_candidates,
+        "n_truth_edges_in_candidate_space": 100,
+        "n_truth_edges_outside_candidate_space": 0,
+        "truth_outside_candidate_space_examples": [],
     }
 
 
