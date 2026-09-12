@@ -78,3 +78,57 @@ def test_complete_study_carries_exact_upstream_ids_without_discovery(
             "performance": {"flow_id": "perf-789", "status": "complete"},
         },
     }
+
+
+def test_complete_study_can_start_after_an_existing_calibration(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def calibration(**_kwargs: Any) -> dict[str, str]:
+        raise AssertionError("calibration must not run when its exact identity is supplied")
+
+    def workflow(name: str, flow_id: str):
+        def run(**kwargs: Any) -> dict[str, str]:
+            events.append((name, kwargs))
+            return {"flow_id": flow_id, "status": "complete"}
+
+        return run
+
+    monkeypatch.setattr(study, "run_calibration_workflow", calibration)
+    monkeypatch.setattr(study, "run_efficiency_workflow", workflow("efficiency", "eff-456"))
+    monkeypatch.setattr(
+        study,
+        "run_dimensional_transfer_workflow",
+        workflow("dimensional_transfer", "dim-789"),
+    )
+    monkeypatch.setattr(study, "run_comparison_workflow", workflow("comparison", "cmp-789"))
+    monkeypatch.setattr(study, "run_scalability_workflow", workflow("scalability", "scale-789"))
+    monkeypatch.setattr(study, "run_performance_workflow", workflow("performance", "perf-789"))
+
+    result = study.run_study_workflow(
+        repo_root=tmp_path / "repo",
+        andrea_repo=tmp_path / "ANDREA",
+        spathi_repo=tmp_path / "SPATHI",
+        work_root=tmp_path / "repo/work",
+        profile="reduced",
+        calibration_run_id="cal-existing",
+    )
+
+    assert [name for name, _kwargs in events] == [
+        "efficiency",
+        "dimensional_transfer",
+        "comparison",
+        "scalability",
+        "performance",
+    ]
+    assert events[0][1]["calibration_run_id"] == "cal-existing"
+    assert all(
+        arguments["efficiency_run_id"] == "eff-456" for _name, arguments in events[1:]
+    )
+    assert result["calibration_run_id"] == "cal-existing"
+    assert result["phases"]["calibration"] == {
+        "flow_id": "cal-existing",
+        "status": "complete",
+    }

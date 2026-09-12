@@ -27,6 +27,7 @@ def run_study_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str,
+    calibration_run_id: str | None = None,
     max_cores: int | None = None,
     max_ram_gb: float | None = None,
     reserve_cores: int = 0,
@@ -35,9 +36,10 @@ def run_study_workflow(
     """Run or resume every phase while carrying exact upstream identities.
 
     Each constituent workflow remains independently content-bound and resumable.
-    The coordinator deliberately passes the calibration and efficiency flow IDs
-    returned by the current invocation, so historical workflows in ``work/`` can
-    never make the natural end-to-end path ambiguous.
+    The coordinator deliberately passes exact calibration and efficiency flow
+    IDs, so historical workflows in ``work/`` can never make the natural
+    end-to-end path ambiguous.  A supplied calibration identity starts the study
+    at efficiency justification after that calibration is fully reconciled.
     """
 
     if profile not in {"reduced", "full"}:
@@ -55,14 +57,18 @@ def run_study_workflow(
         "work_root": work_root,
     }
 
-    calibration = run_calibration_workflow(
-        **common,
-        calibration_budget=profile,
-        run_id=None,
-        **resources,
-    )
-    calibration_summary = _completed_phase(calibration, "Calibration")
-    calibration_flow_id = calibration_summary["flow_id"]
+    if calibration_run_id is None:
+        calibration = run_calibration_workflow(
+            **common,
+            calibration_budget=profile,
+            run_id=None,
+            **resources,
+        )
+        calibration_summary = _completed_phase(calibration, "Calibration")
+        calibration_flow_id = calibration_summary["flow_id"]
+    else:
+        calibration_flow_id = calibration_run_id
+        calibration_summary = {"flow_id": calibration_flow_id, "status": "complete"}
 
     efficiency = run_efficiency_workflow(
         **common,

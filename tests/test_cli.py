@@ -57,6 +57,7 @@ def test_study_script_exposes_the_identity_handoff_contract() -> None:
     assert completed.returncode == 0
     assert "complete content-bound SPATHI benchmark study" in completed.stdout
     assert "workflow IDs are carried automatically" in completed.stdout
+    assert "--calibration-run-id ID" in completed.stdout
 
 
 def test_study_cli_forwards_budget_and_resource_policy(
@@ -82,6 +83,8 @@ def test_study_cli_forwards_budget_and_resource_policy(
                 str(tmp_path / "SPATHI"),
                 "--profile",
                 "reduced",
+                "--calibration-run-id",
+                "calibration-current",
                 "--max-cores",
                 "12",
                 "--reserve-ram-gb",
@@ -97,6 +100,7 @@ def test_study_cli_forwards_budget_and_resource_policy(
             "spathi_repo": (tmp_path / "SPATHI").resolve(),
             "work_root": repo.resolve() / "work",
             "profile": "reduced",
+            "calibration_run_id": "calibration-current",
             "max_cores": 12,
             "max_ram_gb": None,
             "reserve_cores": 0,

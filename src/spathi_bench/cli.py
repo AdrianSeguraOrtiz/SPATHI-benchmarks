@@ -105,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
     study.add_argument("--spathi-repo", type=_path, required=True)
     study.add_argument("--work-root", type=_path)
     study.add_argument("--profile", choices=("reduced", "full"), default="full")
+    study.add_argument(
+        "--calibration-run-id",
+        help="reuse one completed same-profile calibration and start at efficiency",
+    )
     _add_resource_options(study)
 
     calibrate_parser = subparsers.add_parser(
@@ -263,6 +267,7 @@ def _dispatch(
             spathi_repo=args.spathi_repo,
             work_root=args.work_root or args.repo_root / "work",
             profile=args.profile,
+            calibration_run_id=args.calibration_run_id,
             **_resource_options(args),
         )
     if args.command == "calibrate":

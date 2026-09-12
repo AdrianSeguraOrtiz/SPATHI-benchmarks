@@ -33,6 +33,17 @@ It runs or resumes the complete budget and carries the exact calibration and eff
 identities between phases. Historical runs remain safely in `work/`; they neither need to be
 deleted nor create ambiguity. Use `--profile full` for the publication budget.
 
+To resume the study after a completed calibration and run efficiency plus every later phase:
+
+```bash
+scripts/study.sh --profile reduced --calibration-run-id CALIBRATION_ID
+```
+
+The supplied calibration is not trusted by name alone: its selected policy and complete ranking
+chain are revalidated against the current search-space, SPATHI build and ranking contracts.
+Consequently, operational orchestration fixes do not force an unchanged scientific calibration to
+run again, while changes to any selection input or outcome are still rejected.
+
 The six phase-specific commands remain available for development, inspection and report recovery:
 
 ```bash

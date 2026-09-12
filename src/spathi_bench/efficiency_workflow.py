@@ -598,15 +598,11 @@ def run_efficiency_workflow(
         calibration_run_id=calibration_run_id,
     )
     # A selected-config is not authoritative by itself: reconstruct its winner
-    # from the complete ranking chain before it can seed a post-selection study.
+    # from the complete ranking chain under the current search and ranking
+    # contracts before it can seed a post-selection study. This content-level
+    # reconciliation permits operational benchmark fixes without recalibration.
     validate_calibration_contracts(root, selected_path)
     benchmark = observe_benchmark_repository(root, require_clean=True)
-    ranking_path = root / selected["selection_evidence"]["validation_ranking"]
-    ranking = load_json_object(ranking_path, "calibration validation ranking")
-    if ranking.get("benchmark_commit") != benchmark["commit"]:
-        raise BenchmarkConfigError(
-            "Calibration evidence was produced by another benchmark revision; recalibrate"
-        )
     profile_id = f"efficiency-{profile}"
     profile_payload = load_profile(root, profile_id, require_runnable=True)
     development_profile_id = f"efficiency-development-{profile}"

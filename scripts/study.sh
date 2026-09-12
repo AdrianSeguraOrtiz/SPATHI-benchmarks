@@ -4,11 +4,12 @@ set -euo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_ROOT/lib/common.sh"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "Usage: scripts/study.sh [--profile full|reduced]"
+  echo "Usage: scripts/study.sh [--profile full|reduced] [--calibration-run-id ID]"
   echo "Runs or resumes the complete content-bound SPATHI benchmark study."
   echo
   echo "Options:"
   echo "  --profile full|reduced    Use publication full (default) or operational reduced."
+  echo "  --calibration-run-id ID   Reuse this completed calibration and start at efficiency."
   bench_resource_help
   echo "  -h, --help                Show this help."
   echo

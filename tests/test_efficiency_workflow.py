@@ -859,25 +859,18 @@ def test_efficiency_workflow_rejects_path_like_calibration_ids(
         )
 
 
-def test_efficiency_rejects_calibration_from_another_benchmark_revision(
+def test_efficiency_rejects_calibration_that_current_contracts_cannot_reconcile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     frozen_spathi_params: dict[str, Any],
 ) -> None:
     root, work, andrea, spathi, _image_id = _repository(tmp_path, frozen_spathi_params)
-    monkeypatch.setattr(workflow, "validate_calibration_contracts", lambda *_args: ({}, {}))
-    monkeypatch.setattr(
-        workflow,
-        "observe_benchmark_repository",
-        lambda *_args, **_kwargs: {
-            "path": str(root),
-            "commit": "2" * 40,
-            "origin": "https://example.test/spathi-benchmarks.git",
-            "clean": True,
-        },
-    )
+    def reject_reconciliation(*_args: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+        raise BenchmarkConfigError("Calibration ranking cannot be reconciled")
 
-    with pytest.raises(BenchmarkConfigError, match="another benchmark revision"):
+    monkeypatch.setattr(workflow, "validate_calibration_contracts", reject_reconciliation)
+
+    with pytest.raises(BenchmarkConfigError, match="cannot be reconciled"):
         workflow.run_efficiency_workflow(
             repo_root=root,
             andrea_repo=andrea,

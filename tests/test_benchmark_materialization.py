@@ -58,16 +58,6 @@ def _stub_immutable_efficiency_verification(monkeypatch: pytest.MonkeyPatch) -> 
         "validate_calibration_contracts",
         lambda _root, selected_path: ({}, json.loads(selected_path.read_text(encoding="utf-8"))),
     )
-    monkeypatch.setattr(
-        materialization,
-        "observe_benchmark_repository",
-        lambda root, **_kwargs: {
-            "path": str(root),
-            "commit": "1" * 40,
-            "origin": "https://example.test/spathi-benchmarks.git",
-            "clean": True,
-        },
-    )
 
 
 def _selected_policy(repo: Path, *, candidate_id: str = "selected_winner") -> dict[str, Any]:
@@ -409,25 +399,14 @@ def test_production_policy_loader_validates_budget_commit_and_provenance(
         load_frozen_production_policy(repo, path, budget="reduced")
 
 
-def test_production_policy_rejects_another_benchmark_revision(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_production_policy_accepts_reconciled_prior_revision_evidence(tmp_path: Path) -> None:
     repo = _copy_materialization_repo(tmp_path)
     path = _write_production_config(repo, "reduced")
-    monkeypatch.setattr(
-        materialization,
-        "observe_benchmark_repository",
-        lambda root, **_kwargs: {
-            "path": str(root),
-            "commit": "2" * 40,
-            "origin": "https://example.test/spathi-benchmarks.git",
-            "clean": True,
-        },
-    )
 
-    with pytest.raises(BenchmarkConfigError, match="another benchmark revision"):
-        load_frozen_production_policy(repo, path, budget="reduced")
+    policy, seeds = load_frozen_production_policy(repo, path, budget="reduced")
+
+    assert policy["policy_id"] == "spathi_conditional_v1"
+    assert seeds
 
 
 def test_production_policy_rejects_rehashed_results_adoption_tampering(

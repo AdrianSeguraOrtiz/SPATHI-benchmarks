@@ -33,7 +33,6 @@ from .config import (
 from .efficiency_safety import analyze_safety, validate_safety_plan
 from .inference_scope_contract import inference_regulator_scopes
 from .noninferiority import analyze_noninferiority, resolve_efficiency_adoption
-from .provenance import observe_benchmark_repository
 from .seeds import derive_plan_seed, load_seed_plan
 from .tool_contract import spathi_runtime_resources
 
@@ -62,16 +61,10 @@ def _verify_production_chain(
     evidence_path = provenance_paths["efficiency_evidence"]
     results_path = provenance_paths["efficiency_results"]
     # Reconstruct the calibration winner instead of trusting the copied policy
-    # embedded in later artifacts.  The benchmark implementation that selected
-    # it must also be the implementation publishing the production decision.
-    _search, selected = validate_calibration_contracts(repo_root, selected_path)
-    ranking_path = repo_root / selected["selection_evidence"]["validation_ranking"]
-    ranking = load_json_object(ranking_path, "production calibration ranking")
-    benchmark = observe_benchmark_repository(repo_root, require_clean=True)
-    if ranking.get("benchmark_commit") != benchmark["commit"]:
-        raise BenchmarkConfigError(
-            "Production calibration evidence belongs to another benchmark revision"
-        )
+    # embedded in later artifacts. Current contracts recompute the complete
+    # ranking chain, allowing operational benchmark fixes without silently
+    # changing a scientifically selected policy.
+    validate_calibration_contracts(repo_root, selected_path)
     plan = load_json_object(plan_path, "production efficiency plan")
     evidence = load_json_object(evidence_path, "production efficiency evidence")
     results = load_json_object(results_path, "production efficiency results")
