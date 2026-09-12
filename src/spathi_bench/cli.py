@@ -1,441 +1,217 @@
-"""Command-line entry point for SPATHI benchmark stages."""
+"""One command-line interface for planning, running and inspecting benchmark studies."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .config import BenchmarkConfigError
-from .dimensional_transfer_workflow import run_dimensional_transfer_workflow
 from .doctor import run_doctor
-from .efficiency_workflow import run_efficiency_workflow
-from .performance_workflow import run_performance_workflow
-from .pipeline import (
-    build_spathi_image,
-    evaluate,
-    export_analysis,
-    generate_data,
-    integrate_inference,
-    preflight,
-    run_inference,
-    validate_handoffs,
-)
-from .reproducibility import write_reproducibility_audit
-from .scalability_workflow import run_scalability_workflow
-from .state import run_lock
-from .statistics import analyze_statistics
-from .study_workflow import run_study_workflow
-from .summarize import summarize
-from .workflows import (
-    rebuild_calibration_report,
-    rebuild_comparison_report,
-    run_calibration_workflow,
-    run_comparison_workflow,
+from .qualification import run_qualification
+from .study_workflow import (
+    plan_study,
+    rebuild_study_reports,
+    run_study_workflow,
+    study_status,
 )
 
 
 def _path(value: str) -> Path:
+    # Preserve symlinks for the underlying provenance/path-boundary validators.
     return Path(os.path.abspath(value))
 
 
-def _add_common(
-    parser: argparse.ArgumentParser,
-    *,
-    andrea_repository: bool = False,
-    spathi_repository: bool = False,
-) -> None:
-    parser.add_argument("--repo-root", type=_path, required=True)
-    parser.add_argument("--profile", required=True)
-    parser.add_argument("--run-root", type=_path, required=True)
-    if andrea_repository:
-        parser.add_argument("--andrea-repo", type=_path, required=True)
-    if spathi_repository:
-        parser.add_argument("--spathi-repo", type=_path, required=True)
+def discover_repository(start: Path | None = None) -> Path:
+    """Find the checkout from the working directory, then the editable installation."""
+    origin = start or Path.cwd()
+    candidates = [origin, *origin.parents, Path(__file__).resolve().parents[2]]
+    for candidate in candidates:
+        if (candidate / "repos.lock.json").is_file() and (
+            candidate / "experiments" / "v1"
+        ).is_dir():
+            return candidate
+    raise BenchmarkConfigError(
+        "Cannot locate the SPATHI-benchmarks checkout. Run inside it or pass --project PATH."
+    )
 
 
-def _add_resource_options(parser: argparse.ArgumentParser) -> None:
+def _add_project(parser: argparse.ArgumentParser, *, repositories: bool = False) -> None:
+    parser.add_argument("--project", type=_path, help="benchmark checkout (auto-detected)")
+    if repositories:
+        parser.add_argument("--andrea", type=_path, help="ANDREA checkout (default: ../ANDREA)")
+        parser.add_argument("--spathi", type=_path, help="SPATHI checkout (default: ../SPATHI)")
+
+
+def _add_resources(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--max-cores",
-        type=int,
-        help="optional ceiling; defaults to the effective host/cgroup CPU capacity",
+        "--cores", type=int, help="optional CPU ceiling; default: effective machine capacity"
     )
     parser.add_argument(
-        "--max-ram-gb",
-        type=float,
-        help="optional ceiling; defaults to the effective currently available RAM",
+        "--ram-gb", type=float, help="optional RAM ceiling in GiB; default: available memory"
     )
-    parser.add_argument("--reserve-cores", type=int, default=0)
-    parser.add_argument("--reserve-ram-gb", type=float, default=0.0)
 
 
-def _resource_options(args: argparse.Namespace) -> dict[str, int | float | None]:
+def _resources(args: argparse.Namespace) -> dict[str, int | float | None]:
     return {
-        "max_cores": args.max_cores,
-        "max_ram_gb": args.max_ram_gb,
-        "reserve_cores": args.reserve_cores,
-        "reserve_ram_gb": args.reserve_ram_gb,
+        "max_cores": args.cores,
+        "max_ram_gb": args.ram_gb,
+        "reserve_cores": 0,
+        "reserve_ram_gb": 0.0,
     }
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="spathi-bench", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="spathi-bench",
+        description="Reproducible SPATHI studies, from calibration to final reports.",
+        epilog="Start: spathi-bench run reduced --id pilot. Resume: spathi-bench run --id pilot.",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
 
-    doctor_parser = subparsers.add_parser("doctor", help="diagnose benchmark prerequisites")
-    doctor_parser.add_argument("--repo-root", type=_path, required=True)
-    doctor_parser.add_argument("--andrea-repo", type=_path, required=True)
-    doctor_parser.add_argument("--spathi-repo", type=_path, required=True)
-    doctor_parser.add_argument(
-        "--python", default=sys.executable, help="benchmark Python executable"
+    run = commands.add_parser("run", help="start or resume a complete study")
+    run.add_argument(
+        "profile", nargs="?", choices=("smoke", "reduced", "full"),
+        help="new study budget (default: reduced); omitted on resume to use the saved budget",
     )
-    doctor_parser.add_argument("--output", type=_path)
+    run.add_argument("--id", dest="run_id", help="study identity; existing IDs resume saved work")
+    _add_project(run, repositories=True)
+    _add_resources(run)
 
-    study = subparsers.add_parser(
-        "study",
-        help="run or resume the complete benchmark and carry exact workflow identities",
-    )
-    study.add_argument("--repo-root", type=_path, required=True)
-    study.add_argument("--andrea-repo", type=_path, required=True)
-    study.add_argument("--spathi-repo", type=_path, required=True)
-    study.add_argument("--work-root", type=_path)
-    study.add_argument("--profile", choices=("reduced", "full"), default="full")
-    study.add_argument(
-        "--calibration-run-id",
-        help="reuse one completed same-profile calibration and start at efficiency",
-    )
-    _add_resource_options(study)
+    status = commands.add_parser("status", help="show studies, or inspect one study")
+    status.add_argument("run_id", nargs="?", help="study identity; omitted to list studies")
+    _add_project(status)
+    status.add_argument("--json", action="store_true", help="print structured evidence")
 
-    calibrate_parser = subparsers.add_parser(
-        "calibrate",
-        help="run or resume the bounded six-stage SPATHI calibration",
-    )
-    calibrate_parser.add_argument("--repo-root", type=_path, required=True)
-    calibrate_parser.add_argument("--andrea-repo", type=_path, required=True)
-    calibrate_parser.add_argument("--spathi-repo", type=_path, required=True)
-    calibrate_parser.add_argument("--work-root", type=_path)
-    calibrate_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
-    calibrate_parser.add_argument("--run-id")
-    _add_resource_options(calibrate_parser)
-    calibrate_parser.add_argument(
-        "--report-only",
-        action="store_true",
-        help="rebuild HTML from one completed calibration without running experiments",
-    )
+    report = commands.add_parser("report", help="rebuild reports from a study's saved evidence")
+    report.add_argument("run_id", help="study identity")
+    _add_project(report)
 
-    compare_parser = subparsers.add_parser(
-        "compare",
-        help="run or resume the selected SPATHI comparison with catalog baselines",
-    )
-    compare_parser.add_argument("--repo-root", type=_path, required=True)
-    compare_parser.add_argument("--andrea-repo", type=_path, required=True)
-    compare_parser.add_argument("--spathi-repo", type=_path, required=True)
-    compare_parser.add_argument("--work-root", type=_path)
-    compare_parser.add_argument("--profile", choices=("reduced", "full"), default="full")
-    compare_parser.add_argument("--efficiency-run-id")
-    _add_resource_options(compare_parser)
-    compare_parser.add_argument(
-        "--report-only",
-        action="store_true",
-        help="rebuild HTML from one completed comparison without running experiments",
-    )
+    plan = commands.add_parser("plan", help="inspect the phase and resource plan without execution")
+    plan.add_argument("profile", nargs="?", choices=("smoke", "reduced", "full"), default="reduced")
+    _add_project(plan, repositories=True)
+    _add_resources(plan)
+    plan.add_argument("--json", action="store_true", help="print the complete structured plan")
 
-    efficiency = subparsers.add_parser(
-        "justify-efficiency",
-        help="run or resume the independent SPATHI efficiency study",
-    )
-    efficiency.add_argument("--repo-root", type=_path, required=True)
-    efficiency.add_argument("--andrea-repo", type=_path, required=True)
-    efficiency.add_argument("--spathi-repo", type=_path, required=True)
-    efficiency.add_argument("--work-root", type=_path)
-    efficiency.add_argument("--profile", choices=("reduced", "full"), default="full")
-    efficiency.add_argument("--calibration-run-id")
-    _add_resource_options(efficiency)
+    doctor = commands.add_parser("doctor", help="check prerequisites without installing or running")
+    _add_project(doctor, repositories=True)
+    doctor.add_argument("--json", action="store_true", help="print all diagnostic details")
 
-    scalability = subparsers.add_parser(
-        "scalability",
-        help="measure the frozen SPATHI policy across a public synthetic scale grid",
-    )
-    scalability.add_argument("--repo-root", type=_path, required=True)
-    scalability.add_argument("--andrea-repo", type=_path, required=True)
-    scalability.add_argument("--spathi-repo", type=_path, required=True)
-    scalability.add_argument("--work-root", type=_path)
-    scalability.add_argument("--profile", choices=("reduced", "full"), default="full")
-    scalability.add_argument("--efficiency-run-id")
-    _add_resource_options(scalability)
-
-    dimensional_transfer = subparsers.add_parser(
-        "dimensional-transfer",
-        help="measure post-freeze SPATHI accuracy transfer along separate scale axes",
-    )
-    dimensional_transfer.add_argument("--repo-root", type=_path, required=True)
-    dimensional_transfer.add_argument("--andrea-repo", type=_path, required=True)
-    dimensional_transfer.add_argument("--spathi-repo", type=_path, required=True)
-    dimensional_transfer.add_argument("--work-root", type=_path)
-    dimensional_transfer.add_argument("--profile", choices=("reduced", "full"), default="full")
-    dimensional_transfer.add_argument("--efficiency-run-id")
-    _add_resource_options(dimensional_transfer)
-
-    performance = subparsers.add_parser(
-        "performance",
-        help="measure isolated tool runtime, memory, outputs, and parallel scaling",
-    )
-    performance.add_argument("--repo-root", type=_path, required=True)
-    performance.add_argument("--andrea-repo", type=_path, required=True)
-    performance.add_argument("--spathi-repo", type=_path, required=True)
-    performance.add_argument("--work-root", type=_path)
-    performance.add_argument("--profile", choices=("reduced", "full"), default="full")
-    performance.add_argument("--efficiency-run-id")
-    _add_resource_options(performance)
-
-    audit = subparsers.add_parser(
-        "audit-reproducibility",
-        help="verify every committed stochastic seed assignment",
-    )
-    audit.add_argument("--repo-root", type=_path, required=True)
-    audit.add_argument("--output", type=_path, required=True)
-
-    preflight_parser = subparsers.add_parser("preflight", help="validate locks and plan generation")
-    _add_common(
-        preflight_parser,
-        andrea_repository=True,
-        spathi_repository=True,
-    )
-    preflight_parser.add_argument("--profile-file", type=_path)
-    _add_resource_options(preflight_parser)
-
-    build_parser = subparsers.add_parser("build-image", help="build the pinned SPATHI image")
-    _add_common(build_parser)
-    build_parser.add_argument("--spathi-repo", type=_path, required=True)
-
-    generate_parser = subparsers.add_parser("generate", help="run ANDREA generate-data")
-    _add_common(generate_parser, andrea_repository=True)
-
-    infer_parser = subparsers.add_parser(
-        "infer", help="run independently cached ANDREA inference tasks"
-    )
-    _add_common(infer_parser, andrea_repository=True)
-
-    validate_parser = subparsers.add_parser("validate", help="validate evaluation handoffs")
-    _add_common(validate_parser)
-
-    integrate_parser = subparsers.add_parser(
-        "integrate", help="build joint ANDREA inference views by dataset and regime"
-    )
-    _add_common(integrate_parser, andrea_repository=True)
-
-    evaluate_parser = subparsers.add_parser("evaluate", help="run ANDREA evaluate-inference")
-    _add_common(evaluate_parser, andrea_repository=True)
-
-    export_parser = subparsers.add_parser(
-        "export", help="write official ANDREA analysis ZIPs for every handoff"
-    )
-    _add_common(export_parser, andrea_repository=True)
-
-    summarize_parser = subparsers.add_parser("summarize", help="combine evaluation metrics")
-    _add_common(summarize_parser)
-
-    statistics_parser = subparsers.add_parser(
-        "statistics",
-        help=("run predeclared paired analyses; inferential tests only when authorized"),
-    )
-    _add_common(statistics_parser)
+    qualify = commands.add_parser("qualify", help="verify local SPATHI/ANDREA scientific contracts")
+    qualify.add_argument("--id", dest="run_id", help="qualification identity; existing IDs resume")
+    _add_project(qualify, repositories=True)
+    _add_resources(qualify)
     return parser
 
 
-def _dispatch(
-    args: argparse.Namespace,
-) -> tuple[str, Path | tuple[Path, Path] | dict[str, object]]:
-    if args.command == "doctor":
-        report = run_doctor(
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            repo_root=args.repo_root,
-            python_executable=args.python,
-            report_path=args.output,
-        )
-        return "Environment diagnostics", report
-    if args.command == "study":
-        return "Complete SPATHI benchmark study finished", run_study_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            calibration_run_id=args.calibration_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "calibrate":
-        if args.report_only:
-            return "SPATHI calibration report rebuilt", rebuild_calibration_report(
-                repo_root=args.repo_root,
-                work_root=args.work_root or args.repo_root / "work",
-                calibration_budget=args.profile,
-                run_id=args.run_id,
-            )
-        return "SPATHI calibration completed", run_calibration_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            calibration_budget=args.profile,
-            run_id=args.run_id,
-            **_resource_options(args),
-        )
-    if args.command == "compare":
-        if args.report_only:
-            return "SPATHI comparison report rebuilt", rebuild_comparison_report(
-                repo_root=args.repo_root,
-                work_root=args.work_root or args.repo_root / "work",
-                profile=args.profile,
-                efficiency_run_id=args.efficiency_run_id,
-            )
-        return "SPATHI comparison completed", run_comparison_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            efficiency_run_id=args.efficiency_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "justify-efficiency":
-        return "SPATHI efficiency study completed", run_efficiency_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            calibration_run_id=args.calibration_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "scalability":
-        return "SPATHI scalability study completed", run_scalability_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            efficiency_run_id=args.efficiency_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "dimensional-transfer":
-        return "SPATHI dimensional transfer completed", run_dimensional_transfer_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            efficiency_run_id=args.efficiency_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "performance":
-        return "SPATHI performance study completed", run_performance_workflow(
-            repo_root=args.repo_root,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            work_root=args.work_root or args.repo_root / "work",
-            profile=args.profile,
-            efficiency_run_id=args.efficiency_run_id,
-            **_resource_options(args),
-        )
-    if args.command == "audit-reproducibility":
-        return "Reproducibility audit written", write_reproducibility_audit(
-            args.repo_root,
-            args.output,
-        )
-    common = {
-        "repo_root": args.repo_root,
-        "profile_id": args.profile,
-        "run_root": args.run_root,
+def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
+    repo_root = args.project or discover_repository()
+    common = {"repo_root": repo_root, "work_root": repo_root / "work"}
+    if args.command == "status":
+        return "Study status", study_status(**common, run_id=args.run_id)
+    if args.command == "report":
+        return "Study reports", rebuild_study_reports(**common, run_id=args.run_id)
+    repositories = {
+        "andrea_repo": args.andrea or repo_root.parent / "ANDREA",
+        "spathi_repo": args.spathi or repo_root.parent / "SPATHI",
     }
-    if args.command == "preflight":
-        path = preflight(
-            **common,
-            andrea_repo=args.andrea_repo,
-            spathi_repo=args.spathi_repo,
-            profile_file=args.profile_file,
-            **_resource_options(args),
+    if args.command == "doctor":
+        return "Environment diagnostics", run_doctor(
+            repo_root=repo_root, **repositories, python_executable=sys.executable,
         )
-        return "Preflight passed", path
-    if args.command == "build-image":
-        return "SPATHI image built", build_spathi_image(
-            **common,
-            spathi_repo=args.spathi_repo,
+    if args.command == "run":
+        return "Study finished", run_study_workflow(
+            **common, **repositories, profile=args.profile, run_id=args.run_id,
+            **_resources(args),
         )
-    if args.command == "generate":
-        return "Data generated", generate_data(**common, andrea_repo=args.andrea_repo)
-    if args.command == "infer":
-        return "Inference completed", run_inference(**common, andrea_repo=args.andrea_repo)
-    if args.command == "validate":
-        path = validate_handoffs(
-            repo_root=args.repo_root,
-            profile_id=args.profile,
-            run_root=args.run_root,
+    if args.command == "plan":
+        return "Study plan", plan_study(
+            **common, **repositories, profile=args.profile, **_resources(args),
         )
-        return "Handoff validation passed", path
-    if args.command == "integrate":
-        return "Joint inference views built", integrate_inference(
-            **common,
-            andrea_repo=args.andrea_repo,
+    if args.command == "qualify":
+        return "Qualification finished", run_qualification(
+            **common, **repositories, run_id=args.run_id, **_resources(args),
         )
-    if args.command == "evaluate":
-        return "Evaluation completed", evaluate(**common, andrea_repo=args.andrea_repo)
-    if args.command == "export":
-        return "ANDREA analysis bundles exported", export_analysis(
-            **common,
-            andrea_repo=args.andrea_repo,
-        )
-    if args.command == "summarize":
-        paths = summarize(
-            repo_root=args.repo_root,
-            profile_id=args.profile,
-            run_root=args.run_root,
-        )
-        return "Reports written", paths
-    if args.command == "statistics":
-        paths = analyze_statistics(
-            repo_root=args.repo_root,
-            profile_id=args.profile,
-            run_root=args.run_root,
-        )
-        return "Statistical reports written", paths
     raise AssertionError(f"Unhandled command: {args.command}")
+
+
+def _render(title: str, result: Any, *, structured: bool = False) -> None:
+    if structured:
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return
+    print(title)
+    if not isinstance(result, Mapping):
+        print(result)
+        return
+    if "checks" in result:
+        for check in result["checks"]:
+            print(f"  {str(check['status']).upper():5}  {check['id']}: {check['message']}")
+            if check.get("remediation") and check["status"] == "fail":
+                print(f"         {check['remediation']}")
+        return
+    # Do not dump nested inference reports or every artifact to the terminal.
+    for key in ("run_id", "study_id", "profile", "status", "current_phase", "error", "report", "report_path"):
+        if result.get(key) is not None:
+            print(f"  {key.replace('_', ' ')}: {result[key]}")
+    runs = result.get("studies", result.get("runs"))
+    if isinstance(runs, list):
+        if not runs:
+            print("  No studies yet. Start with: spathi-bench run reduced")
+        for run in runs:
+            print(
+                f"  {run.get('run_id', run.get('study_id', '?'))}"
+                f"  {run.get('profile', '')}  {run.get('status', '')}"
+                f"  {run.get('current_phase') or ''}"
+            )
+    phases = result.get("phases")
+    if isinstance(phases, Mapping):
+        phases = [
+            {"phase": name, **value} if isinstance(value, Mapping)
+            else {"phase": name, "status": value}
+            for name, value in phases.items()
+        ]
+    if isinstance(phases, list):
+        for phase in phases:
+            if isinstance(phase, Mapping):
+                name = phase.get("phase", phase.get("name", phase.get("id", "?")))
+                print(f"  {name}: {phase.get('status', phase.get('purpose', 'planned'))}")
+    resources = result.get("resource_plan")
+    if isinstance(resources, Mapping):
+        capacity = resources.get("capacity", resources)
+        ram = capacity.get("memory_gib")
+        if ram is None and isinstance(capacity.get("memory_bytes"), (int, float)):
+            ram = capacity["memory_bytes"] / 1024**3
+        ram_label = f"{ram:.1f} GiB" if isinstance(ram, (int, float)) else "unspecified RAM"
+        print(f"  capacity: {capacity.get('cpu_threads', '?')} CPU threads, {ram_label}")
+    for warning in result.get("warnings", []):
+        print(f"  warning: {warning}")
+    for key in ("estimate", "resume_command"):
+        if result.get(key):
+            print(f"  {key.replace('_', ' ')}: {result[key]}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
-        if args.command in {
-            "doctor",
-            "study",
-            "calibrate",
-            "compare",
-            "justify-efficiency",
-            "scalability",
-            "dimensional-transfer",
-            "performance",
-            "audit-reproducibility",
-        }:
-            message, result = _dispatch(args)
-        else:
-            with run_lock(args.run_root):
-                message, result = _dispatch(args)
+        title, result = _dispatch(args)
+    except KeyboardInterrupt:
+        print(
+            "Interrupted. Completed artifacts are retained; resume with the same study ID.",
+            file=sys.stderr,
+        )
+        return 130
     except (BenchmarkConfigError, OSError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if isinstance(result, dict):
-        rendered = json.dumps(result, indent=2, sort_keys=True)
-    elif isinstance(result, tuple):
-        rendered = ", ".join(str(path) for path in result)
-    else:
-        rendered = str(result)
-    print(f"{message}: {rendered}")
+    _render(title, result, structured=getattr(args, "json", False))
     if args.command == "doctor" and isinstance(result, dict) and not result.get("ok", False):
         return 2
     return 0

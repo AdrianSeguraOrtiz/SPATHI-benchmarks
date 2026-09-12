@@ -47,6 +47,7 @@ from .runtime import (
 )
 from .safe_io import atomic_write_text, path_below_no_symlinks, write_idempotent_json
 from .state import load_state, run_lock
+from .study_context import bind_phase_identity, phase_flow_id
 from .tool_contract import oom_observed
 
 _IDENTITY_INPUTS = (
@@ -767,8 +768,9 @@ def run_performance_workflow(
             "implementation": {member: sha256_file(root / member) for member in _IDENTITY_INPUTS},
         }
     )
-    flow_id = identity[:20]
+    flow_id = phase_flow_id(identity[:20])
     workflow_root = work / "v1/workflows/performance" / profile / flow_id
+    identity = bind_phase_identity(workflow_root, {"fingerprint": identity})["fingerprint"]
     workflow_path = workflow_root / "workflow.json"
     runtime_plan_path = workflow_root / "runtime-plan.json"
     runtime_plan = load_or_create_runtime_plan(

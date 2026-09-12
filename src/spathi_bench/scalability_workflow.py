@@ -55,6 +55,7 @@ from .scalability_boundary import (
 )
 from .seeds import derive_plan_seed, load_seed_plan
 from .state import load_state, run_lock, write_state
+from .study_context import bind_phase_identity, phase_flow_id
 from .tool_contract import spathi_runtime_resources
 
 _IDENTITY_INPUTS = (
@@ -1706,8 +1707,9 @@ def run_scalability_workflow(
             },
         }
     )
-    flow_id = identity[:20]
+    flow_id = phase_flow_id(identity[:20])
     workflow_root = work / "v1/workflows/scalability" / profile / flow_id
+    identity = bind_phase_identity(workflow_root, {"fingerprint": identity})["fingerprint"]
     workflow_path = workflow_root / "workflow.json"
     runtime_plan = load_or_create_runtime_plan(
         workflow_root / "runtime-plan.json",

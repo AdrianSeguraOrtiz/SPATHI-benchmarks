@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-import spathi_bench.cli as cli
 import spathi_bench.efficiency_workflow as workflow
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.calibration import locked_spathi_identity
@@ -809,40 +808,6 @@ def test_high_level_efficiency_workflow_is_complete_and_resumable(
     )
 
 
-def test_natural_cli_dispatches_the_complete_workflow(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_workflow(**kwargs: Any) -> dict[str, Any]:
-        captured.update(kwargs)
-        return {"status": "complete"}
-
-    monkeypatch.setattr(cli, "run_efficiency_workflow", fake_workflow)
-    assert (
-        cli.main(
-            [
-                "justify-efficiency",
-                "--repo-root",
-                str(tmp_path / "repo"),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-                "--profile",
-                "reduced",
-                "--calibration-run-id",
-                "calibration-current",
-            ]
-        )
-        == 0
-    )
-    assert captured["profile"] == "reduced"
-    assert captured["calibration_run_id"] == "calibration-current"
-    assert captured["work_root"] == (tmp_path / "repo/work").resolve()
-
-
 def test_efficiency_workflow_rejects_path_like_calibration_ids(
     tmp_path: Path,
     frozen_spathi_params: dict[str, Any],
@@ -865,6 +830,7 @@ def test_efficiency_rejects_calibration_that_current_contracts_cannot_reconcile(
     frozen_spathi_params: dict[str, Any],
 ) -> None:
     root, work, andrea, spathi, _image_id = _repository(tmp_path, frozen_spathi_params)
+
     def reject_reconciliation(*_args: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         raise BenchmarkConfigError("Calibration ranking cannot be reconciled")
 
@@ -905,14 +871,10 @@ def test_execution_order_is_deterministic_and_position_balanced() -> None:
             order for (_dataset_id, seed), order in orders.items() if seed == algorithm_seed
         ]
         seed_position_counts = {
-            label: [
-                sum(order[position] == label for order in seed_orders) for position in range(4)
-            ]
+            label: [sum(order[position] == label for order in seed_orders) for position in range(4)]
             for label in labels
         }
-        assert all(
-            max(counts) - min(counts) <= 1 for counts in seed_position_counts.values()
-        )
+        assert all(max(counts) - min(counts) <= 1 for counts in seed_position_counts.values())
     assert orders != counterbalanced_execution_orders(
         (f"dataset_{index}" for index in range(5)),
         (1729, 31415),

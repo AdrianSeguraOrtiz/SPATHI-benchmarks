@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
-from spathi_bench.cli import build_parser
 from spathi_bench.config import BenchmarkConfigError, load_profile, validate_json
 from spathi_bench.performance import (
     _catalog_scientific_requests,
@@ -660,28 +659,6 @@ def test_measurement_record_rejects_noncanonical_performance_telemetry(
             task_root=task_root,
             command_return_code=0,
         )
-
-
-def test_cli_exposes_simple_performance_contract() -> None:
-    args = build_parser().parse_args(
-        [
-            "performance",
-            "--repo-root",
-            str(REPO_ROOT),
-            "--andrea-repo",
-            str(REPO_ROOT.parent / "ANDREA"),
-            "--spathi-repo",
-            str(REPO_ROOT.parent / "SPATHI"),
-            "--profile",
-            "reduced",
-            "--max-cores",
-            "8",
-        ]
-    )
-
-    assert args.command == "performance"
-    assert args.profile == "reduced"
-    assert args.max_cores == 8
 
 
 def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) -> None:

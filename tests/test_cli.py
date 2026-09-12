@@ -1,15 +1,27 @@
 from __future__ import annotations
 
-import subprocess
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import spathi_bench.cli as cli
-from spathi_bench.cli import main
+from spathi_bench.config import BenchmarkConfigError
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+@pytest.fixture
+def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "SPATHI-benchmarks"
+    (root / "experiments/v1").mkdir(parents=True)
+    (root / "repos.lock.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(root)
+    return root
+
+
+def test_discovers_checkout_from_nested_directory(checkout: Path) -> None:
+    nested = checkout / "experiments/v1"
+    assert cli.discover_repository(nested) == checkout
 
 
 def test_cli_path_conversion_preserves_symlink_evidence(tmp_path: Path) -> None:
@@ -17,349 +29,92 @@ def test_cli_path_conversion_preserves_symlink_evidence(tmp_path: Path) -> None:
     target.mkdir()
     linked = tmp_path / "linked"
     linked.symlink_to(target, target_is_directory=True)
-
-    converted = cli._path(str(linked))
-
-    assert converted == linked
-    assert converted.is_symlink()
+    assert cli._path(str(linked)) == linked
+    assert cli._path(str(linked)).is_symlink()
 
 
-def test_cli_help_describes_bounded_calibration_and_conditional_inference() -> None:
-    help_text = " ".join(cli.build_parser().format_help().split())
-
-    assert "bounded six-stage SPATHI calibration" in help_text
-    assert "inferential tests only when authorized" in help_text
-
-
-def test_run_all_help_describes_the_low_level_stage_contract() -> None:
-    completed = subprocess.run(
-        [str(REPO_ROOT / "scripts/run_all.sh"), "--help"],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 0
-    assert "Runs a runnable low-level profile" in completed.stdout
-    assert "preflight, image, generate" in completed.stdout
-
-
-def test_study_script_exposes_the_identity_handoff_contract() -> None:
-    completed = subprocess.run(
-        [str(REPO_ROOT / "scripts/study.sh"), "--help"],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 0
-    assert "complete content-bound SPATHI benchmark study" in completed.stdout
-    assert "workflow IDs are carried automatically" in completed.stdout
-    assert "--calibration-run-id ID" in completed.stdout
-
-
-def test_study_cli_forwards_budget_and_resource_policy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("arguments", "profile", "run_id"),
+    [(["run"], None, None), (["run", "reduced", "--id", "pilot"], "reduced", "pilot"),
+     (["run", "--id", "pilot"], None, "pilot"), (["run", "smoke"], "smoke", None)],
+)
+def test_run_uses_one_identity_and_detected_layout(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch,
+    arguments: list[str], profile: str | None, run_id: str | None,
 ) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        cli,
-        "run_study_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
+        cli, "run_study_workflow", lambda **kwargs: calls.append(kwargs) or {"status": "complete"}
     )
-    repo = tmp_path / "repo"
-
-    assert (
-        main(
-            [
-                "study",
-                "--repo-root",
-                str(repo),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-                "--profile",
-                "reduced",
-                "--calibration-run-id",
-                "calibration-current",
-                "--max-cores",
-                "12",
-                "--reserve-ram-gb",
-                "4",
-            ]
-        )
-        == 0
-    )
-    assert calls == [
-        {
-            "repo_root": repo.resolve(),
-            "andrea_repo": (tmp_path / "ANDREA").resolve(),
-            "spathi_repo": (tmp_path / "SPATHI").resolve(),
-            "work_root": repo.resolve() / "work",
-            "profile": "reduced",
-            "calibration_run_id": "calibration-current",
-            "max_cores": 12,
-            "max_ram_gb": None,
-            "reserve_cores": 0,
-            "reserve_ram_gb": 4.0,
-        }
-    ]
+    assert cli.main(arguments) == 0
+    assert calls == [{
+        "repo_root": checkout, "work_root": checkout / "work",
+        "andrea_repo": checkout.parent / "ANDREA", "spathi_repo": checkout.parent / "SPATHI",
+        "profile": profile, "run_id": run_id, "max_cores": None, "max_ram_gb": None,
+        "reserve_cores": 0, "reserve_ram_gb": 0.0,
+    }]
 
 
-def test_run_all_rejects_unknown_flags_with_usage() -> None:
-    completed = subprocess.run(
-        [
-            str(REPO_ROOT / "scripts/run_all.sh"),
-            "smoke",
-            "argument-contract-test",
-            "--not-a-real-option",
-        ],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode == 2
-    assert "Unknown argument: --not-a-real-option" in completed.stderr
-    assert "Usage: run_all.sh [PROFILE] [RUN_ID] [--from STAGE] [--until STAGE]" in completed.stderr
-
-
-def test_high_level_calibrate_cli_uses_default_work_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_plan_forwards_optional_machine_ceilings(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "run_calibration_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
-    )
-    repo = tmp_path / "repo"
-
-    assert (
-        main(
-            [
-                "calibrate",
-                "--repo-root",
-                str(repo),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-            ]
-        )
-        == 0
-    )
-    assert calls[0]["work_root"] == repo.resolve() / "work"
-    assert calls[0]["calibration_budget"] == "full"
-    assert calls[0]["run_id"] is None
-
-
-def test_high_level_calibrate_cli_forwards_reduced_profile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "run_calibration_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
-    )
-
-    assert (
-        main(
-            [
-                "calibrate",
-                "--repo-root",
-                str(tmp_path / "repo"),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-                "--profile",
-                "reduced",
-            ]
-        )
-        == 0
-    )
-    assert calls[0]["calibration_budget"] == "reduced"
-
-
-def test_high_level_compare_cli_defaults_to_full(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "run_comparison_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
-    )
-
-    assert (
-        main(
-            [
-                "compare",
-                "--repo-root",
-                str(tmp_path / "repo"),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-            ]
-        )
-        == 0
-    )
+    monkeypatch.setattr(cli, "plan_study", lambda **kwargs: calls.append(kwargs) or {})
+    assert cli.main(["plan", "full", "--cores", "16", "--ram-gb", "64"]) == 0
     assert calls[0]["profile"] == "full"
-    assert calls[0]["efficiency_run_id"] is None
+    assert calls[0]["max_cores"] == 16
+    assert calls[0]["max_ram_gb"] == 64.0
 
 
-def test_high_level_scalability_cli_forwards_frozen_policy_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_status_prints_structured_saved_evidence(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = {"run_id": "pilot", "status": "failed", "current_phase": "efficiency"}
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(cli, "study_status", lambda **kwargs: calls.append(kwargs) or result)
+    assert cli.main(["status", "pilot", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == result
+    assert calls == [{"repo_root": checkout, "work_root": checkout / "work", "run_id": "pilot"}]
+
+
+def test_report_dispatches_existing_study_without_repositories(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "run_scalability_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
-    )
-    repo = tmp_path / "repo"
-
-    assert (
-        main(
-            [
-                "scalability",
-                "--repo-root",
-                str(repo),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-                "--profile",
-                "reduced",
-                "--efficiency-run-id",
-                "efficiency-fixture",
-            ]
-        )
-        == 0
-    )
-    assert calls == [
-        {
-            "repo_root": repo.resolve(),
-            "andrea_repo": (tmp_path / "ANDREA").resolve(),
-            "spathi_repo": (tmp_path / "SPATHI").resolve(),
-            "work_root": repo.resolve() / "work",
-            "profile": "reduced",
-            "efficiency_run_id": "efficiency-fixture",
-            "max_cores": None,
-            "max_ram_gb": None,
-            "reserve_cores": 0,
-            "reserve_ram_gb": 0.0,
-        }
-    ]
+    monkeypatch.setattr(cli, "rebuild_study_reports", lambda **kwargs: calls.append(kwargs) or {})
+    assert cli.main(["report", "pilot"]) == 0
+    assert calls == [{"repo_root": checkout, "work_root": checkout / "work", "run_id": "pilot"}]
 
 
-def test_high_level_dimensional_transfer_cli_forwards_frozen_policy_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_qualification_uses_same_project_and_resource_contract(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "run_dimensional_transfer_workflow",
-        lambda **kwargs: calls.append(kwargs) or {"status": "complete"},
-    )
-    repo = tmp_path / "repo"
-
-    assert (
-        main(
-            [
-                "dimensional-transfer",
-                "--repo-root",
-                str(repo),
-                "--andrea-repo",
-                str(tmp_path / "ANDREA"),
-                "--spathi-repo",
-                str(tmp_path / "SPATHI"),
-                "--profile",
-                "reduced",
-                "--efficiency-run-id",
-                "efficiency-fixture",
-            ]
-        )
-        == 0
-    )
-    assert calls == [
-        {
-            "repo_root": repo.resolve(),
-            "andrea_repo": (tmp_path / "ANDREA").resolve(),
-            "spathi_repo": (tmp_path / "SPATHI").resolve(),
-            "work_root": repo.resolve() / "work",
-            "profile": "reduced",
-            "efficiency_run_id": "efficiency-fixture",
-            "max_cores": None,
-            "max_ram_gb": None,
-            "reserve_cores": 0,
-            "reserve_ram_gb": 0.0,
-        }
-    ]
+    monkeypatch.setattr(cli, "run_qualification", lambda **kwargs: calls.append(kwargs) or {})
+    assert cli.main(["qualify", "--id", "check", "--cores", "8"]) == 0
+    assert calls[0]["run_id"] == "check"
+    assert calls[0]["max_cores"] == 8
+    assert calls[0]["repo_root"] == checkout
 
 
-@pytest.mark.parametrize("command", ["calibrate", "compare"])
-def test_high_level_report_only_uses_published_outputs(
-    command: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_doctor_renders_actionable_failure_and_returns_nonzero(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    calibration_calls: list[dict[str, Any]] = []
-    comparison_calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        cli,
-        "rebuild_calibration_report",
-        lambda **kwargs: calibration_calls.append(kwargs) or {"status": "rendered"},
-    )
-    monkeypatch.setattr(
-        cli,
-        "rebuild_comparison_report",
-        lambda **kwargs: comparison_calls.append(kwargs) or {"status": "rendered"},
-    )
-    repo = tmp_path / "repo"
-    arguments = [
-        command,
-        "--repo-root",
-        str(repo),
-        "--andrea-repo",
-        str(tmp_path / "ANDREA"),
-        "--spathi-repo",
-        str(tmp_path / "SPATHI"),
-        "--profile",
-        "reduced",
-        "--report-only",
-    ]
-    if command == "calibrate":
-        arguments.extend(["--run-id", "chosen"])
-    else:
-        arguments.extend(["--efficiency-run-id", "chosen"])
+    monkeypatch.setattr(cli, "run_doctor", lambda **kwargs: {
+        "ok": False, "checks": [{"id": "docker", "status": "fail", "message": "unavailable",
+                                  "remediation": "Start Docker."}],
+    })
+    assert cli.main(["doctor"]) == 2
+    output = capsys.readouterr().out
+    assert "FAIL" in output
+    assert "Start Docker." in output
 
-    assert main(arguments) == 0
 
-    if command == "calibrate":
-        assert comparison_calls == []
-        assert calibration_calls == [
-            {
-                "repo_root": repo.resolve(),
-                "work_root": repo.resolve() / "work",
-                "calibration_budget": "reduced",
-                "run_id": "chosen",
-            }
-        ]
-    else:
-        assert calibration_calls == []
-        assert comparison_calls == [
-            {
-                "repo_root": repo.resolve(),
-                "work_root": repo.resolve() / "work",
-                "profile": "reduced",
-                "efficiency_run_id": "chosen",
-            }
-        ]
+def test_cli_reports_contract_failure_without_traceback(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(**kwargs: Any) -> None:
+        raise BenchmarkConfigError("Study pilot has a different saved profile")
+    monkeypatch.setattr(cli, "run_study_workflow", fail)
+    assert cli.main(["run", "full", "--id", "pilot"]) == 2
+    assert "different saved profile" in capsys.readouterr().err

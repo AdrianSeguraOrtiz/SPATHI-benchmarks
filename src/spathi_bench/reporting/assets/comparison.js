@@ -260,7 +260,7 @@
     const rankings = orderedRankings(analysis).slice().reverse();
     const labels = labelMap(analysis);
     if (!rankings.length) {
-      R.empty(target, "Ranks unavailable", "The Friedman analysis did not produce ranks for this comparison.");
+      R.empty(target, "Ranks unavailable", "This comparison did not produce complete within-dataset ranks.");
       return;
     }
     R.plot(target, [{
@@ -275,7 +275,7 @@
       hovertemplate: "<b>%{customdata[2]}</b><br>Mean rank: %{x:.3f}<br>Mean score: %{customdata[0]:.6f}<br>Median score: %{customdata[1]:.6f}<extra></extra>",
     }], {
       margin: { l: 125, r: 45, t: 12, b: 52 },
-      xaxis: { title: { text: "Mean Friedman rank (lower is better)", standoff: 14 }, rangemode: "tozero", gridcolor: "#e7ebf1", zeroline: false },
+      xaxis: { title: { text: "Mean within-dataset rank (lower is better)", standoff: 14 }, rangemode: "tozero", gridcolor: "#e7ebf1", zeroline: false },
       yaxis: { title: { text: "Inference method", standoff: 12 }, automargin: true },
       showlegend: false,
     });

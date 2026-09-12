@@ -40,9 +40,11 @@ from .runtime import (
 )
 from .safe_io import path_below_no_symlinks, write_idempotent_json
 from .state import run_lock
+from .study_context import bind_phase_identity, phase_flow_id
 from .workflows import run_profile_pipeline
 
 _IDENTITY_INPUTS = (
+    "src/spathi_bench/spathi_diagnostics.py",
     "experiments/v1/execution/policy.json",
     "experiments/v1/seeds/seed-plan.json",
     "images.lock.json",
@@ -354,8 +356,9 @@ def run_dimensional_transfer_workflow(
             "implementation": {path: sha256_file(root / path) for path in _IDENTITY_INPUTS},
         }
     )
-    flow_id = identity[:20]
+    flow_id = phase_flow_id(identity[:20])
     workflow_root = work / "v1/workflows/dimensional_transfer" / profile / flow_id
+    identity = bind_phase_identity(workflow_root, {"fingerprint": identity})["fingerprint"]
     workflow_path = workflow_root / "workflow.json"
     runtime_plan = load_or_create_runtime_plan(
         workflow_root / "runtime-plan.json",

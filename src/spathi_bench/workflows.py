@@ -50,6 +50,7 @@ from .runtime import (
 from .safe_io import atomic_write_json, path_below_no_symlinks
 from .state import run_lock
 from .statistics import analyze_statistics
+from .study_context import bind_phase_identity, phase_flow_id
 from .summarize import summarize
 
 CALIBRATION_PHASES = (
@@ -114,57 +115,6 @@ def _workflow_work_root(repo_root: Path, work_root: Path) -> tuple[Path, Path]:
     return root, work
 
 
-def _reportable_workflow_root(
-    *,
-    base: Path,
-    workflow_type: str,
-    requested_id: str | None,
-    required_fields: dict[str, Any] | None = None,
-) -> Path:
-    if requested_id is not None:
-        if not _WORKFLOW_ID.fullmatch(requested_id):
-            raise BenchmarkConfigError(f"Invalid workflow run ID: {requested_id!r}")
-        candidate = base / requested_id
-        candidates = [candidate]
-    else:
-        candidates = sorted(
-            (path.parent for path in base.glob("*/workflow.json")),
-            key=lambda path: path.name,
-        )
-    reportable: list[Path] = []
-    for candidate in candidates:
-        state_path = candidate / "workflow.json"
-        if not state_path.is_file():
-            continue
-        safe_state_path = path_below_no_symlinks(
-            state_path,
-            base,
-            f"{workflow_type} workflow state",
-            require_file=True,
-        )
-        state = load_json_object(safe_state_path, f"{workflow_type} workflow state")
-        if (
-            state.get("workflow_type") == workflow_type
-            and state.get("status") in {"publishing", "complete"}
-            and all(state.get(key) == value for key, value in (required_fields or {}).items())
-        ):
-            reportable.append(safe_state_path.parent)
-    if requested_id is not None and not reportable:
-        raise BenchmarkConfigError(
-            f"No reportable {workflow_type} workflow named {requested_id!r} exists below {base}"
-        )
-    if not reportable:
-        raise BenchmarkConfigError(f"No reportable {workflow_type} workflow exists below {base}")
-    if len(reportable) > 1:
-        option = "--run-id" if workflow_type == "calibration" else "--efficiency-run-id"
-        identifiers = ", ".join(path.name for path in reportable)
-        raise BenchmarkConfigError(
-            f"Multiple reportable {workflow_type} workflows exist ({identifiers}); select one with "
-            f"{option}"
-        )
-    return reportable[0]
-
-
 def _report_paths(
     *, version_root: Path, workflow_type: str, scope: str, flow_id: str
 ) -> tuple[Path, Path]:
@@ -220,81 +170,6 @@ def _publish_report(
     )
 
 
-def rebuild_calibration_report(
-    *,
-    repo_root: Path,
-    work_root: Path,
-    calibration_budget: str,
-    run_id: str | None,
-) -> dict[str, Any]:
-    """Rebuild only the presentation layer of one completed calibration."""
-
-    if calibration_budget not in CALIBRATION_BUDGETS:
-        raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
-    root, work = _workflow_work_root(repo_root, work_root)
-    workflow_root = _reportable_workflow_root(
-        base=work / "v1/workflows/calibration" / calibration_budget,
-        workflow_type="calibration",
-        requested_id=run_id,
-    )
-    with run_lock(workflow_root):
-        state = load_json_object(workflow_root / "workflow.json", "calibration workflow state")
-        _state, report = _publish_report(
-            repo_root=root,
-            version_root=work / "v1",
-            workflow_root=workflow_root,
-            state=state,
-            workflow_type="calibration",
-            scope=calibration_budget,
-            render=lambda: render_calibration_report(
-                repo_root=root,
-                version_root=work / "v1",
-                workflow_root=workflow_root,
-            ),
-        )
-    return report
-
-
-def rebuild_comparison_report(
-    *,
-    repo_root: Path,
-    work_root: Path,
-    profile: str,
-    efficiency_run_id: str | None,
-) -> dict[str, Any]:
-    """Rebuild only the presentation layer of one completed comparison."""
-
-    if profile not in {"reduced", "full"}:
-        raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
-    root, work = _workflow_work_root(repo_root, work_root)
-    if efficiency_run_id is not None and not _WORKFLOW_ID.fullmatch(efficiency_run_id):
-        raise BenchmarkConfigError(f"Invalid efficiency run ID: {efficiency_run_id!r}")
-    workflow_root = _reportable_workflow_root(
-        base=work / "v1/workflows/comparison" / profile,
-        workflow_type="comparison",
-        requested_id=None,
-        required_fields=(
-            {"efficiency_flow_id": efficiency_run_id} if efficiency_run_id is not None else None
-        ),
-    )
-    with run_lock(workflow_root):
-        state = load_json_object(workflow_root / "workflow.json", "comparison workflow state")
-        _state, report = _publish_report(
-            repo_root=root,
-            version_root=work / "v1",
-            workflow_root=workflow_root,
-            state=state,
-            workflow_type="comparison",
-            scope=profile,
-            render=lambda: render_comparison_report(
-                repo_root=root,
-                version_root=work / "v1",
-                workflow_root=workflow_root,
-            ),
-        )
-    return report
-
-
 def _adopt_workflow(
     path: Path,
     *,
@@ -329,7 +204,7 @@ def run_profile_pipeline(
     *,
     repo_root: Path,
     profile_id: str,
-    profile_file: Path,
+    profile_file: Path | None,
     run_root: Path,
     andrea_repo: Path,
     spathi_repo: Path,
@@ -433,8 +308,9 @@ def run_calibration_workflow(
         raise BenchmarkConfigError("Calibration profile must be 'reduced' or 'full'")
     root, work = _workflow_work_root(repo_root, work_root)
     identity = _calibration_identity(_workflow_identity(root), calibration_budget)
-    flow_id = _flow_id(identity, run_id)
+    flow_id = phase_flow_id(_flow_id(identity, run_id))
     workflow_root = work / "v1/workflows/calibration" / calibration_budget / flow_id
+    identity = bind_phase_identity(workflow_root, identity)
     state_path = workflow_root / "workflow.json"
     runtime_plan = load_or_create_runtime_plan(
         workflow_root / "runtime-plan.json",
@@ -472,6 +348,14 @@ def run_calibration_workflow(
                 profile_file = stage_root / f"{profile_id}.json"
                 ranking = stage_root / "ranking.json"
                 run_root = work / "v1" / profile_id / f"{flow_id}-{phase_id}"
+                completed = state["stages"].get(phase_id)
+                if completed is not None and completed.get("status") == "ranked":
+                    if not ranking.is_file() or sha256_file(ranking) != completed.get(
+                        "ranking_sha256"
+                    ):
+                        raise BenchmarkConfigError(f"Completed calibration ranking changed: {phase_id}")
+                    parent_ranking = ranking
+                    continue
                 materialize_calibration_stage(
                     repo_root=root,
                     stage_id=stage_id,
@@ -589,8 +473,9 @@ def run_comparison_workflow(
         efficiency_run_id=efficiency_run_id,
     )
     efficiency_id = production_config.parent.name
-    flow_id = f"{profile}-{efficiency_id}-{identity['fingerprint'][:10]}"
+    flow_id = phase_flow_id(f"{profile}-{efficiency_id}-{identity['fingerprint'][:10]}")
     workflow_root = work / "v1/workflows/comparison" / profile / flow_id
+    identity = bind_phase_identity(workflow_root, identity)
     state_path = workflow_root / "workflow.json"
     profile_id = f"{profile}-v1"
     runtime_plan = load_or_create_runtime_plan(

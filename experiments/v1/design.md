@@ -243,18 +243,19 @@ independent `efficiency_validation` panel. The formal efficiency-validation cont
 Development first scouts three target-eligibility settings and three adaptive-tree settings with
 the designated timing seed. It nominates one setting from each component and constructs their
 exact combination. Joint confirmation then reexecutes exact SPATHI, both component nominees and
-the combined policy under identical 4-thread/16-GiB allocations, serially and in a deterministic
-counterbalanced order for every dataset and seed. Its common timing seed supplies paired cost;
-held-back algorithm seeds supply paired accuracy. Reduced declares 75 physical fits and full 285,
+the combined policy under identical 4-thread/16-GiB allocations. The designated timing seed runs
+alone on a fixed CPU set in deterministic counterbalanced order; held-back algorithm seeds run
+concurrently within the machine's resolved capacity and supply only paired accuracy. Their
+incidental timings never enter the cost comparison. Reduced declares 75 physical fits and full 285,
 and at most one global nominee is chosen from the three modified policies. The independent
 validation panel therefore compares the exact arm with that single nominee, frozen before any
 validation outcome is accessed:
 
 | Candidate | Change from exact policy |
 | --- | --- |
-| Target eligibility | automatic eligibility with at least 20 detected cells, detected fraction 0.01, weighted detected fraction 0.01 and weighted effective sample size 10 |
-| Adaptive trees | minimum 100 trees, batches of 50, tolerance 0.01 and patience 2, with calibrated `n_estimators` as the hard ceiling |
-| Combined | the exact union of the two policies above |
+| Target eligibility | the nominated one of the three committed settings: `(detected cells, detected fraction, weighted detected fraction, weighted ESS)` equal to `(10, .005, .005, 5)`, `(20, .01, .01, 10)` or `(50, .02, .02, 20)` |
+| Adaptive trees | the nominated setting `(minimum trees, batch size, tolerance, patience)` from `(200, 25, .005, 3)`, `(100, 50, .01, 2)` or `(100, 100, .02, 2)`, with calibrated `n_estimators` as the hard ceiling |
+| Combined | the exact union of the two component nominees |
 
 The full requested target universe is primary. A target omitted by an eligibility policy is scored
 as an empty minimum-score prediction, so reducing target coverage cannot manufacture a favourable

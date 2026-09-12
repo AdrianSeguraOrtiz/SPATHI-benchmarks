@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from spathi_bench.artifacts import sha256_file
-from spathi_bench.cli import main
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.seeds import load_seed_plan, validate_plan_seed_record
 from spathi_bench.state import load_state, write_state
@@ -1515,43 +1514,3 @@ def test_statistics_requires_exact_directory_members(
     message = "Incomplete or stale" if state_gap else "non-canonical members"
     with pytest.raises(BenchmarkConfigError, match=message):
         analyze_statistics(repo_root=repo_root, profile_id="smoke", run_root=run_root)
-
-
-def test_statistics_cli_dispatches_under_the_run_lock(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    outputs = tuple(
-        tmp_path / name for name in ("statistics.json", "rankings.csv", "pairwise.csv", "report.md")
-    )
-    observed: dict[str, Any] = {}
-
-    def fake_statistics(**kwargs: Any) -> tuple[Path, Path, Path, Path]:
-        observed.update(kwargs)
-        return outputs
-
-    monkeypatch.setattr("spathi_bench.cli.analyze_statistics", fake_statistics)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    run_root = tmp_path / "run"
-    assert (
-        main(
-            [
-                "statistics",
-                "--repo-root",
-                str(repo_root),
-                "--profile",
-                "smoke",
-                "--run-root",
-                str(run_root),
-            ]
-        )
-        == 0
-    )
-    assert observed == {
-        "repo_root": repo_root.resolve(),
-        "profile_id": "smoke",
-        "run_root": run_root.resolve(),
-    }
-    assert "Statistical reports written" in capsys.readouterr().out

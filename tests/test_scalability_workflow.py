@@ -1434,7 +1434,7 @@ def test_high_level_workflow_freezes_publication_scale_results(
 
 
 def test_scalability_rejects_missing_efficiency_policy(tmp_path: Path) -> None:
-    with pytest.raises(BenchmarkConfigError, match="justify-efficiency"):
+    with pytest.raises(BenchmarkConfigError, match="spathi-bench run reduced"):
         production_policy.completed_production_config(
             repo_root=tmp_path,
             work_root=tmp_path / "work",

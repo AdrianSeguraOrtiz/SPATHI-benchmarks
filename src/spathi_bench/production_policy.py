@@ -77,10 +77,11 @@ def completed_production_config(
         if not completed:
             raise BenchmarkConfigError(
                 f"No completed {budget} efficiency study is available; "
-                f"run scripts/justify-efficiency.sh --profile {budget} first"
+                f"run spathi-bench run {budget} to complete the study's efficiency phase first"
             )
         raise BenchmarkConfigError(
-            "Several completed efficiency studies are available; pass --efficiency-run-id"
+            "Several completed efficiency phases are available; resume the owning study with "
+            "spathi-bench run --id STUDY_ID so its saved phase identity is used"
         )
     production_path, production = completed[0]
     verified_policy, _comparison_seeds = load_frozen_production_policy(

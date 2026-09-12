@@ -45,9 +45,11 @@ from .runtime import (
 from .safe_io import write_idempotent_json
 from .scenario_inputs import scenario_external_input_records
 from .state import run_lock, state_path
+from .study_context import bind_phase_identity, phase_flow_id
 
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _IDENTITY_INPUTS = (
+    "src/spathi_bench/spathi_diagnostics.py",
     "experiments/v1/execution/policy.json",
     "experiments/v1/spathi/efficiency-design-sensitivity.json",
     "experiments/v1/spathi/efficiency-development.json",
@@ -135,10 +137,10 @@ def _completed_selection(
     if len(completed) != 1:
         if not completed:
             raise BenchmarkConfigError(
-                f"No completed {budget} calibration is available; run calibrate.sh first"
+                f"No completed {budget} calibration is available in this study; use spathi-bench run --id STUDY_ID"
             )
         raise BenchmarkConfigError(
-            "Several completed calibrations are available; pass --calibration-run-id"
+            "Several completed calibrations exist outside an unambiguous study; use spathi-bench run --id STUDY_ID"
         )
     return completed[0]
 
@@ -645,8 +647,11 @@ def run_efficiency_workflow(
             },
         }
     )
-    flow_id = identity_fingerprint[:20]
+    flow_id = phase_flow_id(identity_fingerprint[:20])
     workflow_root = work / "v1/workflows/efficiency" / profile / flow_id
+    identity_fingerprint = bind_phase_identity(
+        workflow_root, {"fingerprint": identity_fingerprint}
+    )["fingerprint"]
     run_root = work / "v1" / profile_id / flow_id
     workflow_path = workflow_root / "workflow.json"
     runtime_plan = load_or_create_runtime_plan(
