@@ -45,6 +45,7 @@ from .provenance import (
 )
 from .safe_io import write_idempotent_json
 from .seeds import derive_plan_seed, load_seed_plan
+from .spathi_diagnostics import read_model_accounting
 from .state import load_state
 from .summarize import validate_summary_reports
 
@@ -71,21 +72,6 @@ REDUCED_CONDITION_IDS = (
 )
 EXACT_DIAGNOSTIC_CONDITIONS = ("g3000_tf100_c300", "g100_tf10_c300")
 EXACT_REFERENCE_ID = "spathi_exact_reference"
-_TRAINED_MODEL_STATUSES = frozenset({"trained", "trained_no_positive_importance"})
-_FAILED_MODEL_STATUSES = frozenset({"model_fit_failed", "invalid_feature_importances"})
-_MODEL_STATUSES = (
-    _TRAINED_MODEL_STATUSES
-    | _FAILED_MODEL_STATUSES
-    | frozenset(
-        {
-            "insufficient_positive_weight_samples",
-            "constant_target",
-            "no_predictors_after_self_exclusion",
-            "no_variable_predictors",
-            "target_not_estimable",
-        }
-    )
-)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -703,16 +689,6 @@ def _tabular_rows(path: Path, *, delimiter: str, compressed: bool = False) -> li
         ) from exc
 
 
-def _nonnegative_integer(value: Any, label: str) -> int:
-    try:
-        parsed = int(str(value))
-    except (TypeError, ValueError) as exc:
-        raise BenchmarkConfigError(f"Dimensional diagnostic {label} is not an integer") from exc
-    if str(parsed) != str(value) or parsed < 0:
-        raise BenchmarkConfigError(f"Dimensional diagnostic {label} is not non-negative")
-    return parsed
-
-
 def _configuration_accounting(
     *,
     store: ArtifactStore,
@@ -753,8 +729,15 @@ def _configuration_accounting(
     truth_path = _single_artifact_member(
         dataset_artifact, "truth/networks.csv", "group-specific truth network"
     )
+    genes_path = _single_artifact_member(
+        dataset_artifact, "truth/gene_universe.txt", "truth gene universe"
+    )
+    tf_path = _single_artifact_member(dataset_artifact, "extras/tf_list.txt", "TF list")
+    genes = frozenset(genes_path.read_text(encoding="utf-8").splitlines())
+    sources = frozenset(tf_path.read_text(encoding="utf-8").splitlines())
+    if not sources or not sources <= genes:
+        raise BenchmarkConfigError("Dimensional TF candidates differ from the gene universe")
     eligibility = _tabular_rows(eligibility_path, delimiter="\t", compressed=True)
-    diagnostics = _tabular_rows(diagnostics_path, delimiter="\t", compressed=True)
     truth = _tabular_rows(truth_path, delimiter=",")
     if not eligibility or len({row.get("target") for row in eligibility}) != len(eligibility):
         raise BenchmarkConfigError("Dimensional target eligibility is empty or duplicated")
@@ -773,72 +756,37 @@ def _configuration_accounting(
         if eligible == "true":
             globally_eligible.add(target)
     targets_frozen = frozenset(targets)
+    if targets_frozen != genes:
+        raise BenchmarkConfigError("Dimensional target eligibility omits expression genes")
     globally_eligible_frozen = frozenset(globally_eligible)
     if expected_mode == "all" and globally_eligible_frozen != targets_frozen:
         raise BenchmarkConfigError("The all-target policy omitted a target from eligibility")
     if not globally_eligible_frozen:
         raise BenchmarkConfigError("Dimensional diagnostic retained no targets")
-    diagnostics_by_context: dict[str, set[str]] = defaultdict(set)
-    observed_diagnostics: set[tuple[str, str]] = set()
-    trained_models = 0
-    skipped_models = 0
-    target_not_estimable = 0
-    fitted_from_diagnostics = 0
-    for row in diagnostics:
-        context = f"group:{row.get('target_group')}"
-        target = str(row.get("target"))
-        key = (context, target)
-        if (
-            context not in expected_contexts
-            or target not in globally_eligible_frozen
-            or key in observed_diagnostics
-        ):
-            raise BenchmarkConfigError("Dimensional model diagnostics have invalid coverage")
-        observed_diagnostics.add(key)
-        status = str(row.get("status", ""))
-        if status not in _MODEL_STATUSES or status in _FAILED_MODEL_STATUSES:
-            raise BenchmarkConfigError("Dimensional model diagnostics contain a failed model")
-        diagnostic_seed = _nonnegative_integer(row.get("random_seed"), "model random_seed")
-        if diagnostic_seed != expected_algorithm_seed:
-            raise BenchmarkConfigError("Dimensional model diagnostics use a different seed")
-        fitted = _nonnegative_integer(row.get("n_estimators_fitted"), "model n_estimators_fitted")
-        if fitted > int(expected_parameters["n_estimators"]):
-            raise BenchmarkConfigError("Dimensional model diagnostics exceed the tree ceiling")
-        fitted_from_diagnostics += fitted
-        if status in _TRAINED_MODEL_STATUSES:
-            trained_models += 1
-            if fitted < 1:
-                raise BenchmarkConfigError("A trained dimensional model fitted no estimators")
-        else:
-            skipped_models += 1
-            if fitted != 0:
-                raise BenchmarkConfigError("A skipped dimensional model reports fitted estimators")
-        if status == "target_not_estimable":
-            target_not_estimable += 1
-            if expected_mode != "automatic":
-                raise BenchmarkConfigError(
-                    "The all-target policy cannot report target_not_estimable"
-                )
-        else:
-            diagnostics_by_context[context].add(target)
-    expected_diagnostics = {
-        (context, target) for context in expected_contexts for target in globally_eligible_frozen
-    }
-    if observed_diagnostics != expected_diagnostics:
-        raise BenchmarkConfigError(
-            "Dimensional model diagnostics do not cover the exact group-target product"
-        )
-    eligible_by_context = {
-        context: (
-            set(targets_frozen) if expected_mode == "all" else diagnostics_by_context[context]
-        )
-        for context in expected_contexts
-    }
+    accounting = read_model_accounting(
+        diagnostics_path,
+        contexts=tuple(sorted(expected_contexts)),
+        targets=tuple(sorted(targets_frozen)),
+        globally_eligible=tuple(sorted(globally_eligible_frozen)),
+        parameters=expected_parameters,
+        algorithm_seed=expected_algorithm_seed,
+    )
+    eligible_by_context = accounting.eligible_targets
     truth_edges: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    seen_truth: set[tuple[str, str, str]] = set()
     for row in truth:
         context = str(row.get("context"))
+        source, target = str(row.get("source")), str(row.get("target"))
+        key = (context, source, target)
+        if key in seen_truth or source not in genes or target not in genes:
+            raise BenchmarkConfigError("Dimensional truth contains duplicate or unknown gene edges")
+        seen_truth.add(key)
+        if context not in expected_contexts and context != "global":
+            raise BenchmarkConfigError("Dimensional truth contains an unknown group")
+        if source not in sources or source == target:
+            continue
         if context in expected_contexts:
-            truth_edges[context].add((str(row.get("source")), str(row.get("target"))))
+            truth_edges[context].add((source, target))
     if set(truth_edges) != set(expected_contexts) or any(
         not edges for edges in truth_edges.values()
     ):
@@ -871,21 +819,7 @@ def _configuration_accounting(
         or effective_eligibility.get("globally_eligible_targets") != len(globally_eligible_frozen)
     ):
         raise BenchmarkConfigError("Dimensional SPATHI accounting metadata is incomplete")
-    expected_models = len(expected_diagnostics)
-    expected_counters = {
-        "requested": expected_models,
-        "completed": expected_models,
-        "trained": trained_models,
-        "preflight_skipped": skipped_models,
-        "target_not_estimable": target_not_estimable,
-        "fit_or_importance_failures": 0,
-        "skipped_target_records": skipped_models,
-        "fitted_estimators_total": fitted_from_diagnostics,
-    }
-    if any(models.get(key) != value for key, value in expected_counters.items()):
-        raise BenchmarkConfigError(
-            "Dimensional SPATHI accounting counters differ from complete diagnostics"
-        )
+    accounting.validate_metadata(models)
     return {
         "target_coverage": fmean(
             len(eligible_by_context[context]) / len(targets_frozen) for context in expected_contexts
@@ -895,8 +829,8 @@ def _configuration_accounting(
         "targets_retained": sum(len(eligible_by_context[context]) for context in expected_contexts),
         "truth_edges_requested": total_truth,
         "truth_edges_retained": retained_truth,
-        "models_trained": trained_models,
-        "fitted_estimators": fitted_from_diagnostics,
+        "models_trained": accounting.trained,
+        "fitted_estimators": accounting.trees_fitted,
     }
 
 

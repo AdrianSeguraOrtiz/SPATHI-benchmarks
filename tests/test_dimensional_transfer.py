@@ -23,6 +23,7 @@ from spathi_bench.dimensional_transfer import (
 from spathi_bench.dimensional_transfer_workflow import (
     materialize_dimensional_transfer_profile,
 )
+from spathi_bench.spathi_diagnostics import MODEL_COLUMNS, model_seed
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -804,7 +805,7 @@ def _accounting_fixture(
     tmp_path: Path,
     *,
     omit_last_diagnostic: bool = False,
-    completed_models: int = 4,
+    completed_models: int = 6,
 ) -> tuple[ArtifactStore, dict[str, Any], dict[str, Any]]:
     store = ArtifactStore(tmp_path / "artifacts")
     dataset_key = store.key_for("dataset", {"fixture": "dimensional-accounting"})
@@ -812,9 +813,12 @@ def _accounting_fixture(
         truth_path = staging / "truth/networks.csv"
         truth_path.parent.mkdir(parents=True)
         truth_path.write_text(
-            "context,source,target\ngroup:A,TF1,G1\ngroup:B,TF1,G1\n",
+            "context,source,target\ngroup:A,TF1,G1\ngroup:B,TF1,G1\ngroup:A,G2,G1\ngroup:B,G2,G1\n",
             encoding="utf-8",
         )
+        (staging / "truth/gene_universe.txt").write_text("TF1\nG1\nG2\n")
+        (staging / "extras").mkdir()
+        (staging / "extras/tf_list.txt").write_text("TF1\n")
         dataset_artifact = store.publish_from_temp(
             staging,
             kind="dataset",
@@ -826,14 +830,26 @@ def _accounting_fixture(
         output = staging / "output/tool/io/out"
         output.mkdir(parents=True)
         with gzip.open(output / "target_eligibility.tsv.gz", "wt", encoding="utf-8") as handle:
-            handle.write("target\tmode\teligible\nG1\tall\ttrue\nG2\tall\ttrue\n")
-        diagnostics = [(group, target) for group in ("A", "B") for target in ("G1", "G2")]
+            handle.write("target\tmode\teligible\nTF1\tall\ttrue\nG1\tall\ttrue\nG2\tall\ttrue\n")
+        diagnostics = [(group, target) for group in ("A", "B") for target in ("TF1", "G1", "G2")]
         if omit_last_diagnostic:
             diagnostics.pop()
         with gzip.open(output / "model_diagnostics.tsv.gz", "wt", encoding="utf-8") as handle:
-            handle.write("target_group\ttarget\tstatus\trandom_seed\tn_estimators_fitted\n")
+            writer = csv.DictWriter(handle, fieldnames=MODEL_COLUMNS, delimiter="\t")
+            writer.writeheader()
             for group, target in diagnostics:
-                handle.write(f"{group}\t{target}\ttrained\t123\t25\n")
+                writer.writerow(
+                    {
+                        "target_group": group,
+                        "target": target,
+                        "status": "trained"
+                        if target != "TF1"
+                        else "no_predictors_after_self_exclusion",
+                        "random_seed": model_seed(123, group, target),
+                        "n_estimators_fitted": 25 if target != "TF1" else 0,
+                        "adaptive_converged": False,
+                    }
+                )
         _write_json(
             output / "run_metadata.json",
             {
@@ -842,19 +858,20 @@ def _accounting_fixture(
                 "requested_parameters": {
                     "target_eligibility": "all",
                     "n_estimators": 25,
+                    "adaptive_trees": False,
                     "random_seed": 123,
                     "target_list": None,
                 },
-                "input_dimensions": {"targets": 2, "groups": 2},
-                "effective_parameters": {"target_eligibility": {"globally_eligible_targets": 2}},
+                "input_dimensions": {"targets": 3, "groups": 2},
+                "effective_parameters": {"target_eligibility": {"globally_eligible_targets": 3}},
                 "models": {
-                    "requested": 4,
+                    "requested": 6,
                     "completed": completed_models,
                     "trained": 4,
-                    "preflight_skipped": 0,
+                    "preflight_skipped": 2,
                     "target_not_estimable": 0,
                     "fit_or_importance_failures": 0,
-                    "skipped_target_records": 0,
+                    "skipped_target_records": 2,
                     "fitted_estimators_total": 100,
                 },
             },
@@ -879,7 +896,7 @@ def _accounting_fixture(
 @pytest.mark.parametrize(
     ("omit_last_diagnostic", "completed_models", "message"),
     [
-        (True, 4, "exact group-target product"),
+        (True, 6, "exact group-target product"),
         (False, 3, "counters differ from complete diagnostics"),
     ],
 )
@@ -903,9 +920,36 @@ def test_configuration_accounting_rejects_incomplete_diagnostics_or_counters(
             expected_contexts=frozenset({"group:A", "group:B"}),
             expected_configuration_id="spathi_production_v1",
             expected_configuration_sha256="c" * 64,
-            expected_parameters={"target_eligibility": "all", "n_estimators": 25},
+            expected_parameters={
+                "target_eligibility": "all",
+                "n_estimators": 25,
+                "adaptive_trees": False,
+            },
             expected_algorithm_seed=123,
         )
+
+
+def test_configuration_accounting_filters_truth_to_the_declared_tf_space(tmp_path: Path) -> None:
+    store, evaluation, dataset = _accounting_fixture(tmp_path)
+    accounting = dimensional_transfer_module._configuration_accounting(
+        store=store,
+        evaluation=evaluation,
+        dataset=dataset,
+        expected_contexts=frozenset({"group:A", "group:B"}),
+        expected_configuration_id="spathi_production_v1",
+        expected_configuration_sha256="c" * 64,
+        expected_parameters={
+            "target_eligibility": "all",
+            "n_estimators": 25,
+            "adaptive_trees": False,
+        },
+        expected_algorithm_seed=123,
+    )
+    assert accounting["truth_edges_requested"] == 2
+    assert accounting["truth_edges_retained"] == 2
+    assert accounting["targets_requested"] == 6
+    assert accounting["models_trained"] == 4
+    assert accounting["fitted_estimators"] == 100
 
 
 def test_analysis_rejects_a_symlinked_evidence_input(
