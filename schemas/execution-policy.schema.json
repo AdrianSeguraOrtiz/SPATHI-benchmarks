@@ -10,8 +10,9 @@
     "scheduler": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["queue", "admission", "failure_policy"],
+      "required": ["queue", "admission", "failure_policy", "calibration_cpu_allocation"],
       "properties": {
+        "calibration_cpu_allocation": {"const": "declared_workload_elastic"},
         "queue": {"const": "rolling"},
         "admission": {"const": "declared_order_first_fit"},
         "failure_policy": {"const": "fail_fast_no_new_admissions"}

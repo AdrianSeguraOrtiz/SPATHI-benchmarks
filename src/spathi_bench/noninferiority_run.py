@@ -9,6 +9,7 @@ members of the predeclared counterbalanced order.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ from .runtime import (
     docker_runtime_environment,
 )
 from .safe_io import atomic_write_json, path_below_no_symlinks, write_idempotent_json
+from .study_context import permit_revision_change
 from .tool_contract import oom_observed, spathi_runtime_resources
 
 _GIB = 1024**3
@@ -472,6 +474,38 @@ def _runner_sha256() -> str:
     return runner_implementation_sha256()
 
 
+def _bind_execution_contract(
+    path: Path, observed: Mapping[str, Any], *, boundary: Path
+) -> dict[str, Any]:
+    """Freeze requested identities before the first expensive formal inference.
+
+    Source-only continuation retains the original cache coordinates; each newly
+    published artifact separately records the invocation's actual producer.
+    """
+
+    path = path_below_no_symlinks(path, boundary, "efficiency execution contract")
+    if not path.exists():
+        write_idempotent_json(path, dict(observed), "efficiency execution contract", boundary=boundary)
+        return dict(observed)
+    recorded = load_json_object(path, "efficiency execution contract")
+    if set(recorded) != set(observed):
+        raise BenchmarkConfigError("Efficiency execution contract fields changed")
+    for field, length in (("andrea_commit", 40), ("runner_sha256", 64)):
+        if not isinstance(recorded[field], str) or re.fullmatch(
+            rf"[0-9a-f]{{{length}}}", recorded[field]
+        ) is None:
+            raise BenchmarkConfigError(f"Efficiency execution contract has invalid {field}")
+    for field, value in observed.items():
+        if recorded[field] == value:
+            continue
+        if field in {"andrea_commit", "runner_sha256"} and permit_revision_change(
+            f"Efficiency {field}", recorded[field], value
+        ):
+            continue
+        raise BenchmarkConfigError(f"Efficiency execution contract changed: {field}")
+    return recorded
+
+
 def run_noninferiority_artifacts(
     *,
     repo_root: Path,
@@ -602,7 +636,23 @@ def run_noninferiority_artifacts(
         "model_counts": "validated_spathi_run_metadata",
         "tree_counts": "validated_spathi_model_diagnostics",
     }
-    runner_sha256 = _runner_sha256()
+    execution_contract = _bind_execution_contract(
+        artifact_index_path.with_name(f"{artifact_index_path.stem}-execution.json"),
+        {
+            "plan_sha256": sha256_file(plan_path),
+            "panel_sha256": sha256_file(panel_path),
+            "andrea_commit": str(observed["commit"]),
+            "runner_sha256": _runner_sha256(),
+            "andrea_environment": environment_fingerprint,
+            "benchmark_environment": benchmark_environment_fingerprint,
+            "docker_runtime": docker_runtime_fingerprint,
+            "resources": resources,
+            "measurement_protocol": measurement_protocol,
+        },
+        boundary=root,
+    )
+    runner_sha256 = str(execution_contract["runner_sha256"])
+    requested_andrea_commit = str(execution_contract["andrea_commit"])
     store_path = (artifact_store_path or root / "work/v1/artifacts").resolve()
     store_relative = _inside(root, store_path, "Artifact store")
     store = ArtifactStore(store_path)
@@ -707,7 +757,7 @@ def run_noninferiority_artifacts(
                 spec = _inference_spec(
                     dataset=dataset,
                     dataset_id=dataset_id,
-                    andrea_commit=str(observed["commit"]),
+                    andrea_commit=requested_andrea_commit,
                     andrea_environment=environment_fingerprint,
                     benchmark_environment=benchmark_environment_fingerprint,
                     docker_runtime=docker_runtime_fingerprint,
@@ -800,7 +850,7 @@ def run_noninferiority_artifacts(
         "panel_sha256": sha256_file(panel_path),
         "artifact_store": store_relative,
         "execution": {
-            "andrea_commit": str(observed["commit"]),
+            "andrea_commit": requested_andrea_commit,
             "andrea_environment": environment_fingerprint,
             "benchmark_environment": benchmark_environment_fingerprint,
             "docker_runtime": docker_runtime_fingerprint,

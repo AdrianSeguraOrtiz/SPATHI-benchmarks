@@ -264,7 +264,9 @@ def validate_locked_repository(
         raise BenchmarkConfigError(f"Locked repository {name} is missing: {path}")
     head = _git(safe_path, "rev-parse", "HEAD")
     expected = str(lock_entry["commit"])
-    if head != expected:
+    from .study_context import permit_revision_change
+
+    if head != expected and not permit_revision_change(f"{name} commit", expected, head):
         raise BenchmarkConfigError(
             f"{name} HEAD mismatch: expected {expected}, found {head} at {path}"
         )

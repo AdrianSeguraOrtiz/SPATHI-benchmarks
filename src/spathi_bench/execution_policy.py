@@ -284,10 +284,75 @@ def materialize_inference_run_resources(
     return resolved
 
 
+def resolve_workload_execution_plan(
+    execution_plan: Mapping[str, Any],
+    *,
+    purpose: str,
+    physical_tasks: int,
+) -> dict[str, Any]:
+    """Allocate idle CPU capacity to a small, prospectively declared search stage.
+
+    Allocation uses the full physical task ledger, never cache misses or completion
+    times, so interruption and resumption cannot change a run's resources.  Formal
+    timing and competitor comparisons retain their fixed per-run allocations.
+    """
+
+    resolved = copy.deepcopy(dict(execution_plan))
+    if purpose not in {"calibration", "selection"}:
+        return resolved
+    if (
+        type(physical_tasks) is not int
+        or physical_tasks < 1
+        or resolved.get("exclusive_inference") is not False
+    ):
+        raise BenchmarkConfigError("Elastic calibration requires a positive non-exclusive workload")
+    if resolved.get("scheduler", {}).get("calibration_cpu_allocation") != "declared_workload_elastic":
+        raise BenchmarkConfigError("Execution policy has no declared calibration CPU allocation")
+    allocation = resolved["operations"]["inference"]
+    capacity = resolved["capacity"]
+    base_threads = int(allocation["cpu_threads"])
+    cpu_threads = int(capacity["cpu_threads"])
+    slots = min(
+        physical_tasks,
+        max(1, cpu_threads // base_threads),
+        max(1, int(capacity["memory_bytes"]) // int(allocation["memory_bytes"])),
+        int(capacity.get("max_concurrent_tasks") or cpu_threads),
+    )
+    allocation["cpu_threads"] = max(base_threads, cpu_threads // slots)
+    allocation["workload_allocation"] = {
+        "strategy": "declared_workload_elastic",
+        "physical_tasks": physical_tasks,
+        "parallel_slots": slots,
+        "preferred_cpu_threads": base_threads,
+    }
+    resolved.pop("fingerprint", None)
+    resolved["fingerprint"] = canonical_json_sha256(resolved)
+    return resolved
+
+
+def inference_task_execution_plan(
+    execution_plan: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Isolate designated timing seeds while letting held-back accuracy run together."""
+
+    resolved = copy.deepcopy(dict(execution_plan))
+    if resolved.get("class_id") != "efficiency_development_canonical":
+        return resolved
+    role = metadata.get("seed_role")
+    if metadata.get("family") != "spathi_efficiency_development" or role not in {"timing", "accuracy"}:
+        raise BenchmarkConfigError("Efficiency-development task has no valid timing/accuracy role")
+    resolved["exclusive_inference"] = role == "timing"
+    resolved.pop("fingerprint", None)
+    resolved["fingerprint"] = canonical_json_sha256(resolved)
+    return resolved
+
+
 __all__ = [
     "GIB",
     "POLICY_PATH",
     "load_execution_policy",
     "materialize_inference_run_resources",
+    "inference_task_execution_plan",
     "resolve_execution_class",
+    "resolve_workload_execution_plan",
 ]

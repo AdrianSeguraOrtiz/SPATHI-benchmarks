@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "id": "portable_v1",
   "scheduler": {
+    "calibration_cpu_allocation": "declared_workload_elastic",
     "queue": "rolling",
     "admission": "declared_order_first_fit",
     "failure_policy": "fail_fast_no_new_admissions"
@@ -33,7 +34,7 @@
       "exclusive_inference": false
     },
     "efficiency_development_canonical": {
-      "description": "Serial counterbalanced efficiency-development measurements with canonical outputs and identical per-arm resources.",
+      "description": "Isolated counterbalanced timing seeds followed by concurrent held-back accuracy seeds, with canonical outputs and identical per-arm resources.",
       "generate_data": {
         "minimum_cpu_threads": 1,
         "preferred_cpu_threads": 8,

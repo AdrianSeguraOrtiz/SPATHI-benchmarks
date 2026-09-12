@@ -186,8 +186,8 @@ def materialize_efficiency_development(
     candidates with the designated timing seed.  Joint confirmation is
     outcome-bound to that scout: it reruns the exact reference, both primitive
     nominees and their combined policy with one common timing seed and every
-    held-back accuracy seed. The pipeline executes those blocks serially in a
-    deterministic counterbalanced order.
+    held-back accuracy seed. The pipeline isolates all timing blocks in a
+    deterministic counterbalanced order, then runs held-back accuracy concurrently.
     """
 
     if budget not in {"reduced", "full"}:

@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
+from contextvars import copy_context
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -307,7 +308,7 @@ def execute_resource_schedule(
                         and used_cpu + claim.cpu_threads <= capacity.cpu_threads
                         and used_memory + claim.memory_bytes <= capacity.memory_bytes
                     ):
-                        future = pool.submit(_invoke, worker, task.payload)
+                        future = pool.submit(copy_context().run, _invoke, worker, task.payload)
                         active[future] = (index, task)
                         used_cpu += claim.cpu_threads
                         used_memory += claim.memory_bytes

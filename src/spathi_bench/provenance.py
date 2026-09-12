@@ -425,12 +425,16 @@ def validate_run_inputs(repo_root: Path, profile_id: str, run_root: Path) -> dic
         raise BenchmarkConfigError("Frozen input snapshot identity differs from this run")
     observed = observe_benchmark_repository(repo_root, require_clean=True)
     recorded = manifest.get("benchmark_repository")
-    if not isinstance(recorded, dict) or any(
-        recorded.get(field) != observed.get(field) for field in ("commit", "origin")
-    ):
+    from .study_context import permit_revision_change
+
+    if not isinstance(recorded, dict) or recorded.get("origin") != observed.get("origin"):
         raise BenchmarkConfigError(
-            "SPATHI-benchmarks checkout changed after this run froze its inputs; use a new run ID"
+            "SPATHI-benchmarks repository origin changed after this run froze its inputs"
         )
+    if recorded.get("commit") != observed.get("commit") and not permit_revision_change(
+        "SPATHI-benchmarks commit", recorded.get("commit"), observed.get("commit")
+    ):
+        raise BenchmarkConfigError("SPATHI-benchmarks checkout changed; resume the named study")
     raw_files = manifest.get("files")
     if not isinstance(raw_files, list) or not raw_files:
         raise BenchmarkConfigError("Frozen input snapshot contains no files")

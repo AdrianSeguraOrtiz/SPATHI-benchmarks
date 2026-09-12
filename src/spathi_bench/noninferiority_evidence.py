@@ -32,6 +32,8 @@ from .calibration import resolve_group_policy
 from .config import BenchmarkConfigError, load_json_object, validate_json
 from .efficiency_order import counterbalanced_execution_orders, runner_implementation_sha256
 from .safe_io import path_below_no_symlinks, write_idempotent_json
+from .spathi_diagnostics import read_model_accounting
+from .study_context import permit_revision_change
 from .tool_contract import oom_observed, spathi_runtime_resources
 
 _NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
@@ -46,44 +48,7 @@ _ELIGIBILITY_COLUMNS = (
     "required_detected_cells",
     "reason",
 )
-_MODEL_COLUMNS = (
-    "target_group",
-    "target",
-    "status",
-    "random_seed",
-    "n_samples",
-    "n_positive_weight_samples",
-    "weight_sum",
-    "n_predictors_input",
-    "n_predictors_used",
-    "discarded_predictors_json",
-    "constant_predictors_json",
-    "n_edges",
-    "importance_sum",
-    "fit_seconds",
-    "target_detected_cells",
-    "target_detected_fraction",
-    "target_weighted_detected_fraction",
-    "target_weighted_detected_ess",
-    "n_estimators_fitted",
-    "adaptive_converged",
-    "convergence_delta",
-    "convergence_checks",
-    "message",
-)
 _INPUT_NAMES = ("expression", "groups", "tf_list")
-_TRAINED_STATUSES = frozenset({"trained", "trained_no_positive_importance"})
-_MODEL_STATUSES = _TRAINED_STATUSES | frozenset(
-    {
-        "insufficient_positive_weight_samples",
-        "constant_target",
-        "no_predictors_after_self_exclusion",
-        "no_variable_predictors",
-        "model_fit_failed",
-        "invalid_feature_importances",
-        "target_not_estimable",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,8 +319,7 @@ def _dataset_from_artifact(
         targets=targets,
         truth={context: frozenset(edges) for context, edges in truth.items()},
         truth_outside_candidate_space={
-            context: frozenset(edges)
-            for context, edges in truth_outside_candidate_space.items()
+            context: frozenset(edges) for context, edges in truth_outside_candidate_space.items()
         },
     )
 
@@ -476,91 +440,6 @@ def _validate_eligibility(
         if observed:
             eligible.append(target)
     return tuple(sorted(eligible))
-
-
-def _validate_diagnostics(
-    path: Path,
-    *,
-    dataset: _Dataset,
-    parameters: Mapping[str, Any],
-    algorithm_seed: int,
-    globally_eligible: Sequence[str],
-) -> tuple[dict[str, tuple[str, ...]], int, int]:
-    header, rows = _read_dict_rows(path, gzipped=True)
-    if tuple(header) != _MODEL_COLUMNS:
-        raise BenchmarkConfigError(f"Model diagnostics have an unexpected header: {path}")
-    expected_keys = {
-        (context.removeprefix("group:"), target)
-        for context in dataset.contexts
-        for target in globally_eligible
-    }
-    observed_keys = {(row["target_group"], row["target"]) for row in rows}
-    if len(observed_keys) != len(rows) or observed_keys != expected_keys:
-        raise BenchmarkConfigError("Model diagnostics do not cover the exact group-target product")
-    by_context: dict[str, list[str]] = defaultdict(list)
-    automatic = parameters["target_eligibility"] == "automatic"
-    fraction_threshold = float(parameters["min_target_weighted_detected_fraction"])
-    ess_threshold = float(parameters["min_target_weighted_detected_ess"])
-    fitted_total = 0
-    for row in rows:
-        label = f"{row['target_group']}/{row['target']}"
-        status = row["status"]
-        if status not in _MODEL_STATUSES or status in {
-            "model_fit_failed",
-            "invalid_feature_importances",
-        }:
-            raise BenchmarkConfigError(
-                f"Model diagnostic reports invalid/failed status for {label}"
-            )
-        if _integer(row["random_seed"], f"random_seed[{label}]") != algorithm_seed:
-            raise BenchmarkConfigError(f"Model diagnostic seed differs for {label}")
-        fitted = _integer(row["n_estimators_fitted"], f"n_estimators_fitted[{label}]")
-        fitted_total += fitted
-        if fitted > int(parameters["n_estimators"]):
-            raise BenchmarkConfigError(f"Tree budget exceeds its declared ceiling for {label}")
-        if not parameters["adaptive_trees"] and fitted not in {0, int(parameters["n_estimators"])}:
-            raise BenchmarkConfigError(f"Fixed-tree run reports a partial tree budget for {label}")
-        converged = _parse_bool(row["adaptive_converged"], f"adaptive_converged[{label}]")
-        if status in _TRAINED_STATUSES:
-            if parameters["adaptive_trees"]:
-                minimum = int(parameters["adaptive_min_estimators"])
-                step = int(parameters["adaptive_tree_step"])
-                maximum = int(parameters["n_estimators"])
-                if fitted < minimum or (fitted != maximum and (fitted - minimum) % step != 0):
-                    raise BenchmarkConfigError(f"Adaptive tree count is off schedule for {label}")
-            elif fitted != int(parameters["n_estimators"]):
-                raise BenchmarkConfigError(
-                    f"Trained fixed-tree model has the wrong budget for {label}"
-                )
-        elif fitted != 0:
-            raise BenchmarkConfigError(f"Untrained model reports fitted trees for {label}")
-        if not parameters["adaptive_trees"] and converged:
-            raise BenchmarkConfigError(f"Fixed-tree model reports adaptive convergence for {label}")
-        if automatic:
-            fraction = _finite_float(
-                row["target_weighted_detected_fraction"],
-                f"weighted_detected_fraction[{label}]",
-                minimum=0.0,
-            )
-            ess = _finite_float(
-                row["target_weighted_detected_ess"],
-                f"weighted_detected_ess[{label}]",
-                minimum=0.0,
-            )
-            estimable = fraction >= fraction_threshold and ess >= ess_threshold
-            if (status == "target_not_estimable") != (not estimable):
-                raise BenchmarkConfigError(
-                    f"Model status contradicts weighted target eligibility for {label}"
-                )
-        else:
-            estimable = True
-        if estimable:
-            by_context[f"group:{row['target_group']}"].append(row["target"])
-    return (
-        {context: tuple(sorted(by_context[context])) for context in dataset.contexts},
-        len(rows),
-        fitted_total,
-    )
 
 
 def _input_members(artifact: Artifact) -> dict[str, Path]:
@@ -934,9 +813,7 @@ def _execution_failure_from_artifact(
     measurement = execution.get("measurement") if isinstance(execution, Mapping) else None
     wall_time = measurement.get("wall_time_seconds") if isinstance(measurement, Mapping) else None
     peak_memory = measurement.get("peak_memory_bytes") if isinstance(measurement, Mapping) else None
-    result = (
-        tools.get("results", {}).get(run_id) if isinstance(tools, Mapping) else None
-    )
+    result = tools.get("results", {}).get(run_id) if isinstance(tools, Mapping) else None
 
     if (
         marker.get("status") != "tool_execution_failed"
@@ -949,8 +826,7 @@ def _execution_failure_from_artifact(
         or marker.get("measurement_sha256") != canonical_json_sha256(measurement)
         or marker.get("wall_time_seconds") != wall_time
         or marker.get("peak_memory_bytes") != peak_memory
-        or marker.get("oom_killed")
-        != (isinstance(result, Mapping) and oom_observed(result))
+        or marker.get("oom_killed") != (isinstance(result, Mapping) and oom_observed(result))
         or report.get("status") != "executed"
         or report.get("output_profile") != execution_contract["resources"]["output_profile"]
         or report.get("run_id") != run_id
@@ -1083,17 +959,19 @@ def _inference_from_artifact(
         parameters=parameters,
         expression_statistics=expression_statistics,
     )
-    eligible_targets, diagnostic_models, diagnostic_trees = _validate_diagnostics(
+    accounting = read_model_accounting(
         diagnostics_path,
-        dataset=dataset,
+        contexts=dataset.contexts,
+        targets=dataset.targets,
         parameters=parameters,
         algorithm_seed=algorithm_seed,
         globally_eligible=globally_eligible,
     )
+    accounting.validate_metadata(load_json_object(metadata_path)["models"])
     if (
         metadata_counts["targets_processed"] != len(globally_eligible)
-        or metadata_counts["models_requested"] != diagnostic_models
-        or metadata_counts["trees_fitted"] != diagnostic_trees
+        or metadata_counts["models_requested"] != accounting.models_requested
+        or metadata_counts["trees_fitted"] != accounting.trees_fitted
     ):
         raise BenchmarkConfigError(
             "SPATHI metadata accounting differs from validated eligibility/diagnostics"
@@ -1112,7 +990,7 @@ def _inference_from_artifact(
         report_path=report_path,
         measurements=measurements,
         network=_network(network_path, dataset),
-        eligible_targets=eligible_targets,
+        eligible_targets=accounting.eligible_targets,
     )
 
 
@@ -1180,6 +1058,10 @@ def _evidence_builder_sha256(repo_root: Path, *, safety: bool) -> str:
     digest = hashlib.sha256()
     files = (
         ("src/spathi_bench/noninferiority_evidence.py", Path(__file__).resolve()),
+        (
+            "src/spathi_bench/spathi_diagnostics.py",
+            Path(__file__).with_name("spathi_diagnostics.py"),
+        ),
         (
             "schemas/noninferiority-panel.schema.json",
             repo_root / "schemas/noninferiority-panel.schema.json",
@@ -1308,7 +1190,10 @@ def construct_noninferiority_evidence(
     if index["plan_sha256"] != plan_digest or index["panel_sha256"] != panel_digest:
         raise BenchmarkConfigError("Artifact index is not bound to this exact plan and panel")
     execution = index["execution"]
-    if execution["runner_sha256"] != runner_implementation_sha256():
+    current_runner = runner_implementation_sha256()
+    if execution["runner_sha256"] != current_runner and not permit_revision_change(
+        "Efficiency evidence runner", execution["runner_sha256"], current_runner
+    ):
         raise BenchmarkConfigError(
             "Artifact index was produced by a different efficiency runner implementation"
         )
@@ -1712,12 +1597,29 @@ def write_noninferiority_evidence(
         plan_path=plan_path,
         artifact_index_path=artifact_index_path,
     )
+    if output_path.exists():
+        recorded = _validated_json(
+            output_path, root / "schemas/noninferiority-evidence.schema.json", "existing evidence"
+        )
+        payload = _retain_evidence_implementation(recorded, payload)
     return write_idempotent_json(
         output_path,
         payload,
         "non-inferiority evidence",
         boundary=root,
     )
+
+
+def _retain_evidence_implementation(
+    recorded: Mapping[str, Any], rebuilt: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep original producer attribution while checking every rebuilt scientific value."""
+
+    previous = recorded["evidence_builder_sha256"]
+    current = rebuilt["evidence_builder_sha256"]
+    if previous != current and permit_revision_change("Efficiency evidence builder", previous, current):
+        return {**rebuilt, "evidence_builder_sha256": previous}
+    return rebuilt
 
 
 def verify_noninferiority_evidence(
@@ -1743,6 +1645,7 @@ def verify_noninferiority_evidence(
         plan_path=plan_path,
         artifact_index_path=index_path,
     )
+    rebuilt = _retain_evidence_implementation(evidence, rebuilt)
     if evidence != rebuilt:
         raise BenchmarkConfigError(
             "Evidence does not exactly match values recalculated from immutable source artifacts"

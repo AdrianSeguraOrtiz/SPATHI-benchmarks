@@ -1395,8 +1395,19 @@ def _manifest_matches(
         return False
     if manifest.get("inputs") != {"plan_sha256": plan_digest, "evidence_sha256": evidence_digest}:
         return False
-    if manifest.get("analysis_implementation_sha256") != implementation_digest:
-        return False
+    recorded_implementation = manifest.get("analysis_implementation_sha256")
+    if recorded_implementation != implementation_digest:
+        from .study_context import permit_revision_change
+
+        if (
+            not isinstance(recorded_implementation, str)
+            or len(recorded_implementation) != 64
+            or any(character not in "0123456789abcdef" for character in recorded_implementation)
+            or not permit_revision_change(
+                "Efficiency analysis implementation", recorded_implementation, implementation_digest
+            )
+        ):
+            return False
     files = manifest.get("files")
     if not isinstance(files, list) or len(files) != len(canonical_members):
         return False

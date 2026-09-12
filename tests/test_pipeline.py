@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -10,10 +11,13 @@ import pytest
 import spathi_bench.pipeline as pipeline
 from spathi_bench.artifacts import Artifact, ArtifactKey
 from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.convergence_execution import ConvergenceBinding
+from spathi_bench.execution_policy import GIB, resolve_execution_class
 from spathi_bench.pipeline import (
     _analysis_bundle_spec,
     _artifact_store,
     _batch_selects_dataset,
+    _copy_locked_spathi_source,
     _counterbalanced_efficiency_development_tasks,
     _dataset_execution_run,
     _dataset_job_attribution,
@@ -21,6 +25,7 @@ from spathi_bench.pipeline import (
     _execute_unique_missing_tasks,
     _generation_spec,
     _inference_spec,
+    _inference_workload_plan,
     _integration_spec,
     _spathi_build_fingerprint,
     _validate_inference_state_contract,
@@ -51,6 +56,46 @@ EXECUTION_PLAN = {
 }
 
 
+def test_locked_source_export_uses_original_commit_after_head_and_worktree_change(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "source"
+    repository.mkdir()
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repository), "-c", "user.name=Test", "-c",
+             "user.email=test@example.invalid", *arguments],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    git("init", "--quiet")
+    source = repository / "src/spathi"
+    source.mkdir(parents=True)
+    (source / "core.py").write_text("original = True\n", encoding="utf-8")
+    (source / "resource.bin").write_bytes(b"\x00\xff\xfe\x80")
+    script = source / "script.py"
+    script.write_text("#!/usr/bin/python\n", encoding="utf-8")
+    script.chmod(0o755)
+    git("add", "src")
+    git("commit", "--quiet", "-m", "Initial source")
+    frozen_commit = git("rev-parse", "HEAD")
+    (source / "core.py").write_text("changed = True\n", encoding="utf-8")
+    (source / "new.py").write_text("new = True\n", encoding="utf-8")
+    git("add", "src")
+    git("commit", "--quiet", "-m", "Changed source")
+    (source / "resource.bin").unlink()
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+
+    _copy_locked_spathi_source(repository, snapshot, source_commit=frozen_commit)
+
+    assert (snapshot / "src/spathi/core.py").read_text(encoding="utf-8") == "original = True\n"
+    assert (snapshot / "src/spathi/resource.bin").read_bytes() == b"\x00\xff\xfe\x80"
+    assert (snapshot / "src/spathi/script.py").stat().st_mode & 0o777 == 0o755
+    assert not (snapshot / "src/spathi/new.py").exists()
+
+
 def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() -> None:
     labels = ("adaptive", "combined", "eligibility", "reference")
     tasks = [
@@ -62,6 +107,7 @@ def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() 
                 "efficiency_development_step": "joint_confirmation",
                 "execution_order_seed": 99,
                 "family": "spathi_efficiency_development",
+                "seed_role": "timing" if seed == 12 else "accuracy",
             },
         }
         for dataset_id in ("dataset_a", "dataset_b", "dataset_c", "dataset_d", "dataset_e")
@@ -70,6 +116,8 @@ def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() 
     ]
 
     ordered = _counterbalanced_efficiency_development_tasks(list(reversed(tasks)))
+    assert all(task["metadata"]["seed_role"] == "timing" for task in ordered[:20])
+    assert all(task["metadata"]["seed_role"] == "accuracy" for task in ordered[20:])
     blocks = [ordered[index : index + len(labels)] for index in range(0, len(ordered), 4)]
     position_counts = {
         label: [
@@ -102,6 +150,54 @@ def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() 
         assert all(
             max(counts) - min(counts) <= 1 for counts in seed_position_counts.values()
         )
+
+
+def test_workload_allocation_counts_physical_convergence_fits_and_selected_datasets(
+    tmp_path: Path,
+) -> None:
+    frozen = tmp_path / "input_snapshot/repository"
+    frozen.mkdir(parents=True)
+    (frozen / "params.json").write_text(
+        json.dumps({"runs": [{"run_id": "a"}, {"run_id": "b"}]}), encoding="utf-8"
+    )
+    runtime = {
+        "fingerprint": "a" * 64,
+        "capacity": {"cpu_threads": 24, "memory_bytes": 128 * GIB},
+        "detected": {"allowed_cpus": list(range(24)), "cpu_allocation_order": list(range(24))},
+    }
+    state = {
+        "execution_plan": resolve_execution_class(
+            repo_root=REPO_ROOT, class_id="bulk_canonical", runtime_plan=runtime
+        ),
+        "datasets": [
+            {"dataset_role": "development", "generation_job": "dyngen", "replicate_index": index}
+            for index in range(1, 4)
+        ],
+    }
+    profile = {
+        "purpose": "calibration",
+        "inference_batches": [
+            {"id": "ordinary", "dataset_role": "development", "tools_params": "params.json",
+             "replicate_indices": {"dyngen": [1]}},
+            {"id": "convergence", "dataset_role": "development",
+             "replicate_indices": {"dyngen": [2, 3]}},
+        ],
+    }
+    # Four logical prefixes consume one physical execution per selected dataset.
+    convergence = {
+        f"prefix_{trees}": ConvergenceBinding(
+            plan={"physical_run_id": "physical"}, prefix={"n_estimators": trees}
+        )
+        for trees in (250, 500, 750, 1000)
+    }
+    resolved = _inference_workload_plan(
+        state=state,
+        profile=profile,
+        run_root=tmp_path,
+        convergence_by_batch={"ordinary": {}, "convergence": convergence},
+    )
+    assert resolved["operations"]["inference"]["workload_allocation"]["physical_tasks"] == 4
+    assert resolved["operations"]["inference"]["cpu_threads"] == 6
 
 
 def _physical_measurement() -> dict[str, Any]:
@@ -487,6 +583,7 @@ def _inference_attribution_case(
         "generation_jobs": [],
         "inference_batches": [batch],
         "execution_class": "bulk_canonical",
+        "purpose": "smoke",
     }
     dataset = {
         "dataset_id": "dataset_a",

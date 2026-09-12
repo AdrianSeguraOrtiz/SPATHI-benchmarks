@@ -336,6 +336,11 @@ class ArtifactStore:
             "files": file_entries,
             "status": "complete",
         }
+        from .study_context import execution_provenance
+
+        producer = execution_provenance()
+        if producer is not None:
+            manifest["producer"] = producer
         self._write_manifest(temp_dir / _MANIFEST_NAME, manifest)
 
         target = self.path_for(key)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -100,6 +101,36 @@ def test_publication_is_idempotent_for_an_existing_complete_key(tmp_path: Path) 
 
     assert second == first
     assert second.file("data.txt").read_text(encoding="utf-8") == "first"
+
+
+@pytest.mark.parametrize("mutation", ["content_restored_mtime", "replacement", "unlisted", "symlink"])
+def test_repeated_lookup_detects_mutations_after_initial_validation(
+    tmp_path: Path, mutation: str
+) -> None:
+    store = ArtifactStore(tmp_path / "artifacts")
+    spec = {"run": mutation}
+    key = store.key_for("dataset", spec)
+    with store.staging_directory(key) as staging:
+        (staging / "data.txt").write_text("stable", encoding="utf-8")
+        artifact = store.publish_from_temp(staging, kind="dataset", spec=spec)
+    member = artifact.path / "data.txt"
+    assert store.lookup(key) is not None
+    initial_stat = member.stat()
+    if mutation == "content_restored_mtime":
+        member.write_text("broken", encoding="utf-8")
+        os.utime(member, ns=(initial_stat.st_atime_ns, initial_stat.st_mtime_ns))
+    elif mutation == "replacement":
+        replacement = tmp_path / "replacement.txt"
+        replacement.write_text("broken", encoding="utf-8")
+        os.utime(replacement, ns=(initial_stat.st_atime_ns, initial_stat.st_mtime_ns))
+        replacement.replace(member)
+    elif mutation == "unlisted":
+        (artifact.path / "extra.txt").write_text("unexpected", encoding="utf-8")
+    else:
+        member.unlink()
+        member.symlink_to(tmp_path / "outside")
+    with pytest.raises(ArtifactError):
+        store.lookup(key)
 
 
 def test_concurrent_atomic_publisher_winner_is_reused(

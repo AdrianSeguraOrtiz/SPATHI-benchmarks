@@ -419,14 +419,14 @@ def resolve_runtime_plan(
     if max_cores is not None and (
         not isinstance(max_cores, int) or isinstance(max_cores, bool) or max_cores < 1
     ):
-        raise BenchmarkConfigError("--max-cores must be a positive integer")
+        raise BenchmarkConfigError("CPU ceiling (--cores) must be a positive integer")
     if max_ram_gb is not None and (
         not isinstance(max_ram_gb, (int, float))
         or isinstance(max_ram_gb, bool)
         or not math.isfinite(max_ram_gb)
         or max_ram_gb <= 0
     ):
-        raise BenchmarkConfigError("--max-ram-gb must be finite and positive")
+        raise BenchmarkConfigError("RAM ceiling (--ram-gb) must be finite and positive")
     if not isinstance(reserve_cores, int) or isinstance(reserve_cores, bool) or reserve_cores < 0:
         raise BenchmarkConfigError("--reserve-cores must be a non-negative integer")
     if (

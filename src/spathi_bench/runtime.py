@@ -221,17 +221,17 @@ def stream_command(
         assert process.stdout is not None
         output_filter = _CommandOutputFilter()
         for line in process.stdout:
+            log.write(line)
             if not output_filter.keep(line):
                 continue
             print(line, end="", flush=True)
-            log.write(line)
         return_code = process.wait()
         warning_count = output_filter.suppressed_sklearn_parallel_warnings
         if warning_count:
             summary = (
-                "[spathi-benchmarks] Suppressed "
-                f"{warning_count} repeated scikit-learn parallel warning(s); "
-                "all other command output was retained.\n"
+                "[spathi-benchmarks] scikit-learn parallel-configuration warning: "
+                f"{warning_count} occurrence(s). Full messages and all command output "
+                f"were retained in {log_path}.\n"
             )
             print(summary, end="", flush=True)
             log.write(summary)

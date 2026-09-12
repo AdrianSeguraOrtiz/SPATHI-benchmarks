@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextvars import ContextVar
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,30 @@ from spathi_bench.resource_scheduler import (
 
 def _task(task_id: str, cpu: int, ram: int, *, exclusive: bool = False) -> ScheduledTask[str]:
     return ScheduledTask(task_id, task_id, ResourceClaim(cpu, ram, exclusive))
+
+
+def test_scheduler_propagates_parent_context_without_cross_task_mutations() -> None:
+    context: ContextVar[str] = ContextVar("task_context", default="unset")
+    token = context.set("study-42")
+    barrier = threading.Barrier(2)
+
+    def worker(task_id: str) -> tuple[str, str]:
+        observed = context.get()
+        context.set(task_id)
+        barrier.wait(timeout=2)
+        return observed, context.get()
+
+    try:
+        result = execute_resource_schedule(
+            [_task("a", 1, 1), _task("b", 1, 1)],
+            capacity=ResourceCapacity(cpu_threads=2, memory_bytes=2),
+            worker=worker,
+            thread_name_prefix="test-context",
+        )
+        assert [task.result for task in result.tasks] == [("study-42", "a"), ("study-42", "b")]
+        assert context.get() == "study-42"
+    finally:
+        context.reset(token)
 
 
 def test_scheduler_never_exceeds_cpu_or_ram_and_preserves_result_order() -> None:

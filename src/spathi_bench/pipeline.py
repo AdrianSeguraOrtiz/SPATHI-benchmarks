@@ -13,7 +13,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .artifacts import (
@@ -46,8 +46,10 @@ from .convergence_execution import (
 from .efficiency_order import counterbalanced_execution_orders
 from .environment_lock import validate_environment_lock
 from .execution_policy import (
+    inference_task_execution_plan,
     materialize_inference_run_resources,
     resolve_execution_class,
+    resolve_workload_execution_plan,
 )
 from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
@@ -279,6 +281,12 @@ def _validate_state_andrea(state: dict[str, Any], observed: dict[str, Any]) -> N
         raise BenchmarkConfigError("Benchmark state has no observed ANDREA provenance")
     for field in ("commit", "origin"):
         if recorded.get(field) != observed.get(field):
+            from .study_context import permit_revision_change
+
+            if field == "commit" and permit_revision_change(
+                "ANDREA commit", recorded.get(field), observed.get(field)
+            ):
+                continue
             raise BenchmarkConfigError(
                 f"ANDREA {field} changed after preflight: "
                 f"recorded={recorded.get(field)!r}, observed={observed.get(field)!r}"
@@ -770,9 +778,15 @@ def preflight(
     return preflight_dir / "benchmark-preflight.json"
 
 
-def _copy_locked_spathi_source(spathi_repo: Path, snapshot_root: Path) -> None:
+def _copy_locked_spathi_source(
+    spathi_repo: Path, snapshot_root: Path, *, source_commit: str
+) -> None:
+    """Export tracked source blobs from the immutable image revision, not the worktree."""
+
+    if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+        raise BenchmarkConfigError("Locked SPATHI source requires a complete Git commit digest")
     completed = subprocess.run(
-        ["git", "-C", str(spathi_repo), "ls-tree", "-r", "--name-only", "HEAD", "src"],
+        ["git", "-C", str(spathi_repo), "ls-tree", "-r", "-z", source_commit, "--", "src"],
         check=False,
         capture_output=True,
         text=True,
@@ -782,16 +796,46 @@ def _copy_locked_spathi_source(spathi_repo: Path, snapshot_root: Path) -> None:
             "Cannot enumerate locked SPATHI source: "
             + (completed.stderr or completed.stdout).strip()
         )
-    members = [line for line in completed.stdout.splitlines() if line]
-    if not members:
+    entries = [entry for entry in completed.stdout.split("\0") if entry]
+    if not entries:
         raise BenchmarkConfigError("Locked SPATHI commit contains no tracked src files")
-    for member in members:
-        source = spathi_repo / member
-        if source.is_symlink() or not source.is_file():
+    for entry in entries:
+        header, separator, member = entry.partition("\t")
+        relative = PurePosixPath(member)
+        if (
+            not separator
+            or len(header.split()) != 3
+            or header.split()[0] not in {"100644", "100755"}
+            or header.split()[1] != "blob"
+            or not relative.parts
+            or relative.parts[0] != "src"
+            or relative.as_posix() != member
+            or any(part in {".", ".."} for part in relative.parts)
+        ):
             raise BenchmarkConfigError(f"Unsupported tracked SPATHI source member: {member}")
-        destination = snapshot_root / member
+        blob = subprocess.run(
+            ["git", "-C", str(spathi_repo), "show", f"{source_commit}:{member}"],
+            check=False,
+            capture_output=True,
+        )
+        if blob.returncode != 0:
+            raise BenchmarkConfigError(
+                f"Cannot read locked SPATHI source member {member}: "
+                + blob.stderr.decode("utf-8", errors="replace").strip()
+            )
+        destination = path_below_no_symlinks(
+            snapshot_root / member, snapshot_root, "locked SPATHI source member"
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(blob.stdout)
+                handle.flush()
+                os.fchmod(handle.fileno(), int(header.split()[0], 8) & 0o777)
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def _spathi_build_fingerprint(image: dict[str, Any]) -> str:
@@ -847,7 +891,9 @@ def build_spathi_image(
     if not reusable:
         with tempfile.TemporaryDirectory(prefix="spathi-build-context-") as directory:
             source_snapshot = Path(directory)
-            _copy_locked_spathi_source(spathi_repo, source_snapshot)
+            _copy_locked_spathi_source(
+                spathi_repo, source_snapshot, source_commit=str(image["source_commit"])
+            )
             stream_command(
                 [
                     "docker",
@@ -2156,6 +2202,37 @@ def _convergence_bindings_for_batch(
     return index_convergence_plans(payload)
 
 
+def _inference_workload_plan(
+    *,
+    state: Mapping[str, Any],
+    profile: Mapping[str, Any],
+    run_root: Path,
+    convergence_by_batch: Mapping[str, Mapping[str, ConvergenceBinding]],
+) -> dict[str, Any]:
+    """Count declared physical fits before consulting the artifact cache."""
+
+    if profile["purpose"] not in {"calibration", "selection"}:
+        return copy.deepcopy(dict(state["execution_plan"]))
+    physical_tasks = 0
+    for batch in profile["inference_batches"]:
+        bindings = convergence_by_batch[str(batch["id"])]
+        if bindings:
+            fits_per_dataset = len({item.plan["physical_run_id"] for item in bindings.values()})
+        else:
+            params = load_json_object(
+                frozen_path(run_root, batch["tools_params"], "tools params"), "tools params"
+            )
+            fits_per_dataset = len(params["runs"])
+        physical_tasks += fits_per_dataset * sum(
+            _batch_selects_dataset(batch, dataset) for dataset in state["datasets"]
+        )
+    return resolve_workload_execution_plan(
+        state["execution_plan"],
+        purpose=str(profile["purpose"]),
+        physical_tasks=physical_tasks,
+    )
+
+
 def _dataset_execution_run(run: Mapping[str, Any], dataset: Mapping[str, Any]) -> dict[str, Any]:
     """Bind an outcome-blind target scout to the current immutable dataset ID."""
 
@@ -2405,7 +2482,6 @@ def _validate_inference_state_contract(
             )
         actual_by_identity[identity] = actual
 
-    inference_resources = state["execution_plan"]["operations"]["inference"]
     andrea_repo = Path(state["repositories"]["observed"]["andrea"]["path"])
     expected_identities: set[tuple[str, str, str]] = set()
     verified: dict[tuple[str, str, str], Artifact] = {}
@@ -2415,6 +2491,13 @@ def _validate_inference_state_contract(
         str(batch["id"]): _convergence_bindings_for_batch(run_root, batch)
         for batch in profile["inference_batches"]
     }
+    workload_plan = _inference_workload_plan(
+        state=state,
+        profile=profile,
+        run_root=run_root,
+        convergence_by_batch=convergence_by_batch,
+    )
+    inference_resources = workload_plan["operations"]["inference"]
     for dataset in state["datasets"]:
         for batch in profile["inference_batches"]:
             if not _batch_selects_dataset(batch, dataset):
@@ -2479,7 +2562,7 @@ def _validate_inference_state_contract(
                         run=run,
                         custom_definition=custom_definition,
                     ),
-                    execution_plan=state["execution_plan"],
+                    execution_plan=inference_task_execution_plan(workload_plan, metadata),
                 )
                 tool_image = _runtime_image_contract(
                     state=state,
@@ -2721,6 +2804,16 @@ def _counterbalanced_efficiency_development_tasks(
         )
     dataset_ids = sorted({str(task["dataset"]["dataset_id"]) for task in prepared})
     algorithm_seeds = sorted({int(task["metadata"]["algorithm_seed"]) for task in prepared})
+    roles_by_seed: dict[int, set[str]] = defaultdict(set)
+    for task in prepared:
+        roles_by_seed[int(task["metadata"]["algorithm_seed"])].add(
+            str(task["metadata"].get("seed_role", ""))
+        )
+    if (
+        any(roles not in ({"timing"}, {"accuracy"}) for roles in roles_by_seed.values())
+        or sum(roles == {"timing"} for roles in roles_by_seed.values()) != 1
+    ):
+        raise BenchmarkConfigError("Efficiency-development seeds have inconsistent timing roles")
     labels = sorted({str(task["metadata"]["configuration_id"]) for task in prepared})
     by_identity: dict[tuple[str, int, str], dict[str, Any]] = {}
     for task in prepared:
@@ -2751,11 +2844,12 @@ def _counterbalanced_efficiency_development_tasks(
         labels,
         execution_order_seed=int(next(iter(order_seeds))),
     )
-    return [
+    ordered = [
         by_identity[(dataset_id, algorithm_seed, label)]
         for (dataset_id, algorithm_seed), order in orders.items()
         for label in order
     ]
+    return sorted(ordered, key=lambda task: task["metadata"]["seed_role"] != "timing")
 
 
 def _execute_unique_missing_tasks(
@@ -2882,7 +2976,6 @@ def run_inference(
     _validate_state_andrea(state, observed_andrea)
     _validate_host_environment(state, andrea_host_environment())
     profile = frozen_profile(run_root, profile_id)
-    inference_resources = state["execution_plan"]["operations"]["inference"]
     scheduler_capacity = state["runtime_plan"]["capacity"]
     store = _artifact_store(run_root)
     _validate_generated_state_contract(
@@ -2899,6 +2992,13 @@ def run_inference(
         str(batch["id"]): _convergence_bindings_for_batch(run_root, batch)
         for batch in profile["inference_batches"]
     }
+    workload_plan = _inference_workload_plan(
+        state=state,
+        profile=profile,
+        run_root=run_root,
+        convergence_by_batch=convergence_by_batch,
+    )
+    inference_resources = workload_plan["operations"]["inference"]
 
     for dataset in state["datasets"]:
         dataset_manifest, ground_truth_manifest = _validated_dataset_paths(store, dataset)
@@ -2952,7 +3052,7 @@ def run_inference(
                         run=run,
                         custom_definition=custom_definition,
                     ),
-                    execution_plan=state["execution_plan"],
+                    execution_plan=inference_task_execution_plan(workload_plan, metadata),
                 )
                 tool_image = _runtime_image_contract(
                     state=state,
@@ -3054,7 +3154,11 @@ def run_inference(
             claim=lambda task: ResourceClaim(
                 cpu_threads=int(task["run"]["resources"]["threads"]),
                 memory_bytes=round(float(task["run"]["resources"]["ram_gb"]) * 1024**3),
-                exclusive=bool(state["execution_plan"]["exclusive_inference"]),
+                exclusive=bool(
+                    inference_task_execution_plan(workload_plan, task["metadata"])[
+                        "exclusive_inference"
+                    ]
+                ),
             ),
             thread_name_prefix="spathi-infer",
             schedule_path=run_root / "schedules/inference.json",

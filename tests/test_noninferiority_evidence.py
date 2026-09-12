@@ -31,6 +31,8 @@ from spathi_bench.noninferiority_evidence import (
     verify_noninferiority_evidence,
     write_noninferiority_evidence,
 )
+from spathi_bench.spathi_diagnostics import model_seed
+from spathi_bench.study_context import study_execution
 from spathi_bench.tool_contract import spathi_runtime_resources
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -252,7 +254,7 @@ def _write_eligibility(path: Path, *, automatic: bool) -> None:
 
 def _write_diagnostics(path: Path, *, parameters: dict[str, Any], seed: int) -> None:
     automatic = parameters["target_eligibility"] == "automatic"
-    targets = ("G1", "G3") if automatic else ("TF1", "G1", "G2", "G3")
+    targets = ("TF1", "G1", "G2", "G3")
     with gzip.open(path, "wt", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle, fieldnames=MODEL_COLUMNS, delimiter="\t", lineterminator="\n"
@@ -260,14 +262,21 @@ def _write_diagnostics(path: Path, *, parameters: dict[str, Any], seed: int) -> 
         writer.writeheader()
         for group in ("a", "b"):
             for target in targets:
-                fitted = 100 if parameters["adaptive_trees"] else 250
-                trained = target != "TF1"
+                fitted = 150 if parameters["adaptive_trees"] else 250
+                excluded = automatic and target in {"TF1", "G2"}
+                trained = target != "TF1" and not excluded
                 writer.writerow(
                     {
                         "target_group": group,
                         "target": target,
-                        "status": "trained" if trained else "no_predictors_after_self_exclusion",
-                        "random_seed": seed,
+                        "status": (
+                            "target_not_estimable"
+                            if excluded
+                            else "trained"
+                            if trained
+                            else "no_predictors_after_self_exclusion"
+                        ),
+                        "random_seed": model_seed(seed, group, target),
                         "n_samples": 25,
                         "n_positive_weight_samples": 25,
                         "weight_sum": 25,
@@ -280,8 +289,10 @@ def _write_diagnostics(path: Path, *, parameters: dict[str, Any], seed: int) -> 
                         "fit_seconds": 0.1,
                         "target_detected_cells": 25,
                         "target_detected_fraction": 1.0,
-                        "target_weighted_detected_fraction": 1.0 if automatic else "",
-                        "target_weighted_detected_ess": 20.0 if automatic else "",
+                        "target_weighted_detected_fraction": 1.0
+                        if automatic and not excluded
+                        else "",
+                        "target_weighted_detected_ess": 20.0 if automatic and not excluded else "",
                         "n_estimators_fitted": fitted if trained else 0,
                         "adaptive_converged": parameters["adaptive_trees"] and trained,
                         "convergence_delta": (
@@ -490,9 +501,9 @@ def _publish_inference(
         requested = {**parameters, "random_seed": seed, "target_list": None}
         automatic = parameters["target_eligibility"] == "automatic"
         target_count = 2 if automatic else 4
-        models_requested = target_count * len(contexts)
-        models_trained = models_requested if automatic else 3 * len(contexts)
-        trees_per_model = 100 if parameters["adaptive_trees"] else 250
+        models_requested = 4 * len(contexts)
+        models_trained = (2 if automatic else 3) * len(contexts)
+        trees_per_model = 150 if parameters["adaptive_trees"] else 250
         _json(
             tool_out / "run_metadata.json",
             {
@@ -515,6 +526,10 @@ def _publish_inference(
                     "requested": models_requested,
                     "completed": models_requested,
                     "trained": models_trained,
+                    "preflight_skipped": models_requested - models_trained,
+                    "skipped_target_records": models_requested - models_trained,
+                    "target_not_estimable": 2 * len(contexts) if automatic else 0,
+                    "fit_or_importance_failures": 0,
                     "fitted_estimators_total": models_trained * trees_per_model,
                 },
             },
@@ -936,11 +951,9 @@ def test_builder_recalculates_metrics_spaces_hashes_and_shared_references(tmp_pa
         assert row["candidate_space"]["policy"] == "full_requested_universe"
         assert row["candidate_space"]["n_truth_edges_in_candidate_space"] == 2
         assert row["candidate_space"]["n_truth_edges_outside_candidate_space"] == 1
-        assert row["candidate_space"]["truth_outside_candidate_space_examples"] == [
-            "G3->G1"
-        ]
+        assert row["candidate_space"]["truth_outside_candidate_space_examples"] == ["G3->G1"]
         assert row["reference_measurements"]["peak_memory_bytes"] == 100_000_000
-        assert row["candidate_measurements"]["models_requested"] == 4
+        assert row["candidate_measurements"]["models_requested"] == 8
     assert all(len(references) == 1 for references in per_run.values())
 
 
@@ -1047,6 +1060,37 @@ def test_builder_rejects_index_from_another_efficiency_runner(tmp_path: Path) ->
             plan_path=plan_path,
             artifact_index_path=index_path,
         )
+
+
+def test_named_resume_keeps_evidence_on_source_only_drift_but_rechecks_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, plan, _panel, index = _repository(tmp_path)
+    output = root / "work/evidence.json"
+    write_noninferiority_evidence(
+        repo_root=root, plan_path=plan, artifact_index_path=index, output_path=output
+    )
+    original = json.loads(output.read_text(encoding="utf-8"))
+    original_hash = sha256_file(output)
+    monkeypatch.setattr(
+        "spathi_bench.noninferiority_evidence.runner_implementation_sha256", lambda: "d" * 64
+    )
+    monkeypatch.setattr(
+        "spathi_bench.noninferiority_evidence._evidence_builder_sha256",
+        lambda *_args, **_kwargs: "e" * 64,
+    )
+    with study_execution("study-1", revisions={}, resume=True):
+        write_noninferiority_evidence(
+            repo_root=root, plan_path=plan, artifact_index_path=index, output_path=output
+        )
+        assert sha256_file(output) == original_hash
+        assert verify_noninferiority_evidence(
+            repo_root=root, plan_path=plan, evidence_path=output
+        ) == original
+        original["rows"][0]["candidate_value"] = 0.01
+        _json(output, original)
+        with pytest.raises(BenchmarkConfigError, match="exactly match values recalculated"):
+            verify_noninferiority_evidence(repo_root=root, plan_path=plan, evidence_path=output)
 
 
 @pytest.mark.parametrize(

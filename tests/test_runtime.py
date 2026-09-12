@@ -55,11 +55,14 @@ def test_stream_command_collapses_only_the_repeated_sklearn_warning(
 
     console = capsys.readouterr().out
     log = log_path.read_text(encoding="utf-8")
+    assert warning not in console
+    assert "warnings.warn(" not in console
+    assert warning in log
+    assert "warnings.warn(" in log
     for observed in (console, log):
-        assert warning not in observed
-        assert "warnings.warn(" not in observed
         assert "unrelated warning remains visible" in observed
-        assert "Suppressed 1 repeated scikit-learn parallel warning(s)" in observed
+        assert "parallel-configuration warning: 1 occurrence(s)" in observed
+        assert "Full messages and all command output were retained" in observed
 
 
 def test_matching_catalog_image_leases_run_concurrently(

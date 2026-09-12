@@ -24,10 +24,12 @@ from spathi_bench.noninferiority import (
     materialize_noninferiority_plan,
 )
 from spathi_bench.noninferiority_run import (
+    _bind_execution_contract,
     _execute_missing_tasks,
     _execute_task,
 )
 from spathi_bench.seeds import load_seed_plan, validate_plan_seed_record
+from spathi_bench.study_context import study_execution
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOCKED_SPATHI = locked_spathi_identity(REPO_ROOT)
@@ -71,6 +73,52 @@ def _write_result_bundle(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
     return manifest
+
+
+def test_resumed_execution_contract_keeps_completed_artifact_keys_on_source_drift(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "artifact-index-execution.json"
+    original = {
+        "andrea_commit": "a" * 40, "runner_sha256": "b" * 64,
+        "plan_sha256": "c" * 64, "resources": {"cpu_threads": 4},
+    }
+    frozen = _bind_execution_contract(path, original, boundary=tmp_path)
+    store = ArtifactStore(tmp_path / "artifacts")
+    spec = {"execution": frozen}
+    key = store.key_for("inference", spec)
+    with store.staging_directory(key) as staging:
+        (staging / "network.csv").write_text("source,target,score\nTF1,G1,1\n", encoding="utf-8")
+        published = store.publish_from_temp(staging, kind="inference", spec=spec)
+
+    changed = {**original, "andrea_commit": "d" * 40, "runner_sha256": "e" * 64}
+    with study_execution("study-1", revisions={}, resume=True):
+        resumed = _bind_execution_contract(path, changed, boundary=tmp_path)
+        resumed_key = store.key_for("inference", {"execution": resumed})
+        tasks = [{"artifact": store.lookup(resumed_key)}]
+        _execute_missing_tasks(tasks, lambda _task: pytest.fail("Completed inference was repeated"))
+        assert tasks[0]["artifact"].key == published.key
+        assert resumed == original
+        with pytest.raises(BenchmarkConfigError, match="contract changed: resources"):
+            _bind_execution_contract(
+                path, {**changed, "resources": {"cpu_threads": 8}}, boundary=tmp_path
+            )
+    with pytest.raises(BenchmarkConfigError, match="contract changed: andrea_commit"):
+        _bind_execution_contract(path, changed, boundary=tmp_path)
+
+
+def test_analysis_resume_allows_only_revision_drift_and_still_checks_output_hashes(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "results"
+    _write_result_bundle(
+        output, plan_digest="a" * 64, evidence_digest="b" * 64, implementation_digest="c" * 64
+    )
+    with study_execution("study-1", revisions={}, resume=True):
+        assert _manifest_matches(output, "a" * 64, "b" * 64, "d" * 64)
+        assert not _manifest_matches(output, "e" * 64, "b" * 64, "d" * 64)
+        (output / "results.json").write_text('{"result": false}\n', encoding="utf-8")
+        assert not _manifest_matches(output, "a" * 64, "b" * 64, "d" * 64)
 
 
 def test_noninferiority_result_manifest_requires_the_exact_canonical_contract(

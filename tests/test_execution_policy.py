@@ -7,9 +7,11 @@ import pytest
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.execution_policy import (
     GIB,
+    inference_task_execution_plan,
     load_execution_policy,
     materialize_inference_run_resources,
     resolve_execution_class,
+    resolve_workload_execution_plan,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,84 @@ def test_efficiency_development_class_is_serial_with_common_arm_resources() -> N
     assert resolved["output_profile"] == "canonical"
     assert resolved["operations"]["inference"]["cpu_threads"] == 4
     assert resolved["operations"]["inference"]["memory_gib"] == 16.0
+
+
+@pytest.mark.parametrize(
+    ("cpu", "memory_gib", "tasks", "expected_threads", "expected_slots"),
+    [(120, 1024, 10, 12, 10), (120, 1024, 1, 120, 1), (120, 1024, 60, 4, 30),
+     (24, 32, 20, 12, 2), (2, 10, 4, 2, 1)],
+)
+def test_calibration_elasticity_uses_declared_workload_and_host_limits(
+    cpu: int, memory_gib: int, tasks: int, expected_threads: int, expected_slots: int
+) -> None:
+    execution = resolve_execution_class(
+        repo_root=REPO_ROOT,
+        class_id="bulk_canonical",
+        runtime_plan=_runtime_plan(cpu, memory_gib),
+    )
+    resolved = resolve_workload_execution_plan(
+        execution, purpose="calibration", physical_tasks=tasks
+    )
+    allocation = resolved["operations"]["inference"]
+    assert allocation["cpu_threads"] == expected_threads
+    assert allocation["workload_allocation"]["parallel_slots"] == expected_slots
+    assert allocation["workload_allocation"]["physical_tasks"] == tasks
+    assert allocation["memory_bytes"] == execution["operations"]["inference"]["memory_bytes"]
+    assert "workload_allocation" not in execution["operations"]["inference"]
+    run = {"run_id": "candidate", "params": {"random_seed": 42}}
+    materialized = materialize_inference_run_resources(
+        run, toolspec=_toolspec(maximum=None), execution_plan=resolved
+    )
+    assert materialized["params"] == run["params"]
+    assert materialized["resources"]["threads"] == expected_threads
+    assert resolved == resolve_workload_execution_plan(
+        execution, purpose="calibration", physical_tasks=tasks
+    )
+
+
+def test_elasticity_respects_concurrency_ceiling_and_leaves_comparisons_fixed() -> None:
+    runtime = _runtime_plan(32, 128)
+    runtime["capacity"]["max_concurrent_tasks"] = 2
+    execution = resolve_execution_class(
+        repo_root=REPO_ROOT, class_id="bulk_full", runtime_plan=runtime
+    )
+    resolved = resolve_workload_execution_plan(execution, purpose="selection", physical_tasks=20)
+    assert resolved["operations"]["inference"]["cpu_threads"] == 16
+    assert resolve_workload_execution_plan(
+        execution, purpose="comparison", physical_tasks=1
+    ) == execution
+
+
+def test_development_accuracy_uses_shared_cpus_and_timing_stays_isolated() -> None:
+    execution = resolve_execution_class(
+        repo_root=REPO_ROOT,
+        class_id="efficiency_development_canonical",
+        runtime_plan=_runtime_plan(120, 1024),
+    )
+    for role, exclusive, cpuset in [("timing", True, list(range(4))),
+                                   ("accuracy", False, list(range(120)))]:
+        resolved = inference_task_execution_plan(
+            execution, {"family": "spathi_efficiency_development", "seed_role": role}
+        )
+        materialized = materialize_inference_run_resources(
+            {"run_id": role, "params": {"random_seed": 42}},
+            toolspec=_toolspec(maximum=None),
+            execution_plan=resolved,
+        )
+        assert resolved["exclusive_inference"] is exclusive
+        assert materialized["resources"]["threads"] == 4
+        assert materialized["resources"]["cpuset_cpus"] == cpuset
+    assert execution["exclusive_inference"] is True
+
+
+def test_development_rejects_unspecified_measurement_role() -> None:
+    execution = resolve_execution_class(
+        repo_root=REPO_ROOT,
+        class_id="efficiency_development_canonical",
+        runtime_plan=_runtime_plan(8, 64),
+    )
+    with pytest.raises(BenchmarkConfigError, match="timing/accuracy role"):
+        inference_task_execution_plan(execution, {})
 
 
 def test_portable_class_clamps_preferences_to_small_host() -> None:
