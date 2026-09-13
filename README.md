@@ -79,8 +79,36 @@ phase remains associated with its original software and inputs. Resuming after a
 emits and records a warning and allows continuation under the same study ID; it does not rewrite
 the provenance of prior results. The experimental settings, seeds, dataset contracts,
 `repos.lock.json`, `images.lock.json` and host dependency constraints remain frozen for that ID;
-changing any of these requires a new study. Hash and artifact-integrity checks still apply. For a
+changing these normally requires a new study. The explicit pending-generation repair below is a
+narrow exception; it cannot replace already generated data. Hash and artifact-integrity checks still apply. For a
 publication run, freeze the software first or explicitly disclose any mixed-revision continuation.
+
+### Correct a failed simulator request without discarding the study
+
+Ordinary `run --id` never changes frozen scientific inputs. If a committed correction changes
+simulator parameters **before that request has published any dataset**, stop the study and apply
+an explicit, documented amendment:
+
+```bash
+.venv/bin/spathi-bench amend-inputs pilot --reason "Correct an unsupported simulator integration step"
+.venv/bin/spathi-bench run --id pilot
+```
+
+With PM2, first `pm2 stop PROCESS_NAME`, run `amend-inputs`, and then `pm2 restart PROCESS_NAME`
+if its saved command already runs this study ID. The amendment does not launch simulations or
+inference: it checks completed phase receipts and frozen inputs, rejects changes to published
+datasets, refreshes only affected simulation plans, and preserves the prior requests, manifests,
+plans and journal in `work/studies/ID/amendments/`. Its reason and before/after checksums are
+recorded in the study journal and its warning appears in the study report. If interrupted while
+applying an amendment, repeat the same `amend-inputs` command before resuming.
+
+Only parameters in existing simulator-run requests may change: seeds, run identities, replicate
+counts, scenarios, selection settings, resource policies and image locks remain protected. An
+accompanying update of the ANDREA commit in `repos.lock.json` and the catalog matrix is accepted
+only when it matches the observed clean ANDREA checkout; previous frozen locks and cached
+artifact identities are retained. This is an explicit mixed-revision correction, not permission
+to retune a benchmark after observing its results. Amendments to a published dataset or a completed
+generation phase require a new study instead.
 
 A checkout advancing does not silently upgrade the study's SPATHI container. The image contract
 still requests its exact locked source revision, even if the checkout HEAD is newer; the build
@@ -241,7 +269,7 @@ accuracy ranking or uses them for selection.
 | scMultiSim low balanced/high imbalanced rewiring | 80 genes, 240/300 cells; high case has technical noise and a small group | 1 each | 5 each |
 | scMultiSim medium balanced/imbalanced | 400 genes, 600/800 cells | — | 5 each |
 | SERGIO invariant | 100 genes, 9 bins × 40 cells | 1 | 5 |
-| BoolODE invariant clean/dropout | GSD network preset, 300 cells, 3 clusters | 1 each | 5 each |
+| BoolODE invariant clean/dropout | GSD network preset, 300 cells, 3 clusters, integration step 0.01 | 1 each | 5 each |
 | GeneSPIDER2 invariant | 80 genes, 4 perturbation replicates per gene | 1 | 5 |
 
 Dyngen/scMultiSim provide group-specific truth; the remaining simulators are invariant-network

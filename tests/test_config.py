@@ -172,6 +172,28 @@ def test_formal_efficiency_profile_excludes_conditional_safety_generation() -> N
     assert "replicate_exceptions" not in formal["planned_design"]
 
 
+@pytest.mark.parametrize("budget", ["reduced", "full"])
+def test_boolode_panels_cover_the_native_sampling_grid(budget: str) -> None:
+    profile = load_profile(REPO_ROOT, budget)
+    panels = [
+        load_json_object(REPO_ROOT / job["simulator_runs"])["runs"][0]
+        for job in profile["generation_jobs"]
+        if job["id"].startswith("boolode_")
+    ]
+    assert len(panels) == 2
+    for run in panels:
+        params = run["params"]
+        # The pinned upstream sampler selects one index in [1, tmax * 100)
+        # per trajectory. Its grid must cover exactly that time interval.
+        assert params["integration_step_size"] == 0.01
+        assert int(params["simulation_time"] / params["integration_step_size"]) == (
+            params["simulation_time"] * 100
+        )
+        assert params["sample_cells"] is False
+        assert params["num_cells"] == 300
+        assert params["n_clusters"] == 3
+
+
 def test_full_panel_freezes_supported_robustness_conditions() -> None:
     profile = load_profile(REPO_ROOT, "full")
     jobs = {job["id"]: job for job in profile["generation_jobs"]}

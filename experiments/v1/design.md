@@ -466,6 +466,11 @@ artifact in place; such a derivation would require its own fingerprinted dataset
 
 ### Invariant controls
 
+BoolODE uses its upstream default integration step of `0.01` (simulation time `8`).
+This aligns the generated time grid with its native one-cell-per-trajectory sampler.
+Both clean and dropout panels simulate 300 trajectories, cluster them into three groups,
+and export 300 cells; the integration step is not an output-downsampling parameter.
+
 SERGIO, BoolODE and GeneSPIDER2 generate groups or trajectories while keeping the true regulatory
 network invariant. They answer whether a method invents group-to-group reconfiguration. Their
 dedicated exploratory endpoint is `invariant_edge_stability`.

@@ -15,6 +15,7 @@ from . import __version__
 from .config import BenchmarkConfigError
 from .doctor import run_doctor
 from .qualification import run_qualification
+from .study_amendments import amend_study_inputs
 from .study_workflow import (
     plan_study,
     rebuild_study_reports,
@@ -94,6 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("run_id", help="study identity")
     _add_project(report)
 
+    amend = commands.add_parser("amend-inputs", help="explicitly correct pending simulation inputs in a stopped study")
+    amend.add_argument("run_id", help="study identity")
+    amend.add_argument("--reason", required=True, help="record why unproduced simulator requests must change")
+    _add_project(amend, repositories=True)
+
     plan = commands.add_parser("plan", help="inspect the phase and resource plan without execution")
     plan.add_argument("profile", nargs="?", choices=("smoke", "reduced", "full"), default="reduced")
     _add_project(plan, repositories=True)
@@ -125,6 +131,10 @@ def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
     if args.command == "doctor":
         return "Environment diagnostics", run_doctor(
             repo_root=repo_root, **repositories, python_executable=sys.executable,
+        )
+    if args.command == "amend-inputs":
+        return "Study inputs amended", amend_study_inputs(
+            **common, **repositories, run_id=args.run_id, reason=args.reason,
         )
     if args.command == "run":
         return "Study finished", run_study_workflow(

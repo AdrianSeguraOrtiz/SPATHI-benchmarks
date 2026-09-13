@@ -86,6 +86,19 @@ def test_report_dispatches_existing_study_without_repositories(
     assert calls == [{"repo_root": checkout, "work_root": checkout / "work", "run_id": "pilot"}]
 
 
+def test_amend_inputs_requires_a_reason_and_dispatches_explicit_study(checkout, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "amend_study_inputs", lambda **kwargs: calls.append(kwargs) or {})
+    assert cli.main(["amend-inputs", "pilot", "--reason", "Correct simulator integration step"]) == 0
+    assert calls == [{
+        "repo_root": checkout, "work_root": checkout / "work", "run_id": "pilot",
+        "andrea_repo": checkout.parent / "ANDREA", "spathi_repo": checkout.parent / "SPATHI",
+        "reason": "Correct simulator integration step",
+    }]
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["amend-inputs", "pilot"])
+
+
 def test_qualification_uses_same_project_and_resource_contract(
     checkout: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

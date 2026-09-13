@@ -13,6 +13,7 @@ from .performance_workflow import run_performance_workflow
 from .resource_plan import detect_host_capacity, resolve_runtime_plan
 from .scalability_workflow import run_scalability_workflow
 from .state import run_lock
+from .study_amendments import require_no_pending_amendments
 from .study_context import study_execution
 from .study_state import (
     PHASES,
@@ -77,6 +78,7 @@ def run_study_workflow(
     requested = dict(max_cores=max_cores, max_ram_gb=max_ram_gb,
                      reserve_cores=reserve_cores, reserve_ram_gb=reserve_ram_gb)
     with run_lock(root):
+        require_no_pending_amendments(root)
         resume = (root / "study.json").is_file()
         revisions = observe_revisions(repo_root, andrea_repo, spathi_repo)
         inputs = scientific_inputs(repo_root)
