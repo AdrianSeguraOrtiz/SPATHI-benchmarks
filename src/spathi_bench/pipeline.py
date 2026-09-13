@@ -51,6 +51,7 @@ from .execution_policy import (
     resolve_execution_class,
     resolve_workload_execution_plan,
 )
+from .execution_records import unique_execution_records
 from .integrate import integrate_inference_runs
 from .manifests import datasets_from_benchmark, resolve_manifest_member, unique_direct_manifest
 from .provenance import (
@@ -3561,7 +3562,7 @@ def integrate_inference(
 
     datasets = {item["dataset_id"]: item for item in state["datasets"]}
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    for inference in state["inference_runs"]:
+    for inference in unique_execution_records(state["inference_runs"]):
         dataset_id = str(inference["dataset_id"])
         regime = str(inference["regime"])
         if dataset_id not in datasets:
@@ -3577,10 +3578,6 @@ def integrate_inference(
     for (dataset_id, regime), inference_runs in sorted(grouped.items()):
         ordered_runs = sorted(inference_runs, key=lambda item: str(item["run_id"]))
         source_run_ids = [str(item["run_id"]) for item in ordered_runs]
-        if len(set(source_run_ids)) != len(source_run_ids):
-            raise BenchmarkConfigError(
-                f"Duplicate inference run IDs in {dataset_id!r}/{regime!r}: {source_run_ids}"
-            )
         report_paths: list[Path] = []
         for inference in ordered_runs:
             artifact = _artifact_from_ref(store, inference["artifact"])
@@ -4162,7 +4159,7 @@ def export_analysis(
             source_root=dataset_manifest.parent.parent.parent,
         )
     for scope, collection in (
-        ("individual", state["inference_runs"]),
+        ("individual", unique_execution_records(state["inference_runs"])),
         ("joint", state["integrated_inference_runs"]),
     ):
         for inference in collection:
@@ -4182,7 +4179,7 @@ def export_analysis(
                 source_root=report.parent,
             )
     for scope, collection in (
-        ("individual", state["evaluations"]),
+        ("individual", unique_execution_records(state["evaluations"])),
         ("joint", state["joint_evaluations"]),
     ):
         for evaluation in collection:

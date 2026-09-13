@@ -395,6 +395,12 @@ for one dataset and regime and preserve ANDREA's contracts for its GUI and `comp
 Each archive has integrity metadata. Internal calibration artifacts need not duplicate every full
 visualization export; the public comparison produces the archives used to inspect results.
 
+Comparison panels can share the same selected SPATHI execution. All batch references remain in
+the study state for attribution, but identical executions appear only once per dataset and regime
+in joint views, metric rows and analysis exports. Reuse requires matching artifact identities and
+scientific metadata; a repeated run ID with different results or parameters is an error. Different
+seeds and information regimes remain separate observations.
+
 ## Reproducibility, failures and development
 
 The seed ledger derives positive seeds from semantic coordinates using SHA-256 domain separation.

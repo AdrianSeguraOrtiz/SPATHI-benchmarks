@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -640,6 +641,98 @@ def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path)
         "summary_json": str(summary_path.resolve()),
         "summary_json_sha256": sha256_file(summary_path),
     }
+
+
+def _overlapping_selected_spathi_batches(tmp_path: Path) -> tuple[Path, Path]:
+    repo_root, run_root = _evaluated_run(tmp_path)
+    state = load_state(run_root, "smoke")
+    store = ArtifactStore(Path(state["artifact_store"]))
+    run_id = "spathi_selected_seed_1729"
+    selected = _evaluation(
+        store,
+        dataset=state["datasets"][0],
+        run_id=run_id,
+        tool_id=f"custom_{run_id}",
+        tool_origin="custom",
+        configuration_id="spathi_selected",
+        family="spathi",
+        selection_role="selected",
+        metrics=[
+            {
+                "tool_id": run_id,
+                "level": "directed",
+                "context": context,
+                "truth_context": context,
+                "status": "ok",
+                "auroc": 0.8,
+                "aupr": aupr,
+            }
+            for context, aupr in (("group:a", 0.4), ("group:b", 0.6))
+        ],
+    )
+    selected["batch_id"] = "spathi_group_only"
+    alias = deepcopy(selected)
+    alias["batch_id"] = "spathi_trajectory_group_only"
+    alias["artifact"]["cache_hit"] = True
+    alias["inference_artifact"]["cache_hit"] = True
+    state["purpose"] = "comparison"
+    state["evaluations"] = [state["evaluations"][0], selected, alias]
+    write_state(run_root, state)
+    return repo_root, run_root
+
+
+def test_summarize_counts_overlapping_spathi_batches_as_one_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, run_root = _overlapping_selected_spathi_batches(tmp_path)
+    original_evaluations = load_state(run_root, "smoke")["evaluations"]
+    attribution_checks = []
+
+    def validate_attribution(**_kwargs: Any) -> None:
+        attribution_checks.append(load_state(run_root, "smoke")["evaluations"])
+
+    monkeypatch.setattr(
+        "spathi_bench.summarize.validate_inference_attribution_contract", validate_attribution
+    )
+    metrics_path, summary_path = summarize(
+        repo_root=repo_root, profile_id="smoke", run_root=run_root
+    )
+
+    assert attribution_checks == [original_evaluations]
+    assert load_state(run_root, "smoke")["evaluations"] == original_evaluations
+    with metrics_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    spathi_rows = [row for row in rows if row["configuration_id"] == "spathi_selected"]
+    assert len(rows) == 4
+    assert len(spathi_rows) == 2
+    assert {row["context"] for row in spathi_rows} == {"group:a", "group:b"}
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["metric_rows"] == 4
+    spathi = next(
+        item for item in summary["aggregates"] if item["configuration_id"] == "spathi_selected"
+    )
+    assert spathi["n_metric_rows"] == 2
+    assert spathi["n_executions"] == 1
+    assert spathi["n_datasets"] == 1
+    assert spathi["mean_aupr"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("field", ["configuration_id", "execution_sha256", "algorithm_seed"])
+def test_summarize_rejects_conflicting_metadata_for_overlapping_execution(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    repo_root, run_root = _overlapping_selected_spathi_batches(tmp_path)
+    state = load_state(run_root, "smoke")
+    state["evaluations"][-1][field] = 999 if field == "algorithm_seed" else "different"
+    write_state(run_root, state)
+
+    with pytest.raises(BenchmarkConfigError, match="Conflicting execution records"):
+        summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+
+    assert load_state(run_root, "smoke")["status"] == "exported"
+    assert not (run_root / "reports").exists()
 
 
 def test_summarize_requires_exported_state_and_is_idempotent(tmp_path: Path) -> None:

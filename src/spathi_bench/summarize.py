@@ -19,6 +19,7 @@ from .artifacts import Artifact, ArtifactKey, ArtifactStore, sha256_file
 from .calibration_contexts import DatasetGroupContract, load_dataset_group_contract
 from .config import BenchmarkConfigError, load_json_object
 from .evaluation_identity import EvaluationSpaceIdentity, load_evaluation_space_identity
+from .execution_records import unique_execution_records
 from .pipeline import validate_inference_attribution_contract
 from .provenance import validate_run_inputs
 from .safe_io import path_below_no_symlinks
@@ -660,7 +661,7 @@ def summarize(
     identities: dict[str, EvaluationSpaceIdentity] = {}
     group_contracts: dict[str, DatasetGroupContract] = {}
     rows: list[dict[str, Any]] = []
-    for evaluation in state["evaluations"]:
+    for evaluation in unique_execution_records(state["evaluations"]):
         inference_artifact = _validate_artifact(store, evaluation["inference_artifact"])
         evaluation_artifact = _validate_artifact(store, evaluation["artifact"])
         dataset = datasets[evaluation["dataset_id"]]

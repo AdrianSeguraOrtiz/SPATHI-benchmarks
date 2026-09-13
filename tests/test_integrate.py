@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
 import os
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+import spathi_bench.pipeline as pipeline
+from spathi_bench.artifacts import sha256_file
 from spathi_bench.integrate import IntegrationError, integrate_inference_runs
 
 HEADER = ["source", "target", "score", "sign", "evidence", "context", "tool_id"]
@@ -97,6 +101,179 @@ def _mutate_report(path: Path, update: Any) -> None:
 def _body(path: Path) -> bytes:
     content = path.read_bytes()
     return content[content.index(b"\n") + 1 :]
+
+
+def test_pipeline_projects_overlapping_batches_through_evaluation_and_analysis_exports(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = tmp_path / "work/v1/comparison/test-run"
+    run_root.mkdir(parents=True)
+    store = pipeline._artifact_store(run_root)
+    dataset_spec = {"dataset_id": "dataset-a"}
+    with store.staging_directory(store.key_for("dataset", dataset_spec)) as staging:
+        dataset_dir = staging / "output/benchmark/datasets/dataset-a"
+        dataset_dir.mkdir(parents=True)
+        for name in ("dataset-manifest.json", "ground-truth-manifest.json"):
+            (dataset_dir / name).write_text("{}\n", encoding="utf-8")
+        dataset_artifact = store.publish_from_temp(staging, kind="dataset", spec=dataset_spec)
+    dataset = {
+        "dataset_id": "dataset-a",
+        "dataset_artifact": pipeline._artifact_ref(dataset_artifact, cache_hit=False),
+        "dataset_manifest": str(
+            dataset_artifact.file("output/benchmark/datasets/dataset-a/dataset-manifest.json")
+        ),
+        "ground_truth_manifest": str(
+            dataset_artifact.file("output/benchmark/datasets/dataset-a/ground-truth-manifest.json")
+        ),
+    }
+    records: list[dict[str, Any]] = []
+    source_files: dict[Path, bytes] = {}
+    for run_id, tool_id, origin in (
+        ("spathi_run", "custom_spathi_run", "custom"),
+        ("genie3_run", "genie3", "catalog"),
+    ):
+        spec = {"run_id": run_id}
+        with store.staging_directory(store.key_for("inference", spec)) as staging:
+            _write_source(
+                staging / "output",
+                source_run_id=run_id,
+                tool_run_id=run_id,
+                catalog_tool_id=tool_id,
+                origin=origin,
+            )
+            artifact = store.publish_from_temp(staging, kind="inference", spec=spec)
+        source_files.update(
+            {path: path.read_bytes() for path in artifact.path.rglob("*") if path.is_file()}
+        )
+        records.append(
+            {
+                "dataset_id": "dataset-a",
+                "regime": "group_only",
+                "batch_id": "primary",
+                "batch_kind": "spathi" if origin == "custom" else "andrea",
+                "run_id": run_id,
+                "tool_id": tool_id,
+                "tool_origin": origin,
+                "configuration_id": run_id,
+                "selection_role": "selected" if origin == "custom" else "baseline",
+                "algorithm_seed": 1,
+                "algorithm_seed_parameter": "seed",
+                "family": origin,
+                "configuration_sha256": "c" * 64,
+                "execution_sha256": "e" * 64,
+                "dataset_fingerprint": FINGERPRINT,
+                "tool_image": {"image_id": tool_id},
+                "resources": {"threads": 1},
+                "run_report": str(artifact.file("output/run_report.json")),
+                "artifact": pipeline._artifact_ref(artifact, cache_hit=False),
+            }
+        )
+    alias = copy.deepcopy(records[0])
+    alias["batch_id"] = "all-gene-comparison"
+    alias["artifact"]["cache_hit"] = True
+    records.append(alias)
+    original_records = copy.deepcopy(records)
+    state = {
+        "status": "validated",
+        "datasets": [dataset],
+        "inference_runs": records,
+        "integrated_inference_runs": [],
+        "evaluations": [],
+        "joint_evaluations": [],
+        "cache": {},
+        "benchmark_repository": {"commit": BENCHMARK_COMMIT},
+        "repositories": {"observed": {"andrea": {"commit": "a" * 40}}},
+        "host_environment": {"fingerprint": "h" * 64},
+        "execution_plan": {"operations": {"evaluation": {"cpu_threads": 1, "memory_bytes": 1024}}},
+        "runtime_plan": {"capacity": {"cpu_threads": 2, "memory_bytes": 4096}},
+    }
+    monkeypatch.setattr(pipeline, "_load_existing_state", lambda *_args: state)
+    monkeypatch.setattr(pipeline, "_validate_inference_state_contract", lambda **_kwargs: None)
+    monkeypatch.setattr(pipeline, "frozen_repository_root", lambda _root: tmp_path)
+    monkeypatch.setattr(pipeline, "_validate_andrea_repository", lambda *_args: {})
+    monkeypatch.setattr(pipeline, "_validate_state_andrea", lambda *_args: None)
+    monkeypatch.setattr(pipeline, "andrea_host_environment", lambda: {})
+    monkeypatch.setattr(pipeline, "_validate_host_environment", lambda *_args: None)
+    contract_calls: list[str] = []
+    evaluation_calls: list[str] = []
+
+    def contract_command(arguments: list[str], **_kwargs: Any) -> None:
+        contract_calls.append(arguments[0])
+        if arguments[0] == "validate-inference":
+            report = json.loads(Path(arguments[arguments.index("--run-report") + 1]).read_text())
+            assert report["tools"]["selected"] == ["genie3_run", "spathi_run"]
+            return
+        assert arguments[0] == "export-analysis"
+        archive = Path(arguments[arguments.index("--output") + 1])
+        with zipfile.ZipFile(archive, "w") as handle:
+            handle.writestr("test-report.json", "{}\n")
+        archive.with_suffix(".zip.manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "complete",
+                    "bundle": {"id": "analysis"},
+                    "archive": {
+                        "filename": "analysis.zip",
+                        "sha256": sha256_file(archive),
+                        "size": archive.stat().st_size,
+                    },
+                }
+            )
+        )
+
+    def evaluate_command(arguments: list[str], **_kwargs: Any) -> None:
+        assert arguments[0] == "evaluate-inference"
+        evaluation_calls.append(arguments[arguments.index("--run-report") + 1])
+        output = Path(arguments[arguments.index("--output-dir") + 1]) / "evaluation"
+        output.mkdir(parents=True)
+        (output / "evaluation_report.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(pipeline, "andrea_contract_command", contract_command)
+    monkeypatch.setattr(pipeline, "andrea_command", evaluate_command)
+    arguments = {
+        "repo_root": tmp_path,
+        "profile_id": "comparison",
+        "run_root": run_root,
+        "andrea_repo": tmp_path / "andrea",
+    }
+    pipeline.integrate_inference(**arguments)
+    integrated = state["integrated_inference_runs"]
+    assert len(integrated) == 1
+    assert integrated[0]["source_run_ids"] == ["genie3_run", "spathi_run"]
+    assert len(integrated[0]["source_inference_artifacts"]) == 2
+    integration_key = integrated[0]["artifact"]["key"]
+    state["status"] = "validated"
+    pipeline.integrate_inference(**arguments)
+    assert state["integrated_inference_runs"][0]["artifact"]["key"] == integration_key
+    assert state["cache"]["integration_hits"] == 1
+    assert contract_calls == ["validate-inference"]
+
+    pipeline.evaluate(**arguments)
+    assert len(evaluation_calls) == len(set(evaluation_calls)) == 3
+    assert len(state["evaluations"]) == 3
+    assert len(state["joint_evaluations"]) == 1
+    assert len({row["artifact"]["key"] for row in state["evaluations"]}) == 2
+    schedule = json.loads((run_root / "schedules/evaluation.json").read_text())
+    assert schedule["logical_tasks"] == 4
+    assert schedule["physical_tasks"] == 3
+
+    pipeline.export_analysis(**arguments)
+    assert len(state["analysis_bundles"]) == 7
+    assert contract_calls.count("export-analysis") == 7
+    exported = json.loads((run_root / "exports/manifest.json").read_text())
+    assert len({row["analysis_zip"] for row in exported["bundles"]}) == 7
+    for row in exported["bundles"]:
+        archive = run_root / "exports" / row["analysis_zip"]
+        assert zipfile.is_zipfile(archive)
+        assert sha256_file(archive) == row["archive_sha256"]
+    exports_before = pipeline._tree_file_hashes(run_root / "exports")
+    pipeline.export_analysis(**arguments)
+    assert contract_calls.count("export-analysis") == 7
+    assert pipeline._tree_file_hashes(run_root / "exports") == exports_before
+    assert records == original_records
+    assert {path: path.read_bytes() for path in source_files} == source_files
 
 
 def test_integrates_deterministically_and_preserves_source_rows(tmp_path: Path) -> None:
