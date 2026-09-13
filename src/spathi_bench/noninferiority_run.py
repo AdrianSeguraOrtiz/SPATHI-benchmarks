@@ -41,6 +41,7 @@ from .runtime import (
     andrea_command,
     andrea_host_environment,
     benchmark_host_environment,
+    command_log_path,
     docker_image_details,
     docker_runtime_environment,
 )
@@ -415,7 +416,7 @@ def _execute_task(
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=log_root / f"{task['dataset_id']}__{task['run']['run_id']}.log",
+                log_path=command_log_path(log_root, task["dataset_id"], task["run"]["run_id"]),
             )
         except BaseException:
             failure_artifact = _publish_bound_tool_failure(

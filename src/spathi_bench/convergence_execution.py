@@ -29,7 +29,7 @@ from .resource_scheduler import (
     ScheduledTask,
     execute_resource_schedule,
 )
-from .runtime import CommandExecutionError, andrea_command, stream_command
+from .runtime import CommandExecutionError, andrea_command, command_log_path, stream_command
 from .safe_io import atomic_write_json
 
 _ESTIMATOR_COUNTS = (250, 500, 750, 1000)
@@ -700,9 +700,10 @@ def _execute_group(
                 root=preflight_root,
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=run_root
-                / "logs"
-                / (f"19-convergence-{task['dataset']['dataset_id']}-{task['run']['run_id']}.log"),
+                log_path=command_log_path(
+                    run_root / "logs", "19", "convergence",
+                    task["dataset"]["dataset_id"], task["run"]["run_id"],
+                ),
             )
             for task in tasks
         }

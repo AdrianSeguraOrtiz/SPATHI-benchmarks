@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -195,6 +196,19 @@ def _andrea_python_executable() -> Path:
     # Do not Path.resolve() here: dereferencing a virtualenv's Python symlink
     # can bypass its pyvenv.cfg and execute in the base environment instead.
     return Path(os.path.abspath(resolved))
+
+
+def command_log_path(directory: Path, *parts: object) -> Path:
+    """Name an operational log within 200 bytes, without changing scientific IDs."""
+
+    components = [str(part) for part in parts]
+    raw = "-".join(components)
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-") or "command"
+    # Bound the complete filename, not each of its potentially long components.
+    # ASCII makes the byte limit portable; hash all original parts before truncation.
+    if stem != raw or len(stem) > 196:
+        stem = f"{stem[:179]}-{canonical_json_sha256(components)[:16]}"
+    return directory / f"{stem}.log"
 
 
 def stream_command(

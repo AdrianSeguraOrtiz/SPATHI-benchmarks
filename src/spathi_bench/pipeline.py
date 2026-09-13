@@ -81,6 +81,7 @@ from .runtime import (
     catalog_image_lease,
     catalog_image_leases,
     check_docker,
+    command_log_path,
     docker_image_details,
     docker_runtime_environment,
     stream_command,
@@ -712,7 +713,7 @@ def preflight(
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=run_root / "logs" / f"00-{job['id']}-catalog.log",
+                log_path=command_log_path(run_root / "logs", "00", job["id"], "catalog"),
             )
             andrea_command(
                 [
@@ -733,7 +734,7 @@ def preflight(
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=run_root / "logs" / f"00-{job['id']}-plan.log",
+                log_path=command_log_path(run_root / "logs", "00", job["id"], "plan"),
             )
         report = {
             "schema_version": "1.0",
@@ -1251,7 +1252,7 @@ def generate_data(
                         ],
                         repo_root=repo_root,
                         andrea_repo=andrea_repo,
-                        log_path=run_root / "logs" / f"10-{job['id']}.log",
+                        log_path=command_log_path(run_root / "logs", "10", job["id"]),
                     )
                     _validate_generation_images(
                         state=state,
@@ -2092,11 +2093,9 @@ def _execute_inference_task(
                 preflight_command,
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=run_root
-                / "logs"
-                / (
-                    f"19-{_log_token(task['dataset']['dataset_id'])}-"
-                    f"{_log_token(task['batch']['id'])}-{_log_token(run_id)}.log"
+                log_path=command_log_path(
+                    run_root / "logs", "19", task["dataset"]["dataset_id"],
+                    task["batch"]["id"], run_id,
                 ),
             )
             _validate_single_run_preflight(
@@ -2110,11 +2109,9 @@ def _execute_inference_task(
                     command,
                     repo_root=repo_root,
                     andrea_repo=andrea_repo,
-                    log_path=run_root
-                    / "logs"
-                    / (
-                        f"20-{_log_token(task['dataset']['dataset_id'])}-"
-                        f"{_log_token(task['batch']['id'])}-{_log_token(run_id)}.log"
+                    log_path=command_log_path(
+                        run_root / "logs", "20", task["dataset"]["dataset_id"],
+                        task["batch"]["id"], run_id,
                     ),
                 )
             except CommandExecutionError as exc:
@@ -3448,9 +3445,7 @@ def _execute_integration_task(
                 ],
                 repo_root=repo_root,
                 andrea_repo=andrea_repo,
-                log_path=run_root
-                / "logs"
-                / f"35-{_log_token(dataset_id)}-{_log_token(regime)}.log",
+                log_path=command_log_path(run_root / "logs", "35", dataset_id, regime),
             )
 
         integrate_inference_runs(
@@ -3644,11 +3639,8 @@ def _execute_evaluation_task(
             ],
             repo_root=repo_root,
             andrea_repo=andrea_repo,
-            log_path=run_root
-            / "logs"
-            / (
-                f"50-{_log_token(dataset['dataset_id'])}-{_log_token(task['scope'])}-"
-                f"{_log_token(inference['run_id'])}.log"
+            log_path=command_log_path(
+                run_root / "logs", "50", dataset["dataset_id"], task["scope"], inference["run_id"],
             ),
         )
         unique_direct_manifest(output_root, "evaluation_report.json")
@@ -3891,11 +3883,9 @@ def _execute_analysis_export_task(
             arguments,
             repo_root=repo_root,
             andrea_repo=andrea_repo,
-            log_path=run_root
-            / "logs"
-            / (
-                f"60-{_log_token(task['producer_command'])}-{_log_token(task['dataset_id'])}-"
-                f"{_log_token(task['scope'])}-{_log_token(task.get('run_id') or 'dataset')}.log"
+            log_path=command_log_path(
+                run_root / "logs", "60", task["producer_command"], task["dataset_id"],
+                task["scope"], task.get("run_id") or "dataset",
             ),
         )
         artifact = store.publish_from_temp(
