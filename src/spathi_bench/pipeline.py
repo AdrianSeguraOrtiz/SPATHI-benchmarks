@@ -1109,6 +1109,46 @@ def _dataset_job_attribution(job: dict[str, Any], replicate_index: int) -> dict[
     }
 
 
+def _publish_generation_failure_evidence(
+    *,
+    store: ArtifactStore,
+    staging: Path,
+    generation_key: ArtifactKey,
+    generation_spec: dict[str, Any],
+    job_id: str,
+    log_path: Path,
+    error: Exception,
+) -> Artifact:
+    """Retain the failed attempt atomically, without admitting it to the dataset cache."""
+
+    evidence_spec = {
+        "schema_version": "1.0",
+        "evidence_contract": "andrea_generation_failure",
+        "source_dataset": {
+            "key": generation_key.value,
+            "spec": generation_spec,
+        },
+        "generation_job": job_id,
+        "attempt_id": staging.name,
+    }
+    if log_path.is_file():
+        _copy_failure_file(log_path, staging / "command.log")
+    atomic_write_json(
+        staging / "failure.json",
+        {
+            **evidence_spec,
+            "generation_status": "failed",
+            "failed_at": _utc_now(),
+            "error_type": type(error).__name__,
+            "message": str(error),
+            "original_command_log": str(log_path),
+        },
+        "generation failure evidence",
+        boundary=staging,
+    )
+    return store.publish_from_temp(staging, kind="dataset-failure", spec=evidence_spec)
+
+
 def generate_data(
     *,
     repo_root: Path,
@@ -1231,35 +1271,50 @@ def generate_data(
                 simulator_runs=simulator_runs,
             )
             with store.staging_directory(key) as staging:
-                with catalog_image_leases(requirements):
-                    output_root = staging / "output"
-                    andrea_command(
-                        [
-                            "generate-data",
-                            "execute",
-                            "--scenario",
-                            str(scenario),
-                            "--simulator-runs",
-                            str(simulator_runs),
-                            "--output-dir",
-                            str(output_root),
-                            "--max-parallel-tasks",
-                            str(resources["max_parallel_tasks"]),
-                            "--max-cores",
-                            str(resources["cpu_threads"]),
-                            "--max-ram-gb",
-                            str(resources["memory_gib"]),
-                        ],
-                        repo_root=repo_root,
-                        andrea_repo=andrea_repo,
-                        log_path=command_log_path(run_root / "logs", "10", job["id"]),
+                log_path = command_log_path(run_root / "logs", "10", job["id"])
+                try:
+                    with catalog_image_leases(requirements):
+                        output_root = staging / "output"
+                        andrea_command(
+                            [
+                                "generate-data",
+                                "execute",
+                                "--scenario",
+                                str(scenario),
+                                "--simulator-runs",
+                                str(simulator_runs),
+                                "--output-dir",
+                                str(output_root),
+                                "--max-parallel-tasks",
+                                str(resources["max_parallel_tasks"]),
+                                "--max-cores",
+                                str(resources["cpu_threads"]),
+                                "--max-ram-gb",
+                                str(resources["memory_gib"]),
+                            ],
+                            repo_root=repo_root,
+                            andrea_repo=andrea_repo,
+                            log_path=log_path,
+                        )
+                        _validate_generation_images(
+                            state=state,
+                            frozen_root=frozen_root,
+                            simulator_runs=simulator_runs,
+                        )
+                    unique_direct_manifest(output_root, "benchmark-manifest.json")
+                except Exception as exc:
+                    evidence = _publish_generation_failure_evidence(
+                        store=store,
+                        staging=staging,
+                        generation_key=key,
+                        generation_spec=spec,
+                        job_id=job["id"],
+                        log_path=log_path,
+                        error=exc,
                     )
-                    _validate_generation_images(
-                        state=state,
-                        frozen_root=frozen_root,
-                        simulator_runs=simulator_runs,
-                    )
-                unique_direct_manifest(output_root, "benchmark-manifest.json")
+                    raise BenchmarkConfigError(
+                        f"{exc}; durable generation diagnostics: {evidence.file('failure.json')}"
+                    ) from exc
                 artifact = store.publish_from_temp(staging, kind="dataset", spec=spec)
         else:
             dataset_hits += 1
