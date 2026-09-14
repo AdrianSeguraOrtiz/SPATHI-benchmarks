@@ -262,6 +262,7 @@ def _calibration_fixture(
             "stage_id": stage_id,
             "fidelity": fidelity,
             "calibration_budget": "reduced",
+            "benchmark_commit": ("1" if not ranking_paths else "3") * 40,
             "profile_id": f"calibration-reduced-{stage_id}-{fidelity}",
             "search_space_sha256": search_sha256,
             "spathi_commit": spathi_commit,
@@ -376,6 +377,7 @@ def _calibration_fixture(
         "status": "publishing",
         "calibration_budget": "reduced",
         "identity": {
+            "benchmark_commit": "1" * 40,
             "spathi_commit": spathi_commit,
             "fingerprint": "5" * 64,
         },
@@ -803,6 +805,14 @@ def test_calibration_report_preserves_frozen_ranking_selection_and_null_memory(
     assert captured["immutable"] is True
     payload = captured["payload"]
     assert payload["workflow"]["status"] == "complete"
+    assert payload["workflow"]["identity"]["benchmark_commit"] == "1" * 40
+    # Reporting must accept, preserve and link the recorded revisions of a
+    # resumed chain rather than requiring equality with the initial identity.
+    rankings = [
+        json.loads(path.read_text()) for path in captured["input_paths"]
+        if path.name == "ranking.json"
+    ]
+    assert {ranking["benchmark_commit"] for ranking in rankings} == {"1" * 40, "3" * 40}
     assert payload["selected"] == selected
     assert [stage["id"] for stage in payload["stages"]] == [
         f"{stage_id}__{fidelity}"

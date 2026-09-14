@@ -83,6 +83,12 @@ changing these normally requires a new study. The explicit pending-generation re
 narrow exception; it cannot replace already generated data. Hash and artifact-integrity checks still apply. For a
 publication run, freeze the software first or explicitly disclose any mixed-revision continuation.
 
+Calibration rankings retain each stage's recorded benchmark revision. A resumed chain may span
+revisions and emits a warning, including when its frozen selection is validated later outside
+a live resume. Equal benchmark commit IDs are not a substitute for scientific validation: parent
+hashes, search design, algorithm seeds, SPATHI build identity, scores and candidate transitions
+must still reconcile. Existing ranking files are never relabelled with the current commit.
+
 ### Correct a failed simulator request without discarding the study
 
 Ordinary `run --id` never changes frozen scientific inputs. If a committed correction changes

@@ -9,6 +9,7 @@ algorithmic seeds equal weight inside each dataset and datasets equal weight ove
 from __future__ import annotations
 
 import copy
+import logging
 import math
 import re
 from collections import defaultdict
@@ -35,6 +36,8 @@ from .config import (
 )
 from .seeds import SeedPlanError, derive_plan_seed, load_seed_plan
 from .tool_contract import spathi_runtime_resources
+
+logger = logging.getLogger(__name__)
 
 SEARCH_SPACE_PATH = Path("experiments/v1/spathi/search-space.json")
 SEARCH_SPACE_SCHEMA_PATH = Path("schemas/spathi-search-space.schema.json")
@@ -1668,8 +1671,6 @@ def validate_ranking_chain(
         or parent_ranking.get("calibration_budget") != calibration_budget
     ):
         raise CalibrationError("Calibration ranking chain mixes calibration budgets")
-    if parent_ranking.get("benchmark_commit") != ranking.get("benchmark_commit"):
-        raise CalibrationError("Calibration ranking chain mixes benchmark commits")
     locked_identity = locked_spathi_identity(root)
     if any(parent_ranking.get(field) != value for field, value in locked_identity.items()):
         raise CalibrationError("Calibration ranking chain mixes SPATHI builds")
@@ -1705,6 +1706,18 @@ def validate_ranking_chain(
             stage_id,
             selected_parents,
             current_candidates,
+        )
+    # Commits identify the recorded provenance, not scientific compatibility.
+    # This must also work for frozen evidence outside a live study resume. The
+    # hashes, locked build, scores, seeds and canonical transitions above remain
+    # authoritative; never rewrite a predecessor to claim the current revision.
+    if parent_ranking["benchmark_commit"] != ranking["benchmark_commit"]:
+        logger.warning(
+            "Calibration ranking chain spans benchmark revisions %s → %s "
+            "(%s.%s → %s.%s). Scientific evidence verified; original revisions "
+            "are preserved. Review mixed-revision provenance before publication.",
+            parent_ranking["benchmark_commit"], ranking["benchmark_commit"],
+            expected_parent_stage, expected_parent_fidelity, stage_id, fidelity,
         )
     return scores
 

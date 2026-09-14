@@ -11,19 +11,25 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
+from spathi_bench.benchmark_materialization import load_frozen_selected_policy
 from spathi_bench.calibration import (
     build_calibration_ranking,
     build_frozen_selected_config,
     candidate_from_dict,
     expand_stage_candidates,
+    load_parent_ranking,
     load_search_space,
     locked_spathi_identity,
     stage_profile_id,
     validate_ranking_chain,
 )
 from spathi_bench.calibration_design import calibration_phase
-from spathi_bench.calibration_materialization import freeze_calibration_selection
+from spathi_bench.calibration_materialization import (
+    freeze_calibration_selection,
+    materialize_calibration_stage,
+)
 from spathi_bench.config import BenchmarkConfigError, validate_calibration_contracts
+from spathi_bench.study_context import study_execution
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,7 +99,7 @@ def _calibration_panel(rows: list[dict[str, Any]], role: str) -> dict[str, Any]:
     }
 
 
-def _validation_ranking(repo: Path) -> dict[str, Any]:
+def _validation_ranking(repo: Path, *, resumed: bool = False) -> dict[str, Any]:
     search = load_search_space(REPO_ROOT)
     spathi_identity = locked_spathi_identity(REPO_ROOT)
     search_hash = sha256_file(REPO_ROOT / "experiments/v1/spathi/search-space.json")
@@ -143,7 +149,7 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
             calibration_budget="full",
             profile_id=stage_profile_id(stage_id, "full", fidelity),
             parent_ranking=parent_link,
-            benchmark_commit="1" * 40,
+            benchmark_commit=("2" if resumed and index > 1 else "1") * 40,
             search_space_sha256=search_hash,
             calibration_manifest_sha256=f"{index:x}" * 64,
             benchmark_summary_sha256=f"{index + 4:x}" * 64,
@@ -184,7 +190,7 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
         calibration_budget="full",
         profile_id=stage_profile_id("validation", "full", "final"),
         parent_ranking=parent_link,
-        benchmark_commit="1" * 40,
+        benchmark_commit=("2" if resumed else "1") * 40,
         search_space_sha256=search_hash,
         calibration_manifest_sha256="0" * 64,
         benchmark_summary_sha256="9" * 64,
@@ -192,7 +198,9 @@ def _validation_ranking(repo: Path) -> dict[str, Any]:
     )
 
 
-def _repository_with_ranking(tmp_path: Path) -> tuple[Path, Path, Path]:
+def _repository_with_ranking(
+    tmp_path: Path, *, resumed: bool = False,
+) -> tuple[Path, Path, Path]:
     repo = tmp_path / "repo"
     for relative in (
         "repos.lock.json",
@@ -211,7 +219,7 @@ def _repository_with_ranking(tmp_path: Path) -> tuple[Path, Path, Path]:
     ranking_path = repo / "experiments/v1/spathi/evidence/validation-ranking.json"
     ranking_path.parent.mkdir(parents=True)
     ranking_path.write_text(
-        json.dumps(_validation_ranking(repo), indent=2, sort_keys=True) + "\n",
+        json.dumps(_validation_ranking(repo, resumed=resumed), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     selected_path = repo / "experiments/v1/spathi/selected-config.json"
@@ -301,7 +309,9 @@ def test_ranking_chain_rejects_finalists_outside_parent_shortlist(tmp_path: Path
         )
 
 
-def test_ranking_chain_rejects_mixed_benchmark_commits(tmp_path: Path) -> None:
+def test_ranking_chain_accepts_recorded_benchmark_revisions_with_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
     repo, ranking_path, _selected_path = _repository_with_ranking(tmp_path)
     ranking = json.loads(ranking_path.read_text(encoding="utf-8"))
     convergence_path = repo / ranking["parent_ranking"]["path"]
@@ -310,15 +320,94 @@ def test_ranking_chain_rejects_mixed_benchmark_commits(tmp_path: Path) -> None:
     convergence_path.write_text(json.dumps(convergence), encoding="utf-8")
     ranking["parent_ranking"]["sha256"] = sha256_file(convergence_path)
 
-    with pytest.raises(BenchmarkConfigError, match="mixes benchmark commits"):
-        validate_ranking_chain(
-            repo,
-            load_search_space(REPO_ROOT),
-            ranking,
-            expected_search_space_sha256=sha256_file(
-                REPO_ROOT / "experiments/v1/spathi/search-space.json"
-            ),
-        )
+    before = convergence_path.read_bytes()
+    scores = validate_ranking_chain(
+        repo,
+        load_search_space(REPO_ROOT),
+        ranking,
+        expected_search_space_sha256=sha256_file(
+            REPO_ROOT / "experiments/v1/spathi/search-space.json"
+        ),
+    )
+    assert len(scores) == 2
+    assert "spans benchmark revisions" in caplog.text
+    assert "1" * 40 in caplog.text and "2" * 40 in caplog.text
+    assert convergence_path.read_bytes() == before
+
+
+def test_resumed_full_chain_can_advance_freeze_and_load_portable_selection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    repo, ranking_path, _ = _repository_with_ranking(tmp_path, resumed=True)
+    evidence = ranking_path.parent
+    original_bytes = {path.name: path.read_bytes() for path in evidence.glob("*.json")}
+    # This is the server's failing transition: old geometry scout, new confirmation,
+    # then load the confirmation shortlist to materialize the estimator scout.
+    parents, link = load_parent_ranking(
+        repo, load_search_space(repo), "estimator", "full", "scout",
+        evidence / "geometry-confirmation-ranking.json",
+    )
+    assert parents and link is not None
+    assert expand_stage_candidates(load_search_space(repo), "estimator", parents=parents)
+    for directory in ("schemas", "experiments/v1/profiles"):
+        shutil.copytree(REPO_ROOT / directory, repo / directory, dirs_exist_ok=True)
+    plan = dict(
+        repo_root=repo, stage_id="estimator", calibration_budget="full", fidelity="scout",
+        parent_ranking_path=evidence / "geometry-confirmation-ranking.json",
+        output_dir=repo / "work/estimator/requests",
+        profile_output=repo / "work/estimator/calibration-full-estimator-scout.json",
+    )
+    with study_execution("full-1", revisions={"benchmark": {"commit": "3" * 40}}, resume=True):
+        materialized = materialize_calibration_stage(**plan)
+    request_bytes = {path.name: path.read_bytes() for path in materialized[0].glob("*.json")}
+    assert materialize_calibration_stage(**plan) == materialized
+    assert {path.name: path.read_bytes() for path in materialized[0].glob("*.json")} == request_bytes
+    selected_path = repo / "work/candidate/selected-config.json"
+    selected_path.parent.mkdir(parents=True)
+    selection = _freeze(repo, ranking_path, selected_path)
+    policy, seeds = load_frozen_selected_policy(repo, selected_path, budget="full")
+    assert policy == selection["selected_policy"]
+    assert len(seeds) == 3
+    # Future phases read copied evidence without any live resume context or journal.
+    frozen = tmp_path / "frozen-repository"
+    shutil.copytree(repo, frozen)
+    assert load_frozen_selected_policy(
+        frozen, frozen / selected_path.relative_to(repo), budget="full",
+    ) == (policy, seeds)
+    assert {path.name: path.read_bytes() for path in evidence.glob("*.json")} == original_bytes
+    assert "geometry.scout → geometry.confirmation" in caplog.text
+    assert "Scientific evidence verified" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["parent_hash", "search_hash", "seed", "score", "missing_row", "shortlist", "build"],
+)
+def test_resumed_chain_still_rejects_changed_scientific_evidence(
+    tmp_path: Path, mutation: str,
+) -> None:
+    repo, ranking_path, _ = _repository_with_ranking(tmp_path, resumed=True)
+    ranking = json.loads(ranking_path.read_text())
+    if mutation == "parent_hash":
+        ranking["parent_ranking"]["sha256"] = "0" * 64
+    elif mutation == "search_hash":
+        ranking["search_space_sha256"] = "0" * 64
+    elif mutation == "seed":
+        ranking["calibration_rows"][0]["algorithm_seed"] += 1
+    elif mutation == "score":
+        ranking["ranking"][0]["hierarchical_aupr"] = 0.1
+    elif mutation == "missing_row":
+        ranking["calibration_rows"].pop()
+    elif mutation == "shortlist":
+        ranking["selected_candidates"] = [ranking["ranking"][1]["candidate"]]
+    else:
+        image_path = repo / "images.lock.json"
+        image = json.loads(image_path.read_text())
+        image["images"]["spathi"]["build_inputs"]["containers/spathi/run_tool.py"] = "0" * 64
+        image_path.write_text(json.dumps(image))
+    ranking_path.write_text(json.dumps(ranking))
+    with pytest.raises(BenchmarkConfigError):
+        build_frozen_selected_config(repo, ranking_path)
 
 
 def test_ranking_chain_rejects_mixed_calibration_budgets(tmp_path: Path) -> None:
