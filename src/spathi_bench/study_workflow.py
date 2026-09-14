@@ -8,7 +8,6 @@ from typing import Any
 
 from .config import BenchmarkConfigError, load_json_object
 from .dimensional_transfer_workflow import run_dimensional_transfer_workflow
-from .efficiency_workflow import run_efficiency_workflow
 from .performance_workflow import run_performance_workflow
 from .resource_plan import detect_host_capacity, resolve_runtime_plan
 from .scalability_workflow import run_scalability_workflow
@@ -34,7 +33,6 @@ logger = logging.getLogger(__name__)
 PURPOSES = {
     "smoke": "Verify Docker simulation, inference, evaluation and ANDREA exports on tiny data.",
     "calibration": "Select a bounded SPATHI configuration on development and validation data only.",
-    "efficiency": "Select acceleration settings, then test accuracy loss and runtime on independent data.",
     "dimensional_transfer": "Audit the frozen policy when gene and regulator dimensionality increases.",
     "comparison": "Compare frozen SPATHI with external tools on held-out simulated datasets.",
     "scalability": "Measure the feasible size boundary of the frozen SPATHI policy.",
@@ -106,7 +104,7 @@ def run_study_workflow(
         common = dict(repo_root=repo_root, andrea_repo=andrea_repo, spathi_repo=spathi_repo,
                       work_root=root, **state["resources"])
         functions = {
-            "calibration": run_calibration_workflow, "efficiency": run_efficiency_workflow,
+            "calibration": run_calibration_workflow,
             "dimensional_transfer": run_dimensional_transfer_workflow,
             "comparison": run_comparison_workflow, "scalability": run_scalability_workflow,
             "performance": run_performance_workflow, "smoke": _smoke,
@@ -145,9 +143,7 @@ def run_study_workflow(
                         arguments.update(calibration_budget=state["profile"], run_id=run_id)
                     else:
                         arguments["profile"] = state["profile"]
-                        key = "calibration_run_id" if name == "efficiency" else "efficiency_run_id"
-                        upstream = "calibration" if name == "efficiency" else "efficiency"
-                        arguments[key] = state["phases"][upstream]["flow_id"]
+                        arguments["calibration_run_id"] = state["phases"]["calibration"]["flow_id"]
                     result = functions[name](**arguments)
                     if result.get("status") != "complete" or not result.get("flow_id"):
                         raise BenchmarkConfigError(f"{name} did not return a completed workflow")

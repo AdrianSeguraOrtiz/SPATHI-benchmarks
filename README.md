@@ -1,6 +1,6 @@
 # SPATHI benchmarks
 
-Reproducible synthetic experiments for calibrating SPATHI, justifying computational shortcuts,
+Reproducible synthetic experiments for calibrating SPATHI,
 comparing the frozen method with ANDREA catalog tools, and measuring scale and runtime.
 SPATHI implements the method; ANDREA provides simulation, inference and evaluation contracts;
 this repository defines the experiment and owns its orchestration and reports.
@@ -51,7 +51,7 @@ the intended software environment. Keep scientific inputs committed before start
 `qualify` verifies local scientific contracts using real SPATHI output and ANDREA evaluation on
 small known inputs. It covers diagnostic interpretation and independent metric agreement.
 `smoke` exercises Docker simulation, both inference adapters, integration, evaluation and exports.
-Neither has statistical power, and the simple smoke is not a physical execution of all six
+Neither has statistical power, and the simple smoke is not a physical execution of all five
 scientific phases. New reduced/full studies run the local contract qualification before proceeding.
 
 One ID identifies the entire study, including all phases. If omitted, a new ID is generated and
@@ -73,7 +73,7 @@ or selecting another configuration. Published phase bundles are immutable: recov
 the same renderer; this command does not overwrite earlier plots with a different rendering revision.
 Add `--json` to `status` or `plan` for structured details.
 
-The study journal carries upstream calibration and efficiency identities internally. There is no
+The study journal carries the upstream calibration identity internally. There is no
 need to find a calibration ID, delete other studies, or remember which phase failed. A completed
 phase remains associated with its original software and inputs. Resuming after a commit change
 emits and records a warning and allows continuation under the same study ID; it does not rewrite
@@ -158,19 +158,18 @@ The saved command already contains the complete workflow and its ID. Do not keep
 process pointing at a phase-specific command. A changed dependency constraint still requires the
 installation command above to be rerun.
 
-## The six scientific phases
+## The five scientific phases
 
 | Phase | Purpose and frozen output | `reduced` | `full` |
 | --- | --- | --- | --- |
 | 1. Calibration | Select an exact conditional SPATHI policy by directed AUPR; write `selected-config.json` | 8 ordinary development + 1 high-TF development + 8 independent validation datasets; 431 physical fits / 527 logical results | 24 + 3 + 24 datasets; 1,762 physical fits / 2,482 logical results |
-| 2. Efficiency | Develop target-eligibility/adaptive-tree candidates, independently compare one nominee with exact SPATHI, freeze `production-config.json` | 5 development datasets, 75 fits; 5 validation datasets × 2 algorithm seeds; descriptive estimates, exact policy retained | 15 development datasets, 285 fits; 25 validation datasets × 5 seeds; non-inferiority gates and conditional 18-dataset safety veto |
-| 3. Dimensional transfer | Inspect frozen-policy accuracy across dimensions and routing controls, without tuning | 4 moderate/control datasets, 1 seed; no scale contrasts | 9 datasets across 7 conditions, 1 seed; 3 descriptive one-axis contrasts |
-| 4. Held-out comparison | Compare frozen SPATHI with catalog defaults on independent test data | 10 datasets; descriptive paired scores and ranks | 60 datasets: 40 dynamic + 20 invariant controls; predeclared confirmatory and exploratory families |
-| 5. Scalability | Measure SPATHI feasibility across a public synthetic stress grid | 2 shapes; 64-target scout before possible all-target fit | 7 shapes; 128-target scout before possible all-target fit |
-| 6. Performance | Measure isolated software cost and parallel scaling | 4 methods × 1 dataset × 1/8 threads; 8 measured runs + 8 warm-ups | 6 methods × 2 datasets × 1/2/4/8 threads × 3 repetitions; 144 measured runs + 48 warm-ups |
+| 2. Dimensional transfer | Inspect frozen-policy accuracy across dimensions and routing controls, without tuning | 4 moderate/control datasets, 1 seed; no scale contrasts | 9 datasets across 7 conditions, 1 seed; 3 descriptive one-axis contrasts |
+| 3. Held-out comparison | Compare frozen SPATHI with catalog defaults on independent test data | 10 datasets; descriptive paired scores and ranks | 60 datasets: 40 dynamic + 20 invariant controls; predeclared confirmatory and exploratory families |
+| 4. Scalability | Measure SPATHI feasibility across a public synthetic stress grid | 2 shapes; 64-target scout before possible all-target fit | 7 shapes; 128-target scout before possible all-target fit |
+| 5. Performance | Measure isolated software cost and parallel scaling | 4 methods × 1 dataset × 1/8 threads; 8 measured runs + 8 warm-ups | 6 methods × 2 datasets × 1/2/4/8 threads × 3 repetitions; 144 measured runs + 48 warm-ups |
 
 `reduced` is for development and inspection: it has no inferential winner claim, bootstrap interval
-or non-inferiority adoption decision. `full` is the publication budget, with inference only where
+or hypothesis-test decision. `full` is the publication budget, with inference only where
 the committed design permits it. Reduced and full use independent generation and algorithm seeds;
 one is not a prefix of the other's data. Do not combine their results into a single analysis.
 
@@ -211,41 +210,10 @@ stability, declared simplicity and canonical configuration ID. Runtime does not 
 parameters. Reduced uses one scout and one confirmation seed and two convergence/validation seeds;
 full uses one scout, two confirmation seeds and five convergence/validation seeds.
 
-Calibration keeps `target_eligibility=all`, `adaptive_trees=false` and `bandwidth=auto`.
+Calibration uses every requested target and fixed-size forests, with `bandwidth=auto`.
 Annotation-confidence weights and application-specific target lists are excluded. A single-group
 dataset follows the frozen cell-distance/Euclidean/no-group-correction branch; all other learned
 parameters are shared. No per-test-dataset tuning is allowed.
-
-### Efficiency: which shortcuts are justified?
-
-The [development grid](experiments/v1/spathi/efficiency-development.json) contains exact SPATHI
-and six candidates:
-
-| Component | Three settings |
-| --- | --- |
-| Automatic eligibility: detected cells / detected fraction / weighted detected fraction / weighted ESS | `10 / .005 / .005 / 5`; `20 / .01 / .01 / 10`; `50 / .02 / .02 / 20` |
-| Adaptive trees: minimum / step / tolerance / patience | `200 / 25 / .005 / 3`; `100 / 50 / .01 / 2`; `100 / 100 / .02 / 2` |
-
-Development uses independent instances of the four dyngen conditions and the 80-gene/300-cell
-dynamic scMultiSim condition. It first nominates one setting per component, then confirms exact
-SPATHI, both nominees and their combination. Only the designated timing seed supplies cost:
-those runs have identical quotas and run alone in a deterministic counterbalanced order.
-Held-back accuracy seeds run concurrently. Their incidental timings are excluded from selection.
-The subsequent formal validation retains isolated runs for all its declared paired resource
-observations. Runtime evidence therefore keeps its original estimand and resource context.
-
-Validation uses new datasets from the same five strata. Full requires AUPR non-inferiority
-(absolute margin 0.002), complete execution, runtime benefit, and relevant target/truth coverage
-(0.50/0.90 lower-bound thresholds plus observed safeguards). Omitted targets remain in the full
-evaluation universe as minimum-score predictions. If development nominates nothing, validation is
-an exact-only execution audit. Reduced reports estimates and retains exact SPATHI.
-
-A provisional full candidate must also survive 18 new scMultiSim safety datasets: 3 replicates of
-each 3,000-gene/100-TF/300-cell anchor, 100-gene/10-TF/500-cell single group,
-100-gene/10-TF/300-cell 10/40/250 imbalance, 100-gene/10-TF/10,000-cell endpoint,
-3,000-gene/1,500-TF/300-cell endpoint and 15,000-gene/100-TF/300-cell endpoint.
-The [formal contract](experiments/v1/spathi/efficiency-study.json) defines all gates.
-The safety step is a descriptive veto; it never searches for another candidate.
 
 ### Dimensional transfer: does the frozen policy transfer?
 
@@ -254,8 +222,8 @@ All cases use truth-bearing scMultiSim. Reduced includes `(genes, TFs, cells)` e
 controls. Full adds `(15000, 100, 300)`, `(3000, 1500, 300)` and `(100, 10, 10000)`; its
 3,000-gene anchor has three replicates, with one at each other condition.
 
-The production policy remains frozen. If it differs from the calibrated exact policy, declared
-anchors also receive exact-policy diagnostics. Full reports separate gene-, TF- and cell-axis
+The calibrated policy remains frozen and feeds every downstream phase directly. Full reports
+separate gene-, TF- and cell-axis
 contrasts; the TF contrast also changes regulatory topology and is not a causal isolation of TF
 count. Reduced has no scale contrast. Neither profile contributes these data to the external
 accuracy ranking or uses them for selection.
@@ -364,7 +332,7 @@ Individual HTML reports embed Plotly and their data; they need no server or inte
 The entry page and artifact links require the corresponding local directory structure to remain
 available. Each report shows its dataset base, profile, exact configurations, claim scope and
 provenance. The calibration report exposes candidate parameter values, convergence prefixes and
-selection. Efficiency distinguishes descriptive estimates from formal gates. Transfer separates
+selection. Transfer separates
 routing controls from scale contrasts. Comparison labels each information regime. Scalability and
 performance show measured resource endpoints and failures, with no biological-accuracy claim.
 

@@ -13,7 +13,7 @@
     "expression_preparation",
     "resource_boundary",
     "profile",
-    "production_config",
+    "selected_config",
     "execution_environment",
     "summary",
     "datasets",
@@ -29,18 +29,15 @@
     "expression_preparation": {"$ref": "#/$defs/expression_preparation"},
     "resource_boundary": {"$ref": "#/$defs/resource_boundary"},
     "profile": {"$ref": "#/$defs/artifact"},
-    "production_config": {
+    "selected_config": {
       "allOf": [
         {"$ref": "#/$defs/artifact"},
         {
           "type": "object",
-          "required": ["policy_id", "policy_sha256", "decision"],
+          "required": ["policy_id", "policy_sha256"],
           "properties": {
             "policy_id": {"$ref": "#/$defs/id"},
-            "policy_sha256": {"$ref": "#/$defs/sha256"},
-            "decision": {
-              "enum": ["descriptive_only", "reference_retained", "candidate_adopted"]
-            }
+            "policy_sha256": {"$ref": "#/$defs/sha256"}
           }
         }
       ]
@@ -230,10 +227,7 @@
         "path": {"$ref": "#/$defs/relative_path"},
         "sha256": {"$ref": "#/$defs/sha256"},
         "policy_id": {"$ref": "#/$defs/id"},
-        "policy_sha256": {"$ref": "#/$defs/sha256"},
-        "decision": {
-          "enum": ["descriptive_only", "reference_retained", "candidate_adopted"]
-        }
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
     "resource_boundary": {
@@ -353,8 +347,6 @@
         "inference_artifact_bytes",
         "spathi_output_bytes",
         "targets_requested",
-        "targets_eligible",
-        "targets_ineligible",
         "models_requested",
         "models_completed",
         "models_trained",
@@ -373,8 +365,6 @@
         "inference_artifact_bytes": {"type": "integer", "minimum": 1},
         "spathi_output_bytes": {"type": "integer", "minimum": 1},
         "targets_requested": {"type": "integer", "minimum": 1},
-        "targets_eligible": {"type": "integer", "minimum": 0},
-        "targets_ineligible": {"type": "integer", "minimum": 0},
         "models_requested": {"type": "integer", "minimum": 0},
         "models_completed": {"type": "integer", "minimum": 0},
         "models_trained": {"type": "integer", "minimum": 0},

@@ -41,7 +41,7 @@
     "parameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["weight_mode", "distance_space", "n_components", "distance_standardization", "pca_svd_solver", "distance_metric", "kernel", "bandwidth", "bandwidth_scale", "group_size_correction", "tree_method", "n_estimators", "max_features", "min_samples_leaf", "max_depth", "bootstrap", "target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess", "adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"],
+      "required": ["weight_mode", "distance_space", "n_components", "distance_standardization", "pca_svd_solver", "distance_metric", "kernel", "bandwidth", "bandwidth_scale", "group_size_correction", "tree_method", "n_estimators", "max_features", "min_samples_leaf", "max_depth", "bootstrap"],
       "properties": {
         "weight_mode": {"enum": ["cell-distance", "cell-distance-group-anchored", "group-distance"]},
         "distance_space": {"enum": ["pca", "expression"]},
@@ -58,17 +58,7 @@
         "max_features": {"anyOf": [{"enum": ["sqrt", "log2"]}, {"type": "integer", "minimum": 1}, {"type": "number", "exclusiveMinimum": 0, "maximum": 1}]},
         "min_samples_leaf": {"type": "integer", "minimum": 1},
         "max_depth": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
-        "bootstrap": {"type": "boolean"},
-        "target_eligibility": {"const": "all"},
-        "min_target_detected_cells": {"type": "integer", "minimum": 1},
-        "min_target_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "min_target_weighted_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "min_target_weighted_detected_ess": {"type": "number", "exclusiveMinimum": 0},
-        "adaptive_trees": {"const": false},
-        "adaptive_min_estimators": {"type": "integer", "minimum": 1},
-        "adaptive_tree_step": {"type": "integer", "minimum": 1},
-        "adaptive_tolerance": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "adaptive_patience": {"type": "integer", "minimum": 1}
+        "bootstrap": {"type": "boolean"}
       }
     },
     "condition": {

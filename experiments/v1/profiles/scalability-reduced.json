@@ -22,7 +22,7 @@
     "factors": ["cells", "genes", "transcription_factors", "group_count", "network_mode"],
     "notes": [
       "The generator is a deterministic dimensional stressor on a public synthetic grid, not a calibrated biological simulator.",
-      "The workflow executes only the policy frozen by the same-budget efficiency phase.",
+      "The workflow executes only the policy frozen by the same-budget calibration phase.",
       "Results provide completion-or-attributable-failure and resource-boundary evidence only."
     ]
   },

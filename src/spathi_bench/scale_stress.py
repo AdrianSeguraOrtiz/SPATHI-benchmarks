@@ -4,7 +4,7 @@ The generator is deliberately not presented as a biological simulator.  It creat
 ANDREA-compatible single-cell datasets with known group-specific regulatory truth so
 that completion, resource use and target coverage can be audited on an author-defined,
 public and reproducible grid.  Only the already frozen production policy runs here;
-efficiency decisions and scientific accuracy remain confined to independent catalog
+configuration selection and scientific accuracy remain confined to independent catalog
 simulator panels.
 """
 

@@ -79,8 +79,6 @@ _LOGICAL_CHILD_STAGES = {
 }
 _FIXED_CALIBRATION_PARAMETERS: Mapping[str, Any] = {
     "bandwidth": "auto",
-    "target_eligibility": "all",
-    "adaptive_trees": False,
 }
 _GEOMETRY_DEVELOPMENT_SELECTOR: Mapping[str, Any] = {
     "split_id": "development_v1",

@@ -22,12 +22,7 @@
     valid: "Valid",
     ok: "OK",
     success: "Successful",
-    adoptable: "Adoptable",
-    paired_baseline: "Paired baseline",
-    candidate_adopted: "Candidate adopted",
-    reference_retained: "Exact policy retained",
     descriptive_only: "Descriptive only",
-    confirmed: "Confirmed",
     descriptive: "Descriptive",
     exploratory: "Exploratory",
     confirmatory: "Confirmatory",
@@ -194,7 +189,7 @@
 
   function statusTone(status) {
     const normalized = String(status || "unknown").toLowerCase();
-    if (["complete", "completed", "selected", "ranked", "tested", "passed", "valid", "ok", "success", "confirmatory", "adoptable", "candidate_adopted", "confirmed"].includes(normalized)) return "success";
+    if (["complete", "completed", "selected", "ranked", "tested", "passed", "valid", "ok", "success", "confirmatory"].includes(normalized)) return "success";
     if (["exploratory", "descriptive", "descriptive_only", "pending", "warning", "incomplete", "incomplete_panel", "partially_tested", "confirmatory_incomplete", "not_testable", "unavailable"].includes(normalized)) return "warning";
     if (["failed", "error", "invalid"].includes(normalized)) return "error";
     return "neutral";

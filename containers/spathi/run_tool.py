@@ -18,7 +18,6 @@ from typing import Any
 
 EXPECTED_NETWORK_COLUMNS = ("source", "target", "score", "sign", "evidence", "context")
 AUDIT_SIDECARS = (
-    "target_eligibility.tsv.gz",
     "model_diagnostics.tsv.gz",
     "run_metadata.json",
 )
@@ -37,11 +36,6 @@ _PHASE_PERCENT = {
     "complete": 98,
 }
 REQUIRED_PARAMS = {
-    "adaptive_min_estimators",
-    "adaptive_patience",
-    "adaptive_tolerance",
-    "adaptive_tree_step",
-    "adaptive_trees",
     "bandwidth",
     "bandwidth_scale",
     "distance_metric",
@@ -51,17 +45,12 @@ REQUIRED_PARAMS = {
     "kernel",
     "max_depth",
     "max_features",
-    "min_target_detected_cells",
-    "min_target_detected_fraction",
-    "min_target_weighted_detected_fraction",
-    "min_target_weighted_detected_ess",
     "min_samples_leaf",
     "n_components",
     "n_estimators",
     "pca_svd_solver",
     "bootstrap",
     "random_seed",
-    "target_eligibility",
     "tree_method",
     "weight_mode",
 }
@@ -371,7 +360,7 @@ def _validate_audit_sidecars(output_dir: Path) -> dict[str, Path]:
         raise RuntimeError(
             "SPATHI completed without required audit sidecars: " + ", ".join(missing)
         )
-    for name in ("target_eligibility.tsv.gz", "model_diagnostics.tsv.gz"):
+    for name in ("model_diagnostics.tsv.gz",):
         try:
             with gzip.open(paths[name], "rt", encoding="utf-8", newline="") as handle:
                 if next(csv.reader(handle), None) is None:

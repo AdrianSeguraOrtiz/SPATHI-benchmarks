@@ -16,7 +16,7 @@ from .safe_io import atomic_write_json, path_below_no_symlinks
 
 logger = logging.getLogger(__name__)
 PHASES = (
-    "calibration", "efficiency", "dimensional_transfer", "comparison", "scalability", "performance",
+    "calibration", "dimensional_transfer", "comparison", "scalability", "performance",
 )
 
 

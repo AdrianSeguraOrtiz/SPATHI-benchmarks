@@ -2,59 +2,44 @@
 
 ## Scope and research questions
 
-The primary question is whether a frozen SPATHI production policy recovers group-specific
+The primary question is whether a frozen SPATHI calibrated policy recovers group-specific
 regulatory networks more accurately than competing methods when every method receives the same
 expression data, cell groups and transcription-factor candidate list.
 
-The design also answers five separate questions:
+The design also answers four separate questions:
 
-1. Can target eligibility or adaptive tree stopping reduce SPATHI cost without an unacceptable
-   loss of directed AUPR or network coverage?
-2. Does SPATHI remain competitive with methods that receive group order, even though SPATHI does
+1. Does SPATHI remain competitive with methods that receive group order, even though SPATHI does
    not use that additional information?
-3. How does the frozen production policy's synthetic accuracy transfer as cells, genes and TFs
+2. How does the frozen calibrated policy's synthetic accuracy transfer as cells, genes and TFs
    increase separately, including its single-group and extreme-imbalance routing branches?
-4. Can the frozen production policy complete inference across a prospectively declared public
+3. Can the frozen calibrated policy complete inference across a prospectively declared public
    synthetic scale grid, and what resources does it consume?
-5. How do frozen SPATHI and catalog-default competitors scale from one to eight assigned threads
+4. How do frozen SPATHI and catalog-default competitors scale from one to eight assigned threads
    under isolated, identical full-output executions?
 
 These are not pooled into one claim. Dynamic-network accuracy is confirmatory only in the full
-held-out comparison. Efficiency has its own full confirmatory non-inferiority study. Invariant
+held-out comparison. Invariant
 network behaviour, topology and information-advantaged methods are exploratory. Dimensional
-transfer and all reduced-budget accuracy and efficiency results are strictly descriptive. The
+transfer and all reduced-budget accuracy results are strictly descriptive. The
 scale-stress and performance panels supply computational evidence only.
 
 ## Sequential design and freeze points
 
-The experiment has six ordered phases:
+The experiment has five ordered phases:
 
 | Order | Phase | Data role | Input state | Frozen output |
 | ---: | --- | --- | --- | --- |
 | 1 | Calibration | `development`, then `validation` | predeclared exact search space | `selected-config.json` |
-| 2 | Efficiency justification | `efficiency_validation`; conditional `efficiency_safety` | frozen exact calibration winner | `production-config.json` |
-| 3 | Dimensional transfer | `dimensional_transfer` | frozen production policy | reduced operational checks or full descriptive one-axis scale contrasts |
-| 4 | External-tool comparison | `test` | the same frozen production policy | accuracy and stability evidence |
-| 5 | Scalability | `scalability` | the same frozen production policy | completion, attributable-failure and resource evidence |
-| 6 | Performance | `performance` | the same frozen production policy and catalog defaults | isolated cross-tool runtime, memory, output-size and parallel-scaling evidence |
+| 2 | Dimensional transfer | `dimensional_transfer` | frozen calibrated policy | reduced operational checks or full descriptive one-axis scale contrasts |
+| 3 | External-tool comparison | `test` | the same frozen calibrated policy | accuracy and stability evidence |
+| 4 | Scalability | `scalability` | the same frozen calibrated policy | completion, attributable-failure and resource evidence |
+| 5 | Performance | `performance` | the same frozen calibrated policy and catalog defaults | isolated cross-tool runtime, memory, output-size and parallel-scaling evidence |
 
-Calibration cannot inspect efficiency-validation, efficiency-safety, dimensional-transfer, test,
-scalability or performance results. Formal efficiency selection cannot inspect the safety panel
-until it has nominated its sole provisional candidate; safety may only authorize that candidate or
-retain exact.
-Efficiency justification cannot inspect dimensional-transfer or test results and cannot change the
-scientific calibration objective.
-Dimensional transfer and comparison accept only the production policy frozen by a completed,
-same-budget efficiency workflow. Neither can change that policy. Scalability uses that same policy
-and cannot feed back into calibration, efficiency selection, dimensional-transfer interpretation
-or the external-tool ranking. Performance is also downstream-only and cannot change any scientific
-configuration or ranking.
-
-The exact calibration winner has `target_eligibility=all` and `adaptive_trees=false`. It becomes
-the exact arm in the efficiency study. The full efficiency decision either retains that arm or
-adopts one predeclared efficiency policy. That decision, its complete group policy, the SPATHI
-commit and all evidence hashes are frozen in `production-config.json` before any
-dimensional-transfer, test or performance data are used.
+Calibration cannot inspect dimensional-transfer, test, scalability or performance results.
+The complete conditional group policy, SPATHI commit and ranking-chain evidence are frozen in
+`selected-config.json` after independent validation. Every downstream phase consumes that same
+artifact from the completed, same-budget calibration workflow. No downstream result can change
+the selected parameters, selection objective or external-tool ranking.
 
 ## Protected dataset partitions
 
@@ -64,14 +49,12 @@ condition and group class. Related data and external simulator inputs cannot cro
 
 | Role | Permitted use | Forbidden use |
 | --- | --- | --- |
-| `development` | bounded calibration search and shortlisting | final selection, efficiency decision, external comparison |
-| `validation` | choose one calibration finalist | change the search space, efficiency decision, external comparison |
-| `efficiency_validation` | paired non-inferiority and resource gates | calibration or external-tool ranking |
-| `efficiency_safety` | descriptive exact-versus-provisional adoption veto | calibration, candidate search, formal non-inferiority or external-tool ranking |
-| `dimensional_transfer` | reduced operational checks or full post-freeze descriptive one-axis scale contrasts | calibration, efficiency selection or external-tool ranking |
-| `test` | one comparison of the frozen production policy with competitors | any configuration or efficiency decision |
+| `development` | bounded calibration search and shortlisting | final selection, external comparison |
+| `validation` | choose one calibration finalist | change the search space, external comparison |
+| `dimensional_transfer` | reduced operational checks or full post-freeze descriptive one-axis scale contrasts | calibration or external-tool ranking |
+| `test` | one comparison of the frozen calibrated policy with competitors | any configuration decision |
 | `scalability` | completion and resource measurement across the public synthetic scale grid | biological-accuracy or method-ranking claims |
-| `performance` | cross-tool computational and parallel-scaling measurement on fixed public synthetic inputs | truth evaluation, calibration, efficiency selection or method-ranking claims |
+| `performance` | cross-tool computational and parallel-scaling measurement on fixed public synthetic inputs | truth evaluation, calibration or method-ranking claims |
 
 The reduced and full budgets have disjoint generation and algorithmic seeds. Reduced is not a
 subset of full and does not spend any full dataset early.
@@ -83,20 +66,16 @@ The scientific panels are:
 | ordinary calibration development | 4 dyngen + 4 scMultiSim conditions = 8 | (4 dyngen + 4 scMultiSim conditions) × 3 = 24 |
 | estimator scale-transfer (`development` sub-split) | 1 scMultiSim | scMultiSim × 3 = 3 |
 | validation | 4 dyngen + 4 scMultiSim conditions = 8 | (4 dyngen + 4 scMultiSim conditions) × 3 = 24 |
-| efficiency development | 4 dyngen conditions + 1 scMultiSim = 5 | (4 dyngen conditions + 1 scMultiSim) × 3 = 15 |
-| efficiency validation | 4 dyngen conditions + 1 scMultiSim = 5 | 4 dyngen conditions × 5 + scMultiSim × 5 = 25 |
-| pre-freeze efficiency safety | not run | 6 scMultiSim conditions × 3 = 18 |
 | held-out dynamic test | 4 dyngen + 2 scMultiSim = 6 | 4 dyngen × 5 + 4 scMultiSim × 5 = 40 |
 | held-out invariant test | SERGIO + 2 BoolODE + GeneSPIDER2 = 4 | SERGIO × 5 + 2 BoolODE × 5 + GeneSPIDER2 × 5 = 20 |
 | performance | 1 fixed medium scMultiSim dataset | 1 fixed small + 1 fixed medium scMultiSim dataset |
 
-Ordinary development, estimator scale-transfer, validation and efficiency validation use distinct
+Ordinary development, estimator scale-transfer and validation use distinct
 scMultiSim regulatory topologies.
 For the ordinary panels, distinct means that the complete topology input is role-exclusive; it does
 not require pairwise edge-disjoint supports. Some edges may recur because the protected roles share
 the same synthetic TF-target universe, but no inferred network, truth edge or fitted model crosses
-roles. A stronger explicit contract keeps the distinct efficiency-safety topologies edge-disjoint
-from one another and keeps their union edge-disjoint from dimensional transfer.
+roles. Dimensional-transfer topologies remain separate from all calibration and test inputs.
 All protected roles use distinct simulator seeds. Full test contains 60 independent datasets;
 reduced test contains ten independent descriptive counterparts.
 
@@ -105,10 +84,9 @@ reduced test contains ten independent descriptive counterparts.
 `reduced` preserves phase order and the contracts for each included operational subset while using
 fewer independent datasets and algorithmic repetitions. It does not preserve every full-budget
 scientific question or external-comparison family. It exists to catch contract, runtime and
-integration failures at tolerable cost. Its comparison and efficiency analyses produce point
+integration failures at tolerable cost. Its comparison analyses produce point
 estimates only: no confidence intervals, hypothesis tests, inferential pass/fail labels or winner
-claims. Its efficiency workflow always emits a descriptive production file containing the exact
-calibrated policy.
+claims. It selects one provisional calibrated policy for its downstream phases.
 
 `full` is the publication budget:
 
@@ -116,11 +94,6 @@ calibrated policy.
   use one scout seed and two confirmation seeds, while convergence uses five; 24 independent
   validation datasets use five seeds, and three independent 1,000-TF scale-transfer datasets use
   three;
-- 15 efficiency-development datasets with one timing seed in the component scout and three seeds
-  across each of the four joint-confirmation arms;
-- 25 efficiency-validation datasets (five in each of five strata) with five algorithmic seeds per arm;
-- 18 efficiency-safety datasets (three in each of six protected routing or dimensional conditions)
-  with one common paired algorithm seed;
 - nine dimensional-transfer datasets: three independent instances at the 3,000-gene anchor and one
   instance at each of the other six predeclared conditions;
 - 60 held-out test datasets (40 dynamic and 20 invariant controls) with three paired algorithmic
@@ -142,19 +115,15 @@ The number of algorithmic seeds does not increase the biological sample size. Re
 and average algorithmic variation within an independent dataset.
 
 The `smoke` profile belongs to neither budget. It validates the end-to-end software contract on one
-tiny dyngen instance and must never enter selection, non-inferiority or comparison evidence.
+tiny dyngen instance and must never enter selection or comparison evidence.
 
 ## Phase 1: calibration
 
 ### Inputs and conditional policy
 
 Calibration uses only dynamic dyngen and scMultiSim datasets. No candidate receives a target list,
-regulatory prior, group order, pseudotime or centroid-confidence weights. The following parameters
-remain fixed throughout calibration:
-
-- `bandwidth=auto`;
-- `target_eligibility=all`; and
-- `adaptive_trees=false`.
+regulatory prior, group order, pseudotime or centroid-confidence weights. Calibration `bandwidth=auto` rule. Every requested target is considered
+for fitting, subject only to numerical safety checks; each model uses a fixed-size forest.
 
 Automatic bandwidth is fixed because it adapts to the observed distance scale of each dataset.
 Calibrating an absolute width on the small development panel would create a non-transferable
@@ -190,8 +159,8 @@ it is an incumbent candidate, not a privileged reference:
    configurations advance. Its upstream shortlist analogously retains three interaction structures
    that remain distinct when `max_features` is excluded. These preregistered diversity constraints
    preserve the exact candidate cardinality without silently deduplicating effective configurations.
-5. `convergence` selects a fixed tree-count ceiling among 250, 500, 750 and 1000 trees. Adaptive
-   stopping is still disabled. One physical 1,000-tree fit per parent, dataset and seed emits four
+5. `convergence` selects a fixed tree count among 250, 500, 750 and 1000 trees.
+   One physical 1,000-tree fit per parent, dataset and seed emits four
    exact forest-prefix networks through SPATHI's public prefix API; each prefix remains a separate
    ANDREA-compatible logical run for integration and evaluation. Reduced therefore contains 32
    physical convergence fits and 128 logical results; full contains 240 physical fits and 960
@@ -214,8 +183,8 @@ seeds within dataset and configuration, and across datasets. Candidates are orde
 4. canonical configuration identifier as a deterministic final tie-breaker.
 
 Wall time and peak memory are retained in every ranking artifact and report for transparency, but
-they are not calibration tie-breakers. Computational efficiency is decided only in the later,
-independent efficiency-justification phase.
+they are not calibration tie-breakers. Computational cost is measured separately in scalability
+and in the isolated cross-tool performance phase.
 
 Every stage manifest records the complete parameter map, configuration and execution hashes,
 expected datasets and algorithmic seeds, SPATHI commit, image ID and build fingerprint. Rankings
@@ -233,141 +202,10 @@ process. Applying arbitrary synthetic confidence scores would tune to an invente
 primary policy therefore uses uniform centroid contributions; no accuracy claim about confidence
 weighting is made.
 
-## Phase 2: efficiency justification
+## Phase 2: post-freeze dimensional transfer
 
-Automatic target eligibility and adaptive trees are computational policies, not ordinary
-calibration parameters. They are evaluated only after the exact policy is frozen and on an
-independent `efficiency_validation` panel. The formal efficiency-validation contract is committed in
-`experiments/v1/spathi/efficiency-study.json`.
-
-Development first scouts three target-eligibility settings and three adaptive-tree settings with
-the designated timing seed. It nominates one setting from each component and constructs their
-exact combination. Joint confirmation then reexecutes exact SPATHI, both component nominees and
-the combined policy under identical 4-thread/16-GiB allocations. The designated timing seed runs
-alone on a fixed CPU set in deterministic counterbalanced order; held-back algorithm seeds run
-concurrently within the machine's resolved capacity and supply only paired accuracy. Their
-incidental timings never enter the cost comparison. Reduced declares 75 physical fits and full 285,
-and at most one global nominee is chosen from the three modified policies. The independent
-validation panel therefore compares the exact arm with that single nominee, frozen before any
-validation outcome is accessed:
-
-| Candidate | Change from exact policy |
-| --- | --- |
-| Target eligibility | the nominated one of the three committed settings: `(detected cells, detected fraction, weighted detected fraction, weighted ESS)` equal to `(10, .005, .005, 5)`, `(20, .01, .01, 10)` or `(50, .02, .02, 20)` |
-| Adaptive trees | the nominated setting `(minimum trees, batch size, tolerance, patience)` from `(200, 25, .005, 3)`, `(100, 50, .01, 2)` or `(100, 100, .02, 2)`, with calibrated `n_estimators` as the hard ceiling |
-| Combined | the exact union of the two component nominees |
-
-The full requested target universe is primary. A target omitted by an eligibility policy is scored
-as an empty minimum-score prediction, so reducing target coverage cannot manufacture a favourable
-AUPR. Accuracy on the retained-target intersection is diagnostic only. TF predictor hashes must
-remain identical between paired arms.
-
-Adoption of the frozen nominee requires all of the following:
-
-- the one-sided lower confidence bound for paired
-  `AUPR(candidate) - AUPR(exact)` is at least `-0.002`;
-- every scheduled run and every requested target-group model completes;
-- the one-sided upper confidence bound for the paired wall-time ratio is
-  strictly below `1.0`;
-- target eligibility and the combined policy retain a lower-bound target fraction of at least
-  `0.50` and truth-edge fraction of at least `0.90`, while every dataset and every
-  simulator-condition mean independently meet the same observed guardrails; and
-- an adaptive-tree nominee retains the exact target and predictor universes; a target-eligibility
-  or combined nominee satisfies the declared target and truth-edge coverage contract.
-
-These confirmatory gates can authorize the sole frozen nominee provisionally; they do not yet authorize the
-published production policy. If no formal candidate passes, the exact arm is retained and no
-safety run is needed. Otherwise, that sole candidate and the exact arm enter a separate pre-freeze
-descriptive safety veto. No failed candidate can be replaced by the next formal runner-up.
-
-Development can also produce no global nominee. In that case the held-out efficiency
-step records a reference-only execution audit, performs no non-inferiority test or multiplicity
-adjustment, freezes the exact calibrated policy, and allows the remaining phases to continue.
-
-The safety panel contains three independently generated scMultiSim datasets in each of six
-protected conditions:
-
-- a balanced moderate problem with 3,000 genes, 100 TFs, 300 cells and groups 100/100/100;
-- the 100-gene, 10-TF, 500-cell single-group branch;
-- the same small feature space with 300 cells split 10/40/250;
-- the 100-gene, 10-TF high-cell case with 10,000 cells split 3,333/3,333/3,334;
-- the 3,000-gene, 1,500-TF dimensional endpoint with 300 cells split 100/100/100; and
-- the 15,000-gene, 100-TF dimensional endpoint with 300 cells split 100/100/100.
-
-All 18 generation seeds are disjoint from every other phase. The two added dimensional endpoints
-each use their own topology, and none of the four distinct safety topology files is reused outside
-this panel. The four safety topologies share no directed edge with one another or with any
-dimensional-transfer topology. Exact and provisional arms
-use one common algorithm seed within and across these datasets, and one independent execution-order
-seed counterbalances their frozen serial order. The independent unit remains the generated dataset,
-not a group, edge or cell.
-
-Safety has no p-values, confidence intervals or second optimization opportunity. Authorization
-requires all 18 pairs and all three pairs per condition to complete; candidate-minus-exact AUPR
-mean and median of at least `-0.002` globally and in every condition; no individual dataset below
-`-0.01`; every dataset to retain its candidate-specific target and truth-edge coverage threshold;
-and a global median candidate/exact wall-time ratio below `1.0`. Any failed gate or attributable
-candidate execution retains exact. A reference/exact failure makes the safety contrast
-uninterpretable and aborts it rather than favouring the candidate.
-
-The `0.002` absolute AUPR margin is the largest mean accuracy loss the authors accept for a purely
-computational optimization. The `0.50` target and `0.90` truth-edge coverage thresholds are likewise
-author-defined engineering safeguards. None is an empirically validated biological-equivalence
-threshold. Therefore any positive full-budget decision is conditional on this predeclared
-synthetic panel, its fixed algorithm-seed ensemble and these explicit value judgements; it does not
-establish equivalence on real data without known ground truth.
-
-The single nominee decision uses an intersection-union rule: accuracy, coverage when applicable,
-completion and runtime must all pass. Because exactly one nominee is frozen before validation,
-the family-wise `alpha=0.05` is used directly without a multiplicity adjustment; mandatory gates
-within that decision are not separate claim opportunities. Confirmatory bounds use a
-20,000-resample fixed-stratum hierarchical bootstrap.
-Algorithmic seeds are averaged within dataset; datasets are weighted equally within condition,
-conditions within simulator, and simulators within the panel. The full design has 25 independent
-datasets but an effective sample size of 16 under these unequal hierarchical weights. This is a
-declared design property, not a power guarantee. Runs are serial and candidate order is
-deterministically counterbalanced by dataset and seed so no arm always occupies the same temporal
-position.
-
-Execution is resumable only at the frozen-order prefix boundary. A crash preserves every completed
-prefix member and the next invocation executes only the missing suffix, still serially and without
-deleting valid cache entries. A non-prefix or identity-inconsistent state is rejected as corruption,
-not normalized into an apparently valid resume. Evidence, results, production policy and report
-are then published atomically so downstream phases cannot observe a partially frozen decision.
-
-The analysis reports paired wall time, peak memory, output size, processed targets, requested
-models and fitted trees. Runtime is formed as a paired log ratio within algorithm seed, averaged
-within dataset, and exponentiated after hierarchical aggregation; hence the endpoint is a
-hierarchically weighted geometric-mean candidate/exact ratio. The formal full analysis nominates
-the passing candidate with the lowest observed geometric-mean runtime ratio, breaking ties by
-candidate ID. This tie-break does not claim a significant speed difference between passing
-candidates. The safety veto then either authorizes that one candidate or retains exact. The reduced
-workflow reports descriptive estimates only, freezes exact and cannot authorize adoption.
-
-The failure rule is deliberately conservative. Any formally bound execution failure in a
-candidate arm invalidates the global relative selection and retains the exact policy; the workflow
-does not choose opportunistically among only the surviving candidates. A failure in the
-exact/reference arm makes every paired candidate contrast uninterpretable and aborts the decision.
-
-Before full outcomes are inspected,
-`experiments/v1/spathi/efficiency-design-sensitivity.json` freezes an outcome-free,
-deterministic normal-location scenario grid for AUPR differences and runtime log ratios. It makes
-the assumed variance dependence and unadjusted single-nominee alpha reproducible. Its probabilities are
-assumption-conditional operating characteristics, not empirical power estimates, and they do not
-validate percentile-bootstrap coverage with five replicates per stratum.
-
-Evidence is reconstructed from immutable artifacts rather than trusted from self-declared result
-fields. It verifies SPATHI identity, input fingerprints, the absence of truth-bearing inference
-inputs, context-specific target eligibility, complete directed TF-by-target candidate-space counts
-minus self-edges, and the original simulator truth. Simulator truth may contain regulatory edges
-outside the manifest-declared TF-by-gene candidate space; exactly as in ANDREA evaluation, those
-edges are retained in provenance, excluded from AUPR, and reported with per-context counts and
-bounded examples rather than being mistaken for malformed data.
-
-## Phase 3: post-freeze dimensional transfer
-
-The dimensional-transfer phase asks a deliberately narrower question than either efficiency or
-scalability: how the already frozen production policy's synthetic accuracy behaves as one input
+The dimensional-transfer phase asks a different question from computational scalability:
+how the already frozen calibrated policy's synthetic accuracy behaves as one input
 dimension increases at a time. It uses scMultiSim datasets with dynamic group-specific truth and
 never selects parameters, changes the policy or contributes observations to the confirmatory
 external-tool comparison.
@@ -395,13 +233,7 @@ condition. These sparse, deliberately bounded replicates provide publication-des
 evidence, not confirmatory inference or a power guarantee. Cells, contexts and edges do not become
 independent replicates.
 
-If efficiency freezes a policy different from the calibrated exact arm, the exact arm is run only
-as a diagnostic at the two scale anchors (`g3000_tf100_c300` and `g100_tf10_c300`). This checks
-the local policy contrast without reopening selection. It does not make either expensive endpoint
-an exact-versus-production experiment and cannot justify adoption outside the formal efficiency
-panel.
-
-## Phase 4: held-out external comparison
+## Phase 3: held-out external comparison
 
 ### Primary estimand
 
@@ -428,7 +260,7 @@ family. Topology accuracy is exploratory. Exact batches and statistical families
 
 The full directed `group_only` family contains:
 
-- frozen production SPATHI;
+- frozen calibrated SPATHI;
 - GENIE3 with the common TF list;
 - GRNBoost2 with the common TF list;
 - inferCSN with `sift_method=none`;
@@ -517,7 +349,7 @@ resampling keeps simulator-by-condition design strata fixed and resamples indepe
 within each stratum. SPATHI is described as the statistical winner only if it is uniquely
 top-ranked and every required directional contrast is significant after correction.
 
-## Phase 5: public synthetic scalability
+## Phase 4: public synthetic scalability
 
 The scalability phase uses a rounded, author-defined public grid selected to cover the intended
 application-scale envelope. It retains no source samples, identifiers, exact source dimensions or
@@ -557,7 +389,7 @@ every machine or biological fidelity to a real population.
 
 Each shape first runs an outcome-blind target scout selected by SHA-256 over the algorithm seed,
 dataset ID and gene ID: 64 targets in reduced and 128 in full. The scout and all-target stages use
-the same frozen production policy and the same algorithm seed. The preregistered contract fixes a
+the same frozen calibrated policy and the same algorithm seed. The preregistered contract fixes a
 prospective per-endpoint wall envelope of 12 hours in reduced and 24 hours in full. An all-target
 run is attempted only when the scout's linear target-count projection is at most 80% of that wall
 envelope and its observed peak memory is at most 80% of the RAM actually allocated to the
@@ -572,7 +404,7 @@ decisions and evidence dataset are retained in the results and interactive repor
 The recorded endpoints are immutable generation time, SPATHI core time and ANDREA end-to-end wall
 time; canonical ANDREA container CPU time and the overlap upper bound formed from physical-container
 cgroup memory peaks (excluding the ANDREA host process); expression, dataset, inference and
-SPATHI-output bytes; target eligibility counts; model completion; and fitted-tree count. The
+SPATHI-output bytes; requested-target counts; model completion; and fitted-tree count. The
 12/24-hour envelope is also enforced by ANDREA as the physical-task timeout. Inference must be fresh
 for resource attribution. Measurements are resumable only when their digest is already bound to the
 exact stage-specific runtime state.
@@ -583,12 +415,12 @@ infrastructure failures, identity mismatches, corrupted artifacts, invalid progr
 canonical telemetry or inconsistent provenance abort the workflow. Such failures never become a
 resource boundary or a publishable SPATHI endpoint.
 
-## Phase 6: formal computational performance
+## Phase 5: formal computational performance
 
 Performance is deliberately separate from scalability. Scalability asks whether frozen SPATHI can
 complete increasingly large shapes; performance compares methods and thread endpoints on the same
 fixed inputs. The phase never reads synthetic truth, evaluates accuracy, selects a method or
-changes the production policy. Its budget-specific generation seeds are disjoint from every other
+changes the calibrated policy. Its budget-specific generation seeds are disjoint from every other
 phase, although the public simulator scenario and dimensional definitions are deliberately reused.
 
 The reduced operational panel uses one medium scMultiSim dataset and measures SPATHI, GENIE3,
@@ -628,18 +460,17 @@ software-stack-specific computational claims.
 - stochastic stream; and
 - semantic coordinates such as simulator run, replicate, method, stage or dataset ID.
 
-The streams are `generation`, `augmentation`, `inference`, `statistical` and `execution_order`.
+The streams are `generation`, `augmentation`, `inference` and `statistical`.
 Seed derivation is independent of manifest ordering, so adding or reordering an unrelated task
 cannot change existing seeds. Contiguous simulator seed blocks are allocated explicitly; other
 task seeds are derived directly and stored with their coordinates.
 
-Only the full held-out comparison and full efficiency study allocate the `statistical` stream.
+Only the full held-out comparison allocates the `statistical` stream.
 Smoke is contract-only and every reduced analysis is descriptive: their contracts omit alpha,
 permutation and bootstrap counts, multiplicity rules and statistical seeds.
 
 The reproducibility audit verifies every committed simulator allocation, inference request and
-scale-stress seed derivation. It also validates and hashes the prospective efficiency
-design-sensitivity contract and its deterministic operating-characteristic output. It rejects
+scale-stress seed derivation. It rejects
 stale derived values, duplicate or overlapping generation blocks, undeclared namespaces,
 request/metadata disagreement and cross-budget reuse.
 
@@ -673,7 +504,7 @@ command and container logs, last progress snapshot, and available SPATHI diagnos
 content-addressed `inference-failure` evidence artifact. That operational evidence remains explicitly
 failed and is ineligible for integration, evaluation, ranking, or successful-inference cache reuse.
 
-Efficiency, scalability and performance use a two-phase report publication contract.
+Scalability and performance use a two-phase report publication contract.
 `workflow.json` is first
 written with status `publishing`; the deterministic HTML and provenance manifest are then published
 as immutable files; only after both have been verified are their canonical paths and SHA-256 hashes
@@ -688,18 +519,16 @@ Only the complete full workflow may support manuscript conclusions, and each con
 its declared scope:
 
 - directed AUPR on dynamic held-out `group_only` data: confirmatory external-tool accuracy;
-- full efficiency non-inferiority and cost gates: confirmatory production-policy decision;
 - post-freeze dimensional transfer: publication-descriptive synthetic accuracy along separate
   cell, gene and TF axes, without policy selection or a joint-scale accuracy claim;
 - invariant edge stability, topology, order-aware and pySCENIC implementation-sensitivity analyses:
   exploratory;
 - all-gene-inference directed and topology families: exploratory unequal-inference-scope analyses;
-- reduced efficiency and comparison workflows: descriptive only, without inferential winner or
-  adoption claims; and
+- reduced comparison: descriptive only, without inferential winner claims;
 - public synthetic scalability: computational feasibility and measured resources only; and
 - full performance: isolated cross-tool computational and parallel-scaling evidence for the
   recorded host and software stack only; reduced performance remains descriptive.
 
-No test result may change calibration or efficiency policy. No truth-derived prior or lineage rate
+No test result may change the calibrated policy. No truth-derived prior or lineage rate
 may enter a primary inference input. No failure may silently narrow a family. No synthetic
 dimensional stress result may be described as biological realism.

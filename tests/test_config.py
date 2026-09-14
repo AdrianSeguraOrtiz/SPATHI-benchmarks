@@ -28,6 +28,15 @@ from spathi_bench.seeds import generation_seed_for_consumer, load_seed_plan
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _current_design_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validate current design bytes, not a developer's unrelated staging state.
+
+    The publication-boundary suite checks index/worktree disclosure separately.
+    """
+    monkeypatch.setattr("spathi_bench.publication_boundary._index_payloads", lambda _root: ())
+
+
 def _git(repo: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -80,19 +89,6 @@ def test_every_schema_profile_purpose_has_an_explicit_dataset_role_contract() ->
     assert set(schema["properties"]["purpose"]["enum"]) == set(_PROFILE_DATASET_ROLES)
 
 
-@pytest.mark.parametrize(
-    "profile_id",
-    ("efficiency-development-reduced", "efficiency-development-full"),
-)
-def test_materialized_efficiency_development_profile_is_role_valid(
-    profile_id: str,
-) -> None:
-    profile = deepcopy(load_profile(REPO_ROOT, profile_id))
-    profile["status"] = "runnable"
-
-    validate_profile_references(REPO_ROOT, profile)
-
-
 def test_design_validation_treats_seed_audit_as_a_mandatory_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,72 +100,6 @@ def test_design_validation_treats_seed_audit_as_a_mandatory_gate(
     monkeypatch.setattr("spathi_bench.reproducibility.audit_reproducibility", fail)
     with pytest.raises(BenchmarkConfigError, match="Reproducibility audit failed"):
         validate_design_contracts(REPO_ROOT)
-
-
-def test_full_efficiency_safety_profile_freezes_six_disjoint_conditions() -> None:
-    profile = load_profile(REPO_ROOT, "efficiency-safety-full")
-    jobs = [job for job in profile["generation_jobs"] if job["dataset_role"] == "efficiency_safety"]
-    expected = {
-        "g3000_tf100_c300": (3_000, 100, 300, [100, 100, 100]),
-        "g100_tf10_c500_single_group": (100, 10, 500, [500]),
-        "g100_tf10_c300_groups_10_40_250": (100, 10, 300, [10, 40, 250]),
-        "g100_tf10_c10000": (100, 10, 10_000, [3_333, 3_333, 3_334]),
-        "g3000_tf1500_c300": (3_000, 1_500, 300, [100, 100, 100]),
-        "g15000_tf100_c300": (15_000, 100, 300, [100, 100, 100]),
-    }
-    assert {job["condition_id"] for job in jobs} == set(expected)
-
-    def directed_edges(path: Path) -> set[tuple[str, str]]:
-        edges: set[tuple[str, str]] = set()
-        for row in path.read_text(encoding="utf-8").splitlines()[1:]:
-            target, regulator, _effect = row.split("\t")
-            edges.add((target, regulator))
-        return edges
-
-    safety_root = REPO_ROOT / "experiments/v1/simulations/scmultisim/efficiency_safety"
-    seed_plan = load_seed_plan(REPO_ROOT / "experiments/v1/seeds/seed-plan.json")
-    generation_seeds: set[int] = set()
-    for job in jobs:
-        run = load_json_object(REPO_ROOT / job["simulator_runs"])["runs"][0]
-        genes, transcription_factors, cells, group_sizes = expected[job["condition_id"]]
-        assert job["split_id"] == "efficiency_safety_v1"
-        assert run["replicates"] == 3
-        assert run["params"]["num_genes"] == genes
-        assert run["params"]["num_cells"] == cells
-        assert run["params"]["discrete_population"]["pop_size"] == group_sizes
-        assert run["base_seed"] == generation_seed_for_consumer(
-            seed_plan,
-            path=job["simulator_runs"],
-            run_id=run["run_id"],
-        )
-        scenario = load_json_object(REPO_ROOT / job["scenario"])
-        topology = safety_root / scenario["inputs"]["regulatory_network"]["path"]
-        assert len({regulator for _target, regulator in directed_edges(topology)}) == (
-            transcription_factors
-        )
-        generation_seeds.update(run["base_seed"] + offset for offset in range(run["replicates"]))
-    assert len(generation_seeds) == 18
-
-    transfer_root = REPO_ROOT / "experiments/v1/simulations/scmultisim/dimensional_transfer"
-    safety_topologies = [
-        directed_edges(path) for path in sorted(safety_root.glob("regulatory-network*.tsv"))
-    ]
-    assert len(safety_topologies) == 4
-    for index, left in enumerate(safety_topologies):
-        for right in safety_topologies[index + 1 :]:
-            assert left.isdisjoint(right)
-    transfer_edges = set().union(
-        *(directed_edges(path) for path in transfer_root.glob("regulatory-network*.tsv"))
-    )
-    assert set().union(*safety_topologies).isdisjoint(transfer_edges)
-
-
-def test_formal_efficiency_profile_excludes_conditional_safety_generation() -> None:
-    formal = load_profile(REPO_ROOT, "efficiency-full")
-
-    assert len(formal["generation_jobs"]) == 5
-    assert {job["dataset_role"] for job in formal["generation_jobs"]} == {"efficiency_validation"}
-    assert "replicate_exceptions" not in formal["planned_design"]
 
 
 @pytest.mark.parametrize("budget", ["reduced", "full"])
@@ -526,14 +456,14 @@ def test_runnable_profiles_cannot_mix_dataset_partitions() -> None:
         validate_profile_references(REPO_ROOT, profile)
 
 
-def test_test_profile_requires_an_efficiency_gated_production_policy() -> None:
+def test_test_profile_requires_a_frozen_calibration_selected_policy() -> None:
     profile = deepcopy(load_profile(REPO_ROOT, "smoke"))
     profile["purpose"] = "benchmark"
     profile["generation_jobs"][0]["dataset_role"] = "test"
     for batch in profile["inference_batches"]:
         batch["dataset_role"] = "test"
 
-    with pytest.raises(BenchmarkConfigError, match="requires an efficiency-gated"):
+    with pytest.raises(BenchmarkConfigError, match="requires a frozen calibrated"):
         validate_profile_references(REPO_ROOT, profile)
 
 

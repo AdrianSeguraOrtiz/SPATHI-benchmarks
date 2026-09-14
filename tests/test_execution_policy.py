@@ -7,7 +7,6 @@ import pytest
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.execution_policy import (
     GIB,
-    inference_task_execution_plan,
     load_execution_policy,
     materialize_inference_run_resources,
     resolve_execution_class,
@@ -38,25 +37,11 @@ def test_committed_execution_policy_validates() -> None:
     assert set(policy["classes"]) == {
         "bulk_canonical",
         "bulk_full",
-        "efficiency_development_canonical",
         "performance_full",
         "scale_canonical",
         "scale_full",
         "smoke_full",
     }
-
-
-def test_efficiency_development_class_is_serial_with_common_arm_resources() -> None:
-    resolved = resolve_execution_class(
-        repo_root=REPO_ROOT,
-        class_id="efficiency_development_canonical",
-        runtime_plan=_runtime_plan(8, 64),
-    )
-
-    assert resolved["exclusive_inference"] is True
-    assert resolved["output_profile"] == "canonical"
-    assert resolved["operations"]["inference"]["cpu_threads"] == 4
-    assert resolved["operations"]["inference"]["memory_gib"] == 16.0
 
 
 @pytest.mark.parametrize(
@@ -103,38 +88,6 @@ def test_elasticity_respects_concurrency_ceiling_and_leaves_comparisons_fixed() 
     assert resolve_workload_execution_plan(
         execution, purpose="comparison", physical_tasks=1
     ) == execution
-
-
-def test_development_accuracy_uses_shared_cpus_and_timing_stays_isolated() -> None:
-    execution = resolve_execution_class(
-        repo_root=REPO_ROOT,
-        class_id="efficiency_development_canonical",
-        runtime_plan=_runtime_plan(120, 1024),
-    )
-    for role, exclusive, cpuset in [("timing", True, list(range(4))),
-                                   ("accuracy", False, list(range(120)))]:
-        resolved = inference_task_execution_plan(
-            execution, {"family": "spathi_efficiency_development", "seed_role": role}
-        )
-        materialized = materialize_inference_run_resources(
-            {"run_id": role, "params": {"random_seed": 42}},
-            toolspec=_toolspec(maximum=None),
-            execution_plan=resolved,
-        )
-        assert resolved["exclusive_inference"] is exclusive
-        assert materialized["resources"]["threads"] == 4
-        assert materialized["resources"]["cpuset_cpus"] == cpuset
-    assert execution["exclusive_inference"] is True
-
-
-def test_development_rejects_unspecified_measurement_role() -> None:
-    execution = resolve_execution_class(
-        repo_root=REPO_ROOT,
-        class_id="efficiency_development_canonical",
-        runtime_plan=_runtime_plan(8, 64),
-    )
-    with pytest.raises(BenchmarkConfigError, match="timing/accuracy role"):
-        inference_task_execution_plan(execution, {})
 
 
 def test_portable_class_clamps_preferences_to_small_host() -> None:

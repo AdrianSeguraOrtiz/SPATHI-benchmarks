@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 
-import spathi_bench.reporting.scalability as scalability_reporting
+from selection_helpers import selected_document
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
+from spathi_bench.calibration import load_search_space, materialize_group_policy
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.execution_policy import resolve_execution_class
 from spathi_bench.reporting.common import central_report_path, render_html
@@ -209,8 +210,6 @@ def _report_payload() -> dict[str, Any]:
             "spathi_output_bytes": 700,
             "inference_artifact_bytes": 1_200,
             "targets_requested": 500,
-            "targets_eligible": 490,
-            "targets_ineligible": 10,
             "models_requested": 980,
             "models_completed": 980,
             "trees_fitted": 98_000,
@@ -240,8 +239,6 @@ def _report_payload() -> dict[str, Any]:
     }
     scout["dimensions"]["targets"] = 64
     scout["inference"]["targets_requested"] = 64
-    scout["inference"]["targets_eligible"] = 64
-    scout["inference"]["targets_ineligible"] = 0
     return {
         "schema_version": "1.0",
         "report_type": "scalability",
@@ -321,13 +318,12 @@ def _report_payload() -> dict[str, Any]:
                 }
             ],
         },
-        "production": {
+        "selection": {
             "budget": "reduced",
             "evidence_role": "descriptive",
             "status": "descriptive",
-            "decision": "descriptive_only",
             "policy": {
-                "policy_id": "spathi_production_v1",
+                "policy_id": "spathi_conditional_v1",
                 "policy_sha256": canonical_json_sha256(group_policy),
                 "spathi_commit": "1" * 40,
                 "group_policy": group_policy,
@@ -380,7 +376,7 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "schemas/profile.schema.json",
         "schemas/scalability-results.schema.json",
         "schemas/scalability-boundary.schema.json",
-        "schemas/spathi-production-config.schema.json",
+        "schemas/spathi-selected-config.schema.json",
         "schemas/execution-policy.schema.json",
         "experiments/v1/execution/policy.json",
         "experiments/v1/profiles/scalability-reduced.json",
@@ -399,51 +395,21 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         runtime_plan=runtime_plan,
     )
     limits = _execution_limits(execution_plan)
-    evidence: dict[str, dict[str, str]] = {}
-    for name in (
-        "calibration_selection",
-        "efficiency_plan",
-        "efficiency_evidence",
-        "efficiency_results",
-    ):
-        source = _write_json(version / "evidence" / f"{name}.json", {"id": name})
-        evidence[name] = {
-            "path": source.relative_to(root).as_posix(),
-            "sha256": sha256_file(source),
-        }
-
-    group_policy = {
-        "routing_parameter": "group_count",
-        "shared_parameters": ["n_estimators"],
-        "branches": {
-            "single_group": {
-                "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
-                "parameters": {"n_estimators": 100},
-            },
-            "multi_group": {
-                "condition": {"minimum_group_count": 2},
-                "parameters": {"n_estimators": 100},
-            },
-        },
-    }
-    production = {
-        "schema_version": "1.0",
-        "artifact_type": "spathi_production_policy",
-        "budget": "reduced",
-        "evidence_role": "descriptive",
-        "status": "descriptive",
-        "decision": "descriptive_only",
-        "policy": {
-            "policy_id": "spathi_production_v1",
-            "policy_sha256": canonical_json_sha256(group_policy),
+    ranking_path = _write_json(version / "evidence/validation-ranking.json", {"id": "validation"})
+    search = load_search_space(REPO_ROOT)
+    group_policy = materialize_group_policy(search, {**search["base_configuration"], "n_estimators": 100})
+    selection = selected_document(
+        {
+            "policy_id": "spathi_conditional_v1",
             "group_policy": group_policy,
             "spathi_commit": "1" * 40,
         },
-        "provenance": evidence,
-    }
-    production_path = _write_json(
-        version / "workflows/efficiency/reduced/efficiency-fixture/production-config.json",
-        production,
+        ranking_path=ranking_path.relative_to(root).as_posix(),
+        ranking_sha256=sha256_file(ranking_path),
+    )
+    selection_path = _write_json(
+        version / "workflows/calibration/reduced/calibration-fixture/selected-config.json",
+        selection,
     )
 
     panel = json.loads(
@@ -504,8 +470,6 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "inference_artifact_bytes": 1_500 * index,
                     "spathi_output_bytes": 900 * index,
                     "targets_requested": dataset["genes"],
-                    "targets_eligible": dataset["genes"],
-                    "targets_ineligible": 0,
                     "models_requested": dataset["genes"] * groups,
                     "models_completed": dataset["genes"] * groups,
                     "models_trained": dataset["genes"] * groups,
@@ -543,8 +507,6 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         scout["inference"].update(
             {
                 "targets_requested": 64,
-                "targets_eligible": 64,
-                "targets_ineligible": 0,
                 "models_requested": 64 * groups,
                 "models_completed": 64 * groups,
                 "models_trained": 64 * groups,
@@ -622,12 +584,11 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
             "path": profile_path.relative_to(root).as_posix(),
             "sha256": sha256_file(profile_path),
         },
-        "production_config": {
-            "path": production_path.relative_to(root).as_posix(),
-            "sha256": sha256_file(production_path),
-            "policy_id": "spathi_production_v1",
-            "policy_sha256": production["policy"]["policy_sha256"],
-            "decision": "descriptive_only",
+        "selected_config": {
+            "path": selection_path.relative_to(root).as_posix(),
+            "sha256": sha256_file(selection_path),
+            "policy_id": "spathi_conditional_v1",
+            "policy_sha256": selection["selected_policy"]["policy_sha256"],
         },
         "execution_environment": {
             "spathi_commit": "1" * 40,
@@ -704,8 +665,8 @@ def _complete_report_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         "identity": {"fingerprint": "5" * 64},
         "runtime_plan": runtime_plan,
         "status": "publishing",
-        "production_config": production_path.relative_to(root).as_posix(),
-        "production_config_sha256": sha256_file(production_path),
+        "selected_config": selection_path.relative_to(root).as_posix(),
+        "selected_config_sha256": sha256_file(selection_path),
         "results": results_path.relative_to(root).as_posix(),
         "results_sha256": sha256_file(results_path),
         "interactive_report": report_path.relative_to(root).as_posix(),
@@ -855,54 +816,6 @@ def test_scalability_report_has_one_canonical_location(tmp_path: Path) -> None:
     )
 
 
-def test_candidate_policy_provenance_flattens_the_efficiency_safety_chain(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "repo"
-    version = root / "work/v1"
-
-    def reference(name: str) -> dict[str, str]:
-        path = _write_json(version / "evidence" / f"{name}.json", {"id": name})
-        return {
-            "path": path.relative_to(root).as_posix(),
-            "sha256": sha256_file(path),
-        }
-
-    production = {
-        "decision": "candidate_adopted",
-        "provenance": {
-            name: reference(name)
-            for name in (
-                "calibration_selection",
-                "efficiency_plan",
-                "efficiency_evidence",
-                "efficiency_results",
-            )
-        },
-    }
-    production["provenance"]["efficiency_safety"] = {
-        name: reference(f"safety-{name}") for name in ("panel", "plan", "evidence", "results")
-    }
-
-    links, inputs = scalability_reporting._production_inputs(
-        repo_root=root,
-        version_root=version,
-        production=production,
-    )
-
-    assert len(links) == len(inputs) == 8
-    assert {link["label"] for link in links} >= {
-        "Efficiency Safety Panel",
-        "Efficiency Safety Plan",
-        "Efficiency Safety Evidence",
-        "Efficiency Safety Results",
-    }
-    assert {path.name for path in inputs} >= {
-        "safety-panel.json",
-        "safety-plan.json",
-        "safety-evidence.json",
-        "safety-results.json",
-    }
 
 
 def test_scalability_report_rejects_an_inconsistent_resource_summary(tmp_path: Path) -> None:

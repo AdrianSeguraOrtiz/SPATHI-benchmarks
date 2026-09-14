@@ -51,7 +51,7 @@ def _comparison_records(
         profile_id=f"{budget}-v1",
         bundle_path=f"experiments/v1/spathi/benchmark/v1/{budget}",
         policy_id=POLICY_ID,
-        production_config_path="work/test-production-config.json",
+        selected_config_path="work/test-selected-config.json",
     )
     datasets: dict[str, list[str]] = {}
     for job in profile["generation_jobs"]:

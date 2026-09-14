@@ -69,7 +69,7 @@ def test_plan_forwards_optional_machine_ceilings(
 def test_status_prints_structured_saved_evidence(
     checkout: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    result = {"run_id": "pilot", "status": "failed", "current_phase": "efficiency"}
+    result = {"run_id": "pilot", "status": "failed", "current_phase": "calibration"}
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(cli, "study_status", lambda **kwargs: calls.append(kwargs) or result)
     assert cli.main(["status", "pilot", "--json"]) == 0

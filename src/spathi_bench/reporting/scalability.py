@@ -9,7 +9,6 @@ from typing import Any
 
 from ..config import BenchmarkConfigError, load_json_object, validate_json
 from ..execution_policy import POLICY_PATH, resolve_execution_class
-from ..provenance import production_provenance_artifacts
 from ..resource_plan import validate_runtime_plan
 from .common import (
     central_report_path,
@@ -156,8 +155,6 @@ def _validate_summary(results: Mapping[str, Any]) -> list[dict[str, Any]]:
         inference = require_mapping(row["inference"], "inference measurement")
         if inference["targets_requested"] != dimensions["targets"]:
             raise BenchmarkConfigError("Requested targets differ from the dataset dimensions")
-        if inference["targets_eligible"] + inference["targets_ineligible"] != dimensions["targets"]:
-            raise BenchmarkConfigError("Target-eligibility accounting is incomplete")
         if (
             inference["models_completed"] != inference["models_requested"]
             or inference["models_failed"]
@@ -260,34 +257,20 @@ def _validate_panel(panel: Mapping[str, Any], rows: Sequence[Mapping[str, Any]])
         raise BenchmarkConfigError("Scalability results differ from the frozen dimensional panel")
 
 
-def _production_inputs(
-    *, repo_root: Path, version_root: Path, production: Mapping[str, Any]
+def _selection_inputs(
+    *, repo_root: Path, version_root: Path, selection: Mapping[str, Any]
 ) -> tuple[list[dict[str, Any]], list[Path]]:
-    links: list[dict[str, Any]] = []
-    inputs: list[Path] = []
-    for label, raw in production_provenance_artifacts(dict(production)):
-        reference = require_mapping(raw, f"production provenance {label}")
-        source = repo_file(
-            repo_root,
-            reference.get("path"),
-            f"production provenance {label}",
-            below=version_root,
-        )
-        verify_sha256(source, reference.get("sha256"), f"production provenance {label}")
-        links.append({"label": str(label).replace("_", " ").title(), "path": source})
-        inputs.append(source)
-    return links, inputs
-
-
-def _validate_group_policy(policy: Mapping[str, Any]) -> None:
-    group_policy = require_mapping(policy.get("group_policy"), "production group policy")
-    branches = require_mapping(group_policy.get("branches"), "production policy branches")
-    if not branches:
-        raise BenchmarkConfigError("Production group policy has no executable branches")
-    for branch_id, raw in branches.items():
-        branch = require_mapping(raw, f"production policy branch {branch_id}")
-        require_mapping(branch.get("condition"), f"condition for production branch {branch_id}")
-        require_mapping(branch.get("parameters"), f"parameters for production branch {branch_id}")
+    evidence = require_mapping(selection.get("selection_evidence"), "calibration evidence")
+    source = repo_file(
+        repo_root,
+        evidence.get("validation_ranking"),
+        "calibration validation ranking",
+        below=version_root,
+    )
+    verify_sha256(
+        source, evidence.get("validation_ranking_sha256"), "calibration validation ranking"
+    )
+    return [{"label": "Validation ranking", "path": source}], [source]
 
 
 def render_scalability_report(
@@ -330,42 +313,40 @@ def render_scalability_report(
         raise BenchmarkConfigError("Scalability results overstate their scientific claim")
     rows = _validate_summary(results)
 
-    production_reference = require_mapping(
-        results.get("production_config"), "scalability production policy reference"
+    selection_reference = require_mapping(
+        results.get("selected_config"), "scalability selection policy reference"
     )
-    production_path = repo_file(
+    selection_path = repo_file(
         root,
-        workflow.get("production_config"),
-        "SPATHI production policy",
+        workflow.get("selected_config"),
+        "SPATHI selection policy",
         below=version,
     )
-    if production_reference.get("path") != production_path.relative_to(root).as_posix():
-        raise BenchmarkConfigError("Workflow and results refer to different production policies")
+    if selection_reference.get("path") != selection_path.relative_to(root).as_posix():
+        raise BenchmarkConfigError("Workflow and results refer to different selection policies")
     verify_sha256(
-        production_path,
-        workflow.get("production_config_sha256"),
-        "SPATHI production policy",
+        selection_path,
+        workflow.get("selected_config_sha256"),
+        "SPATHI selection policy",
     )
     verify_sha256(
-        production_path,
-        production_reference.get("sha256"),
-        "results SPATHI production policy",
+        selection_path,
+        selection_reference.get("sha256"),
+        "results SPATHI selection policy",
     )
-    production = load_json_object(production_path, "SPATHI production policy")
+    selection = load_json_object(selection_path, "SPATHI selection policy")
     validate_json(
-        production,
-        root / "schemas/spathi-production-config.schema.json",
-        "SPATHI production policy",
+        selection,
+        root / "schemas/spathi-selected-config.schema.json",
+        "SPATHI selection policy",
     )
-    policy = require_mapping(production.get("policy"), "SPATHI production policy")
-    _validate_group_policy(policy)
+    policy = require_mapping(selection.get("selected_policy"), "SPATHI selection policy")
     if (
-        production.get("budget") != profile_scope
-        or production_reference.get("policy_id") != policy.get("policy_id")
-        or production_reference.get("policy_sha256") != policy.get("policy_sha256")
-        or production_reference.get("decision") != production.get("decision")
+        selection.get("calibration_budget") != profile_scope
+        or selection_reference.get("policy_id") != policy.get("policy_id")
+        or selection_reference.get("policy_sha256") != policy.get("policy_sha256")
     ):
-        raise BenchmarkConfigError("Scalability results change the frozen production policy")
+        raise BenchmarkConfigError("Scalability results change the frozen selection policy")
 
     profile_reference = require_mapping(results.get("profile"), "scalability profile reference")
     profile_path = repo_file(root, profile_reference.get("path"), "scalability profile")
@@ -532,10 +513,10 @@ def render_scalability_report(
     if workflow.get("interactive_report") != report_path.relative_to(root).as_posix():
         raise BenchmarkConfigError("Workflow records a non-canonical scalability report path")
 
-    provenance_links, provenance_inputs = _production_inputs(
+    provenance_links, provenance_inputs = _selection_inputs(
         repo_root=root,
         version_root=version,
-        production=production,
+        selection=selection,
     )
     links = [
         {"label": "Workflow state", "path": workflow_path},
@@ -543,7 +524,7 @@ def render_scalability_report(
         {"label": "Scalability profile", "path": profile_path},
         {"label": "Frozen dimensional panel", "path": panel_path},
         {"label": "Preregistered resource boundary", "path": boundary_path},
-        {"label": "Frozen production policy", "path": production_path},
+        {"label": "Frozen selection policy", "path": selection_path},
         {"label": "Execution policy", "path": policy_path},
         *provenance_links,
         *[
@@ -593,11 +574,10 @@ def render_scalability_report(
             "summary": _dataset_summary(rows),
             "rows": rows,
         },
-        "production": {
-            "budget": production["budget"],
-            "evidence_role": production["evidence_role"],
-            "status": production["status"],
-            "decision": production["decision"],
+        "selection": {
+            "budget": selection["calibration_budget"],
+            "evidence_role": "publication" if selection["calibration_budget"] == "full" else "descriptive",
+            "status": selection["status"],
             "policy": policy,
         },
         "environment": results["execution_environment"],
@@ -622,7 +602,7 @@ def render_scalability_report(
                 profile_path,
                 panel_path,
                 boundary_path,
-                production_path,
+                selection_path,
                 policy_path,
                 *metadata_paths,
                 *failure_log_paths,

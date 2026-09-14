@@ -30,9 +30,7 @@ from .config import (
     validate_json,
     validate_profile_references,
 )
-from .efficiency_safety import analyze_safety, validate_safety_plan
 from .inference_scope_contract import inference_regulator_scopes
-from .noninferiority import analyze_noninferiority, resolve_efficiency_adoption
 from .seeds import derive_plan_seed, load_seed_plan
 from .tool_contract import spathi_runtime_resources
 
@@ -40,217 +38,6 @@ SELECTED_PLACEHOLDER = "selected_spathi"
 _PROFILE_IDS = {"reduced": "reduced-v1", "full": "full-v1"}
 _PLAN_KEYS = {"schema_version", "template_profile_id", "baseline_batches", "statistics"}
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]*")
-
-
-def _required_mapping(payload: Mapping[str, Any], key: str, *, label: str) -> Mapping[str, Any]:
-    value = payload.get(key)
-    if not isinstance(value, Mapping):
-        raise BenchmarkConfigError(f"{label} has no valid {key!r} object")
-    return value
-
-
-def _verify_production_chain(
-    repo_root: Path,
-    production: Mapping[str, Any],
-    provenance_paths: Mapping[str, Path],
-) -> None:
-    """Prove that one production policy is the decision authorized by its evidence."""
-
-    selected_path = provenance_paths["calibration_selection"]
-    plan_path = provenance_paths["efficiency_plan"]
-    evidence_path = provenance_paths["efficiency_evidence"]
-    results_path = provenance_paths["efficiency_results"]
-    # Reconstruct the calibration winner instead of trusting the copied policy
-    # embedded in later artifacts. Current contracts recompute the complete
-    # ranking chain, allowing operational benchmark fixes without silently
-    # changing a scientifically selected policy.
-    validate_calibration_contracts(repo_root, selected_path)
-    plan = load_json_object(plan_path, "production efficiency plan")
-    evidence = load_json_object(evidence_path, "production efficiency evidence")
-    results = load_json_object(results_path, "production efficiency results")
-    validate_json(
-        results,
-        repo_root / "schemas/noninferiority-results.schema.json",
-        "production efficiency results",
-    )
-
-    provenance = _required_mapping(production, "provenance", label="Production policy")
-    plan_reference = _required_mapping(plan, "reference", label="Efficiency plan")
-    selected_reference = _required_mapping(
-        plan_reference, "selected_config", label="Efficiency plan reference"
-    )
-    selected_provenance = _required_mapping(
-        provenance, "calibration_selection", label="Production policy provenance"
-    )
-    expected_selected_reference = {
-        "path": selected_path.relative_to(repo_root).as_posix(),
-        "sha256": sha256_file(selected_path),
-    }
-    if (
-        dict(selected_reference) != expected_selected_reference
-        or dict(selected_provenance) != expected_selected_reference
-    ):
-        raise BenchmarkConfigError(
-            "Production policy and efficiency plan reference different calibration selections"
-        )
-
-    plan_provenance = _required_mapping(
-        provenance, "efficiency_plan", label="Production policy provenance"
-    )
-    evidence_provenance = _required_mapping(
-        provenance, "efficiency_evidence", label="Production policy provenance"
-    )
-    plan_digest = str(plan_provenance["sha256"])
-    evidence_digest = str(evidence_provenance["sha256"])
-    if evidence.get("plan_sha256") != plan_digest:
-        raise BenchmarkConfigError("Production efficiency evidence targets a different plan")
-    result_inputs = _required_mapping(results, "inputs", label="Efficiency results")
-    if dict(result_inputs) != {
-        "plan_sha256": plan_digest,
-        "evidence_sha256": evidence_digest,
-    }:
-        raise BenchmarkConfigError(
-            "Production efficiency results target a different plan or evidence artifact"
-        )
-
-    budget = production["budget"]
-    plan_budget = _required_mapping(plan, "budget", label="Efficiency plan")
-    analysis_role = plan_budget.get("analysis_role")
-    if (
-        plan_budget.get("id") != budget
-        or evidence.get("budget") != budget
-        or results.get("budget") != budget
-    ):
-        raise BenchmarkConfigError("Production evidence chain uses inconsistent budgets")
-    if analysis_role not in {"descriptive", "confirmatory"} or any(
-        value != analysis_role
-        for value in (production.get("evidence_role"), results.get("analysis_role"))
-    ):
-        raise BenchmarkConfigError("Production evidence chain uses inconsistent analysis roles")
-    if evidence.get("study_id") != results.get("study_id"):
-        raise BenchmarkConfigError("Production evidence and results target different studies")
-    if evidence.get("dataset_role") != results.get("dataset_role"):
-        raise BenchmarkConfigError("Production evidence and results use different dataset roles")
-    if evidence.get("selection_validation_manifest_sha256") != plan_reference.get(
-        "selection_validation_manifest_sha256"
-    ):
-        raise BenchmarkConfigError(
-            "Production efficiency evidence targets a different calibration validation"
-        )
-    panel_reference = _required_mapping(plan, "panel", label="Efficiency plan")
-    if evidence.get("panel_sha256") != panel_reference.get("sha256"):
-        raise BenchmarkConfigError("Production efficiency evidence targets a different panel")
-
-    comparisons = results.get("comparisons")
-    if not isinstance(comparisons, list) or not all(
-        isinstance(item, Mapping) for item in comparisons
-    ):
-        raise BenchmarkConfigError("Efficiency results have no valid comparisons")
-    try:
-        expected_adoption = resolve_efficiency_adoption(
-            plan,
-            comparisons,
-            results.get("execution_failures", []),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise BenchmarkConfigError(
-            "Efficiency plan or results cannot reproduce the production decision"
-        ) from exc
-    adoption = _required_mapping(results, "adoption", label="Efficiency results")
-    if dict(adoption) != expected_adoption:
-        raise BenchmarkConfigError(
-            "Efficiency results adoption does not match the predeclared decision rule"
-        )
-    expected_global_decision = {
-        "candidate_adopted": "policy_adopted",
-        "reference_retained": "reference_retained",
-        "descriptive_only": "descriptive_only",
-    }[expected_adoption["decision"]]
-    if results.get("global_decision") != expected_global_decision:
-        raise BenchmarkConfigError(
-            "Efficiency global decision does not match its adoption decision"
-        )
-
-    expected_status = "confirmed" if analysis_role == "confirmatory" else "descriptive"
-    expected_decision = expected_adoption["decision"]
-    expected_policy = {
-        "policy_id": expected_adoption["selected_policy_id"],
-        "policy_sha256": expected_adoption["selected_policy_sha256"],
-        "group_policy": expected_adoption["selected_group_policy"],
-        "spathi_commit": plan_reference.get("spathi_commit"),
-    }
-    safety_provenance = provenance.get("efficiency_safety")
-    if budget != "full" or expected_adoption["decision"] != "candidate_adopted":
-        if safety_provenance is not None:
-            raise BenchmarkConfigError(
-                "Efficiency safety is only valid for one full provisional candidate"
-            )
-    else:
-        if not isinstance(safety_provenance, Mapping):
-            raise BenchmarkConfigError(
-                "A full provisional candidate lacks the mandatory efficiency safety veto"
-            )
-        safety_plan_path = provenance_paths["safety_plan"]
-        safety_evidence_path = provenance_paths["safety_evidence"]
-        safety_results_path = provenance_paths["safety_results"]
-        safety_plan = load_json_object(safety_plan_path, "production safety plan")
-        validate_safety_plan(repo_root, safety_plan)
-        expected_safety_panel = {
-            "path": provenance_paths["safety_panel"].relative_to(repo_root).as_posix(),
-            "sha256": sha256_file(provenance_paths["safety_panel"]),
-        }
-        if safety_plan["panel"] != expected_safety_panel:
-            raise BenchmarkConfigError("Production safety provenance references a different panel")
-        safety_results = load_json_object(safety_results_path, "production safety results")
-        validate_json(
-            safety_results,
-            repo_root / "schemas/efficiency-safety-results.schema.json",
-            "production safety results",
-        )
-        if safety_results["inputs"] != {
-            "plan_sha256": sha256_file(safety_plan_path),
-            "evidence_sha256": sha256_file(safety_evidence_path),
-        }:
-            raise BenchmarkConfigError("Production safety results target different inputs")
-        verified_safety = analyze_safety(
-            repo_root=repo_root,
-            plan_path=safety_plan_path,
-            evidence_path=safety_evidence_path,
-            output_path=safety_results_path,
-        )
-        if verified_safety != safety_results_path:
-            raise BenchmarkConfigError("Production safety results cannot be reproduced")
-        decision = safety_results["decision"]
-        expected_decision = (
-            "candidate_adopted"
-            if decision["status"] == "candidate_authorized"
-            else "reference_retained"
-        )
-        expected_policy = {
-            "policy_id": decision["selected_policy_id"],
-            "policy_sha256": decision["selected_policy_sha256"],
-            "group_policy": decision["selected_group_policy"],
-            "spathi_commit": plan_reference.get("spathi_commit"),
-        }
-    if (
-        production.get("status") != expected_status
-        or production.get("decision") != expected_decision
-        or production.get("policy") != expected_policy
-    ):
-        raise BenchmarkConfigError(
-            "Production policy does not match the efficiency adoption decision"
-        )
-
-    verified_results, _comparisons, _manifest = analyze_noninferiority(
-        repo_root=repo_root,
-        plan_path=plan_path,
-        evidence_path=evidence_path,
-        output_dir=results_path.parent,
-    )
-    if verified_results != results_path:
-        raise BenchmarkConfigError(
-            "Production provenance does not reference the verified efficiency results"
-        )
 
 
 def _repo_relative_path(repo_root: Path, path: Path, label: str) -> str:
@@ -281,29 +68,28 @@ def _comparison_seeds(repo_root: Path, calibration_budget: str) -> tuple[int, ..
     )
 
 
-def load_frozen_production_policy(
+def load_frozen_selected_policy(
     repo_root: Path,
-    production_config_path: Path,
+    selected_config_path: Path,
     *,
     budget: str,
 ) -> tuple[dict[str, Any], tuple[int, ...]]:
-    """Return the efficiency-gated policy and independent comparison seeds."""
+    """Return the verified calibration winner and independent comparison seeds."""
 
     root = repo_root.resolve()
-    path = production_config_path.resolve()
-    if not path.is_relative_to(root / "work") or not path.is_file() or path.is_symlink():
-        raise BenchmarkConfigError("Production policy must be a regular file below work/")
-    production = load_json_object(path, "SPATHI production policy")
-    validate_json(
-        production,
-        root / "schemas/spathi-production-config.schema.json",
-        "SPATHI production policy",
+    from .safe_io import path_below_no_symlinks
+
+    path = path_below_no_symlinks(
+        selected_config_path, root / "work", "Frozen calibration selection", require_file=True
     )
-    if production.get("budget") != budget:
+    _search, production = validate_calibration_contracts(root, path)
+    if production.get("status") != "selected" or production.get("phase") != "frozen":
+        raise BenchmarkConfigError("Downstream inference requires a frozen calibration selection")
+    if production.get("calibration_budget") != budget:
         raise BenchmarkConfigError(
-            f"Production policy uses budget {production.get('budget')!r}, not {budget!r}"
+            f"Production policy uses budget {production.get('calibration_budget')!r}, not {budget!r}"
         )
-    policy = production.get("policy")
+    policy = production.get("selected_policy")
     if not isinstance(policy, dict):
         raise BenchmarkConfigError("Production artifact contains no SPATHI policy")
     group_policy = policy.get("group_policy")
@@ -324,46 +110,6 @@ def load_frozen_production_policy(
         raise BenchmarkConfigError(
             "Production SPATHI policy targets a different repos.lock.json commit"
         )
-    provenance_paths: dict[str, Path] = {}
-
-    def register(artifact_id: str, artifact: Mapping[str, Any]) -> None:
-        artifact_path = (root / artifact["path"]).resolve()
-        if (
-            not artifact_path.is_relative_to(root / "work")
-            or not artifact_path.is_file()
-            or sha256_file(artifact_path) != artifact["sha256"]
-        ):
-            raise BenchmarkConfigError(
-                f"Production policy provenance {artifact_id!r} is missing or changed"
-            )
-        provenance_paths[artifact_id] = artifact_path
-
-    for artifact_id in (
-        "calibration_selection",
-        "efficiency_plan",
-        "efficiency_evidence",
-        "efficiency_results",
-    ):
-        artifact = production["provenance"].get(artifact_id)
-        if not isinstance(artifact, Mapping):
-            raise BenchmarkConfigError(f"Production provenance lacks {artifact_id!r}")
-        register(artifact_id, artifact)
-    raw_safety = production["provenance"].get("efficiency_safety")
-    if raw_safety is not None:
-        if not isinstance(raw_safety, Mapping) or set(raw_safety) != {
-            "panel",
-            "plan",
-            "evidence",
-            "results",
-        }:
-            raise BenchmarkConfigError("Efficiency safety provenance is incomplete")
-        for artifact_id, artifact in raw_safety.items():
-            if not isinstance(artifact, Mapping):
-                raise BenchmarkConfigError("Efficiency safety reference is invalid")
-            register(f"safety_{artifact_id}", artifact)
-    if len(set(provenance_paths.values())) != len(provenance_paths):
-        raise BenchmarkConfigError("Production policy provenance artifacts must be distinct")
-    _verify_production_chain(root, production, provenance_paths)
     return copy.deepcopy(policy), _comparison_seeds(root, budget)
 
 
@@ -578,7 +324,7 @@ def build_runnable_benchmark_profile(
     profile_id: str,
     bundle_path: str,
     policy_id: str,
-    production_config_path: str,
+    selected_config_path: str,
     materialization_manifest_path: str = "experiments/v1/spathi/benchmark-manifest.json",
 ) -> dict[str, Any]:
     """Combine a planned dataset template, catalog plan and selected SPATHI bundle."""
@@ -630,7 +376,7 @@ def build_runnable_benchmark_profile(
             ).strip(),
             "inference_batches": baseline_batches + spathi_batches,
             "statistics": statistics,
-            "production_config": production_config_path,
+            "selected_config": selected_config_path,
             "materialization_manifest": materialization_manifest_path,
         }
     )
@@ -738,7 +484,7 @@ def materialize_benchmark_plan(
     baseline_plan_path: Path,
     output_dir: Path,
     profile_output: Path,
-    production_config_path: Path,
+    selected_config_path: Path,
 ) -> tuple[Path, Path]:
     """Publish or validate an idempotent selected-SPATHI benchmark profile."""
 
@@ -756,9 +502,9 @@ def materialize_benchmark_plan(
             "or below work/"
         )
     bundle_relative = _repo_relative_path(root, output_dir, "Benchmark bundle output")
-    resolved_production = production_config_path.resolve()
+    resolved_production = selected_config_path.resolve()
     production_relative = _repo_relative_path(root, resolved_production, "SPATHI production policy")
-    policy, seeds = load_frozen_production_policy(
+    policy, seeds = load_frozen_selected_policy(
         root,
         resolved_production,
         budget=template_profile_id,
@@ -776,7 +522,7 @@ def materialize_benchmark_plan(
         profile_id=profile_id,
         bundle_path=bundle_relative,
         policy_id=str(policy["policy_id"]),
-        production_config_path=production_relative,
+        selected_config_path=production_relative,
         materialization_manifest_path=manifest_relative,
     )
     for comparison in profile["statistics"]["comparisons"]:
@@ -805,7 +551,7 @@ def materialize_benchmark_plan(
         "profile_id": profile_id,
         "template_profile_id": template_profile_id,
         "catalog_plan": {"path": plan_relative, "sha256": sha256_file(baseline_plan_path)},
-        "production_config": {
+        "selected_config": {
             "path": production_relative,
             "sha256": sha256_file(resolved_production),
             "policy_id": policy["policy_id"],

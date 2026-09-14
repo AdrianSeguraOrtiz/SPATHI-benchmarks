@@ -49,9 +49,9 @@ def test_committed_design_passes_a_stable_schema_validated_audit() -> None:
     assert result["coverage"]["stochastic_inference_runs"] > 0
     assert result["coverage"]["scale_stress_generator_datasets"] > 0
     assert result["coverage"] == {
-        "simulator_manifests": 97,
-        "simulator_runs": 97,
-        "simulator_replicates": 223,
+        "simulator_manifests": 71,
+        "simulator_runs": 71,
+        "simulator_replicates": 155,
         "inference_metadata_documents": 7,
         "stochastic_inference_runs": 44,
         "deterministic_inference_runs": 6,
@@ -62,13 +62,6 @@ def test_committed_design_passes_a_stable_schema_validated_audit() -> None:
         "statistical_contract_documents": 1,
         "statistical_root_seeds": 1,
         "comparison_algorithm_seeds": 7,
-        "efficiency_algorithm_seeds": 7,
-        "efficiency_statistical_root_seeds": 1,
-        "efficiency_execution_order_seeds": 2,
-        "efficiency_design_sensitivity_contracts": 1,
-        "efficiency_safety_generation_seeds": 18,
-        "efficiency_safety_algorithm_seeds": 1,
-        "efficiency_safety_execution_order_seeds": 1,
         "scalability_algorithm_seeds": 9,
         "dimensional_transfer_algorithm_seeds": 2,
     }
@@ -159,17 +152,6 @@ def test_audit_rejects_a_noncanonical_seed_plan(tmp_path: Path) -> None:
         audit_reproducibility(root)
 
 
-def test_audit_rejects_a_mismatched_efficiency_seed(tmp_path: Path) -> None:
-    root = _copy_design(tmp_path)
-    path = root / "experiments/v1/spathi/efficiency-study.json"
-    payload = _read(path)
-    payload["budgets"]["reduced"]["algorithm_seeds"][0] += 1
-    _write(path, payload)
-
-    with pytest.raises(ReproducibilityAuditError, match="algorithm seed 1 derives"):
-        audit_reproducibility(root)
-
-
 def test_audit_rejects_a_mismatched_calibration_seed(tmp_path: Path) -> None:
     root = _copy_design(tmp_path)
     path = root / "experiments/v1/spathi/search-space.json"
@@ -189,19 +171,6 @@ def test_audit_rejects_a_mismatched_statistical_root(tmp_path: Path) -> None:
     _write(path, payload)
 
     with pytest.raises(ReproducibilityAuditError, match="resolves to"):
-        audit_reproducibility(root)
-
-
-def test_audit_rejects_a_mismatched_efficiency_execution_order_seed(
-    tmp_path: Path,
-) -> None:
-    root = _copy_design(tmp_path)
-    path = root / "experiments/v1/spathi/efficiency-study.json"
-    payload = _read(path)
-    payload["budgets"]["full"]["execution_order_seed"] += 1
-    _write(path, payload)
-
-    with pytest.raises(ReproducibilityAuditError, match="execution-order seed derives"):
         audit_reproducibility(root)
 
 

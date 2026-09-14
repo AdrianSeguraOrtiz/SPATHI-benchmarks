@@ -229,7 +229,7 @@ def render_performance_report(
             "excluded_from_aggregates": True,
         },
         "execution_environment": results["execution_environment"],
-        "production_config": results["production_config"],
+        "selected_config": results["selected_config"],
         "notes": results["notes"],
         "links": [
             {

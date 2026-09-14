@@ -330,29 +330,11 @@ def resolve_workload_execution_plan(
     return resolved
 
 
-def inference_task_execution_plan(
-    execution_plan: Mapping[str, Any], metadata: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Isolate designated timing seeds while letting held-back accuracy run together."""
-
-    resolved = copy.deepcopy(dict(execution_plan))
-    if resolved.get("class_id") != "efficiency_development_canonical":
-        return resolved
-    role = metadata.get("seed_role")
-    if metadata.get("family") != "spathi_efficiency_development" or role not in {"timing", "accuracy"}:
-        raise BenchmarkConfigError("Efficiency-development task has no valid timing/accuracy role")
-    resolved["exclusive_inference"] = role == "timing"
-    resolved.pop("fingerprint", None)
-    resolved["fingerprint"] = canonical_json_sha256(resolved)
-    return resolved
-
-
 __all__ = [
     "GIB",
     "POLICY_PATH",
     "load_execution_policy",
     "materialize_inference_run_resources",
-    "inference_task_execution_plan",
     "resolve_execution_class",
     "resolve_workload_execution_plan",
 ]

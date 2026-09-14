@@ -43,10 +43,8 @@ from .convergence_execution import (
     logical_execution_contract,
     validate_logical_convergence_artifact,
 )
-from .efficiency_order import counterbalanced_execution_orders
 from .environment_lock import validate_environment_lock
 from .execution_policy import (
-    inference_task_execution_plan,
     materialize_inference_run_resources,
     resolve_execution_class,
     resolve_workload_execution_plan,
@@ -1680,7 +1678,6 @@ _ADAPTER_FAILURE_MANIFEST = "failure.json"
 _ADAPTER_FAILURE_SIDECARS = {
     "model_diagnostics.tsv.gz",
     "run_metadata.json",
-    "target_eligibility.tsv.gz",
 }
 
 
@@ -2615,7 +2612,7 @@ def _validate_inference_state_contract(
                         run=run,
                         custom_definition=custom_definition,
                     ),
-                    execution_plan=inference_task_execution_plan(workload_plan, metadata),
+                    execution_plan=workload_plan,
                 )
                 tool_image = _runtime_image_contract(
                     state=state,
@@ -2824,87 +2821,6 @@ def validate_inference_attribution_contract(
     _validate_inference_state_contract(state=state, profile_id=profile_id, run_root=run_root)
 
 
-def _counterbalanced_efficiency_development_tasks(
-    prepared: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Order a complete development panel by balanced dataset/seed blocks."""
-
-    if not prepared:
-        return prepared
-    metadata = [task.get("metadata") for task in prepared]
-    if not all(isinstance(item, Mapping) for item in metadata):
-        raise BenchmarkConfigError("Efficiency-development tasks require run metadata")
-    families = {str(item.get("family", "")) for item in metadata if isinstance(item, Mapping)}
-    if families != {"spathi_efficiency_development"}:
-        raise BenchmarkConfigError(
-            "The efficiency-development execution class cannot mix task families"
-        )
-    order_seeds = {
-        item.get("execution_order_seed") for item in metadata if isinstance(item, Mapping)
-    }
-    steps = {
-        str(item.get("efficiency_development_step", ""))
-        for item in metadata
-        if isinstance(item, Mapping)
-    }
-    if (
-        len(order_seeds) != 1
-        or len(steps) != 1
-        or not all(isinstance(seed, int) and not isinstance(seed, bool) for seed in order_seeds)
-    ):
-        raise BenchmarkConfigError(
-            "Efficiency-development tasks have inconsistent counterbalancing metadata"
-        )
-    dataset_ids = sorted({str(task["dataset"]["dataset_id"]) for task in prepared})
-    algorithm_seeds = sorted({int(task["metadata"]["algorithm_seed"]) for task in prepared})
-    roles_by_seed: dict[int, set[str]] = defaultdict(set)
-    for task in prepared:
-        roles_by_seed[int(task["metadata"]["algorithm_seed"])].add(
-            str(task["metadata"].get("seed_role", ""))
-        )
-    if (
-        any(roles not in ({"timing"}, {"accuracy"}) for roles in roles_by_seed.values())
-        or sum(roles == {"timing"} for roles in roles_by_seed.values()) != 1
-    ):
-        raise BenchmarkConfigError("Efficiency-development seeds have inconsistent timing roles")
-    labels = sorted({str(task["metadata"]["configuration_id"]) for task in prepared})
-    by_identity: dict[tuple[str, int, str], dict[str, Any]] = {}
-    for task in prepared:
-        identity = (
-            str(task["dataset"]["dataset_id"]),
-            int(task["metadata"]["algorithm_seed"]),
-            str(task["metadata"]["configuration_id"]),
-        )
-        if identity in by_identity:
-            raise BenchmarkConfigError(
-                f"Efficiency-development execution repeats task identity {identity!r}"
-            )
-        by_identity[identity] = task
-    expected = {
-        (dataset_id, algorithm_seed, label)
-        for dataset_id in dataset_ids
-        for algorithm_seed in algorithm_seeds
-        for label in labels
-    }
-    if set(by_identity) != expected:
-        raise BenchmarkConfigError(
-            "Efficiency-development counterbalancing requires a complete "
-            "dataset-by-seed-by-configuration panel"
-        )
-    orders = counterbalanced_execution_orders(
-        dataset_ids,
-        algorithm_seeds,
-        labels,
-        execution_order_seed=int(next(iter(order_seeds))),
-    )
-    ordered = [
-        by_identity[(dataset_id, algorithm_seed, label)]
-        for (dataset_id, algorithm_seed), order in orders.items()
-        for label in order
-    ]
-    return sorted(ordered, key=lambda task: task["metadata"]["seed_role"] != "timing")
-
-
 def _execute_unique_missing_tasks(
     prepared: list[dict[str, Any]],
     *,
@@ -3105,7 +3021,7 @@ def run_inference(
                         run=run,
                         custom_definition=custom_definition,
                     ),
-                    execution_plan=inference_task_execution_plan(workload_plan, metadata),
+                    execution_plan=workload_plan,
                 )
                 tool_image = _runtime_image_contract(
                     state=state,
@@ -3160,13 +3076,6 @@ def run_inference(
                     }
                 )
 
-    if state["execution_plan"]["class_id"] == "efficiency_development_canonical":
-        if state["execution_plan"]["exclusive_inference"] is not True:
-            raise BenchmarkConfigError(
-                "Efficiency-development timing requires serial inference execution"
-            )
-        prepared = _counterbalanced_efficiency_development_tasks(prepared)
-
     convergence_tasks = [task for task in prepared if task["convergence_binding"] is not None]
     if convergence_tasks:
         if len(convergence_tasks) != len(prepared):
@@ -3208,7 +3117,7 @@ def run_inference(
                 cpu_threads=int(task["run"]["resources"]["threads"]),
                 memory_bytes=round(float(task["run"]["resources"]["ram_gb"]) * 1024**3),
                 exclusive=bool(
-                    inference_task_execution_plan(workload_plan, task["metadata"])[
+                    workload_plan[
                         "exclusive_inference"
                     ]
                 ),

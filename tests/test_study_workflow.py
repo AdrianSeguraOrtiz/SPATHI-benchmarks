@@ -80,12 +80,12 @@ def test_named_study_carries_upstream_ids_and_completed_resume_runs_nothing(setu
     assert len(qualifications) == 1
     assert all(args["work_root"] == common["work_root"] / "studies/pilot" for _, args in events)
     assert events[1][1]["calibration_run_id"] == "pilot"
-    assert all(args["efficiency_run_id"] == "pilot" for _, args in events[2:])
+    assert all(args["calibration_run_id"] == "pilot" for _, args in events[2:])
     completed_at = load_study(common["work_root"] / "studies/pilot")["completed_at"]
     monkeypatch.setattr(study, "now", lambda: "2099-01-01T00:00:00+00:00")
     second = study.run_study_workflow(**common, run_id="pilot")
     assert second["status"] == "complete"
-    assert len(events) == 6
+    assert len(events) == len(PHASES)
     assert len(qualifications) == 1
     journal = load_study(common["work_root"] / "studies/pilot")
     assert len(journal["invocations"]) == 2
@@ -96,21 +96,21 @@ def test_named_study_carries_upstream_ids_and_completed_resume_runs_nothing(setu
 
 def test_interrupted_study_resumes_failed_phase_not_completed_calibration(setup_study):
     common, events, fail, _ = setup_study
-    fail["phase"] = "efficiency"
+    fail["phase"] = "dimensional_transfer"
     with pytest.raises(RuntimeError, match="Injected"):
         study.run_study_workflow(**common, profile="reduced", run_id="pilot")
     journal = load_study(common["work_root"] / "studies/pilot")
     assert journal["status"] == "failed"
-    assert journal["current_phase"] == "efficiency"
+    assert journal["current_phase"] == "dimensional_transfer"
     assert journal["phases"]["calibration"]["status"] == "complete"
     fail["phase"] = None
     study.run_study_workflow(**common, run_id="pilot")
-    assert [name for name, _ in events] == ["calibration", "efficiency", *PHASES[1:]]
+    assert [name for name, _ in events] == ["calibration", "dimensional_transfer", *PHASES[1:]]
 
 
 def test_commit_drift_warns_and_preserves_completed_phase(setup_study, caplog):
     common, events, fail, _ = setup_study
-    fail["phase"] = "efficiency"
+    fail["phase"] = "dimensional_transfer"
     with pytest.raises(RuntimeError):
         study.run_study_workflow(**common, profile="reduced", run_id="pilot")
     root = common["repo_root"]

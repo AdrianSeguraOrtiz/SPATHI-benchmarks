@@ -9,7 +9,7 @@
     "budget",
     "design",
     "template_profile",
-    "production_config",
+    "selected_config",
     "runtime_plan",
     "execution",
     "datasets",
@@ -23,7 +23,7 @@
     "budget": {"enum": ["reduced", "full"]},
     "design": {"$ref": "#/$defs/reference"},
     "template_profile": {"$ref": "#/$defs/reference"},
-    "production_config": {
+    "selected_config": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "sha256", "policy_id", "policy_sha256"],
@@ -121,7 +121,7 @@
         "properties": {
           "configuration_id": {"$ref": "#/$defs/id"},
           "tool_id": {"$ref": "#/$defs/id"},
-          "origin": {"enum": ["catalog", "spathi_production_policy"]},
+          "origin": {"enum": ["catalog", "spathi_selected_policy"]},
           "algorithm_seed": {"type": "integer", "minimum": 1, "maximum": 2147483646},
           "request": {"type": "object"},
           "custom_tool": {"type": ["object", "null"]}
@@ -175,7 +175,7 @@
         "size_class": {"enum": ["small", "medium"]},
         "configuration_id": {"$ref": "#/$defs/id"},
         "tool_id": {"$ref": "#/$defs/id"},
-        "origin": {"enum": ["catalog", "spathi_production_policy"]},
+        "origin": {"enum": ["catalog", "spathi_selected_policy"]},
         "threads": {"type": "integer", "minimum": 1},
         "ram_gb": {"type": "number", "exclusiveMinimum": 0},
         "cpuset_cpus": {

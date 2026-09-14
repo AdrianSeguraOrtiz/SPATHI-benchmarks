@@ -90,17 +90,7 @@ def test_seed_plan_reserves_only_consumed_domains_without_seed_overlap() -> None
             | ({"generation"} if role != "scalability" else {"augmentation"})
             | (
                 {"statistical"}
-                if namespace in {"full.efficiency_validation", "full.test"}
-                else set()
-            )
-            | (
-                {"execution_order"}
-                if role
-                in {
-                    "efficiency_development",
-                    "efficiency_validation",
-                    "efficiency_safety",
-                }
+                if namespace == "full.test"
                 else set()
             )
         )
@@ -114,22 +104,6 @@ def test_seed_plan_reserves_only_consumed_domains_without_seed_overlap() -> None
         assert occupied.isdisjoint(block)
         occupied.update(block)
 
-    safety_generation = next(
-        allocation
-        for allocation in plan["allocations"]
-        if allocation["id"] == "seed.full.efficiency_safety.generation"
-    )
-    assert safety_generation["span"] == 18
-    assert len(safety_generation["consumers"]) == 6
-    assert [consumer["offset"] for consumer in safety_generation["consumers"]] == [
-        0,
-        3,
-        6,
-        9,
-        12,
-        15,
-    ]
-    assert {consumer["span"] for consumer in safety_generation["consumers"]} == {3}
 
 
 def test_every_simulator_manifest_is_registered_and_matches_its_seed_block() -> None:
@@ -179,13 +153,6 @@ def test_every_simulator_manifest_is_registered_and_matches_its_seed_block() -> 
     assert registered_paths == simulator_paths
     assert namespace_seeds["reduced.development"].isdisjoint(namespace_seeds["full.development"])
     assert namespace_seeds["reduced.validation"].isdisjoint(namespace_seeds["full.validation"])
-    assert namespace_seeds["reduced.efficiency_validation"].isdisjoint(
-        namespace_seeds["full.efficiency_validation"]
-    )
-    assert namespace_seeds["reduced.test"].isdisjoint(namespace_seeds["full.test"])
-    assert namespace_seeds["full.efficiency_safety"].isdisjoint(
-        namespace_seeds["full.efficiency_validation"]
-    )
 
 
 def test_self_describing_seed_records_round_trip_and_reject_drift() -> None:

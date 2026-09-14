@@ -13,7 +13,7 @@
     "technical_noise": "umi",
     "dynamic_group_truth": true,
     "target_list_supplied_to_inference": false,
-    "policy_stage": "post_efficiency_freeze",
+    "policy_stage": "post_calibration_freeze",
     "selection_feedback": false,
     "confirmatory_ranking_eligible": false,
     "external_comparison_use": "forbidden"

@@ -37,22 +37,17 @@ def _diagnostics(path: Path, updates: dict[str, object] | None = None) -> Path:
             "status": "trained",
             "random_seed": 3811930675,
             "n_positive_weight_samples": 25,
-            "n_estimators_fitted": 150,
-            "adaptive_converged": True,
-            "convergence_delta": 0.001,
-            "convergence_checks": 1,
-            "target_weighted_detected_fraction": 1.0,
-            "target_weighted_detected_ess": 25.0,
+            "n_estimators_fitted": 250,
+            "fit_seconds": 0.1,
         },
         {
             "target_group": "a",
             "target": "G2",
-            "status": "target_not_estimable",
+            "status": "constant_target",
             "random_seed": 978580909,
             "n_positive_weight_samples": 25,
             "n_estimators_fitted": 0,
-            "adaptive_converged": False,
-            # Globally excluded targets have no group detection statistics.
+            "fit_seconds": 0.0,
         },
     ]
     records[0].update(updates or {})
@@ -63,34 +58,24 @@ def _diagnostics(path: Path, updates: dict[str, object] | None = None) -> Path:
     return path
 
 
-def _read(path: Path, *, globally_eligible: tuple[str, ...] = ("G1",)):
+def _read(path: Path):
     return read_model_accounting(
         path,
         contexts=("group:a",),
         targets=("G1", "G2"),
-        globally_eligible=globally_eligible,
         algorithm_seed=7,
         parameters={
-            "target_eligibility": "automatic",
-            "adaptive_trees": True,
             "n_estimators": 250,
-            "adaptive_min_estimators": 125,
-            "adaptive_tree_step": 50,
-            "adaptive_patience": 2,
-            "adaptive_tolerance": 0.01,
-            "min_target_weighted_detected_fraction": 0.01,
-            "min_target_weighted_detected_ess": 10,
         },
     )
 
 
-def test_full_requested_product_includes_globally_excluded_models(tmp_path: Path) -> None:
+def test_full_requested_product_includes_constant_targets(tmp_path: Path) -> None:
     accounting = _read(_diagnostics(tmp_path / "models.tsv.gz"))
-    assert accounting.eligible_targets == {"group:a": ("G1",)}
     assert accounting.models_requested == 2
     assert accounting.trained == 1
-    assert accounting.trees_fitted == 150
-    assert accounting.status_counts == {"trained": 1, "target_not_estimable": 1}
+    assert accounting.trees_fitted == 250
+    assert accounting.status_counts == {"trained": 1, "constant_target": 1}
 
 
 @pytest.mark.parametrize(
@@ -99,11 +84,9 @@ def test_full_requested_product_includes_globally_excluded_models(tmp_path: Path
         ({"random_seed": 7}, "seed differs"),
         ({"target": "G9"}, "exact group-target product"),
         ({"status": "invalid_feature_importances"}, "invalid/failed status"),
-        ({"n_estimators_fitted": 175}, "off schedule"),
-        ({"adaptive_converged": False}, "off schedule"),
-        ({"convergence_delta": 0.2}, "convergence is inconsistent"),
-        ({"target_weighted_detected_fraction": 0.005}, "contradicts target eligibility"),
-        ({"target_weighted_detected_ess": "nan"}, "finite and non-negative"),
+        ({"n_estimators_fitted": 175}, "invalid tree budget"),
+        ({"status": "constant_target"}, "Untrained model reports fitted trees"),
+        ({"fit_seconds": "nan"}, "finite and non-negative"),
     ],
 )
 def test_corrupted_diagnostics_fail_before_evidence_is_published(
@@ -113,23 +96,17 @@ def test_corrupted_diagnostics_fail_before_evidence_is_published(
         _read(_diagnostics(tmp_path / "models.tsv.gz", updates))
 
 
-def test_group_specific_exclusion_preserves_global_eligibility(tmp_path: Path) -> None:
-    path = _diagnostics(
-        tmp_path / "models.tsv.gz",
-        {
-            "status": "target_not_estimable",
-            "n_estimators_fitted": 0,
-            "adaptive_converged": False,
-            "target_weighted_detected_fraction": 0.005,
-        },
-    )
-    accounting = _read(path)
-    assert accounting.eligible_targets == {"group:a": ()}
-    assert accounting.models_requested == 2
-    assert accounting.status_counts == {"target_not_estimable": 2}
-
-
-def test_global_exclusion_takes_precedence_over_group_detection(tmp_path: Path) -> None:
-    path = _diagnostics(tmp_path / "models.tsv.gz")
-    with pytest.raises(BenchmarkConfigError, match="contradicts target eligibility"):
-        _read(path, globally_eligible=())
+def test_metadata_counters_match_diagnostics(tmp_path: Path) -> None:
+    accounting = _read(_diagnostics(tmp_path / "models.tsv.gz"))
+    counters = {
+        "requested": 2,
+        "completed": 2,
+        "trained": 1,
+        "preflight_skipped": 1,
+        "fit_or_importance_failures": 0,
+        "skipped_target_records": 1,
+        "fitted_estimators_total": 250,
+    }
+    accounting.validate_metadata(counters)
+    with pytest.raises(BenchmarkConfigError, match="counters differ"):
+        accounting.validate_metadata({**counters, "fitted_estimators_total": 150})

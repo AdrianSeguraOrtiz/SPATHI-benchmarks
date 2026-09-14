@@ -42,7 +42,6 @@ def _namespace(inputs: dict[str, Path], *, threads: int = 2) -> Namespace:
 
 def _write_audit_sidecars(output_dir: Path, *, status: str = "complete") -> None:
     for name, header in (
-        ("target_eligibility.tsv.gz", "target\tmode\teligible\n"),
         ("model_diagnostics.tsv.gz", "target_group\ttarget\tstatus\n"),
     ):
         with gzip.open(output_dir / name, "wt", encoding="utf-8", newline="") as handle:
@@ -153,16 +152,6 @@ def test_adapter_accepts_bound_scalability_parameters_without_renaming(
     params = {
         **frozen_spathi_params,
         "n_estimators": 250,
-        "target_eligibility": "automatic",
-        "min_target_detected_cells": 20,
-        "min_target_detected_fraction": 0.01,
-        "min_target_weighted_detected_fraction": 0.01,
-        "min_target_weighted_detected_ess": 10.0,
-        "adaptive_trees": True,
-        "adaptive_min_estimators": 100,
-        "adaptive_tree_step": 50,
-        "adaptive_tolerance": 0.01,
-        "adaptive_patience": 2,
     }
     params_path = tmp_path / "params.json"
     params_path.write_text(json.dumps(params), encoding="utf-8")
@@ -293,20 +282,6 @@ def test_adapter_rejects_a_policy_with_divergent_shared_parameters(
 
     with pytest.raises(ValueError, match="shared parameter"):
         adapter._validated_params(path, group_count=1)
-
-
-def test_adapter_contract_covers_every_noninferiority_binding(adapter: types.ModuleType) -> None:
-    study = json.loads(
-        (REPO_ROOT / "experiments/v1/spathi/efficiency-study.json").read_text(encoding="utf-8")
-    )
-    bound = {
-        parameter
-        for candidate in study["validation_components"]
-        for parameter in candidate["binding"]["parameters"]
-    }
-
-    assert len(bound) == 10
-    assert bound <= adapter.REQUIRED_PARAMS
 
 
 def test_adapter_requires_group_native_execution(
@@ -560,13 +535,6 @@ def test_failed_spathi_run_preserves_diagnostics_without_publishing_success(
 
     def fake_infer(config: FakeConfig, **_: Any) -> Any:
         config.output_dir.mkdir()
-        with gzip.open(
-            config.output_dir / "target_eligibility.tsv.gz",
-            "wt",
-            encoding="utf-8",
-            newline="",
-        ) as handle:
-            handle.write("target\tmode\teligible\nG1\tall\ttrue\n")
         with gzip.open(
             config.output_dir / "model_diagnostics.tsv.gz",
             "wt",

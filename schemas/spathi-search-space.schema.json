@@ -175,23 +175,13 @@
         },
         "min_samples_leaf": {"type": "integer", "minimum": 1},
         "max_depth": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
-        "bootstrap": {"type": "boolean"},
-        "target_eligibility": {"const": "all"},
-        "min_target_detected_cells": {"type": "integer", "minimum": 1},
-        "min_target_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "min_target_weighted_detected_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "min_target_weighted_detected_ess": {"type": "number", "exclusiveMinimum": 0},
-        "adaptive_trees": {"const": false},
-        "adaptive_min_estimators": {"type": "integer", "minimum": 1},
-        "adaptive_tree_step": {"type": "integer", "minimum": 1},
-        "adaptive_tolerance": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
-        "adaptive_patience": {"type": "integer", "minimum": 1}
+        "bootstrap": {"type": "boolean"}
       }
     },
     "complete_parameters": {
       "allOf": [
         {"$ref": "#/$defs/parameters"},
-        {"required": ["weight_mode", "distance_space", "n_components", "distance_standardization", "pca_svd_solver", "distance_metric", "kernel", "bandwidth", "bandwidth_scale", "group_size_correction", "tree_method", "n_estimators", "max_features", "min_samples_leaf", "max_depth", "bootstrap", "target_eligibility", "min_target_detected_cells", "min_target_detected_fraction", "min_target_weighted_detected_fraction", "min_target_weighted_detected_ess", "adaptive_trees", "adaptive_min_estimators", "adaptive_tree_step", "adaptive_tolerance", "adaptive_patience"]}
+        {"required": ["weight_mode", "distance_space", "n_components", "distance_standardization", "pca_svd_solver", "distance_metric", "kernel", "bandwidth", "bandwidth_scale", "group_size_correction", "tree_method", "n_estimators", "max_features", "min_samples_leaf", "max_depth", "bootstrap"]}
       ]
     },
     "calibration_constraints": {
@@ -200,13 +190,11 @@
       "required": ["fixed_parameters", "fixed_parameter_rationales", "excluded_inputs", "purpose"],
       "properties": {
         "fixed_parameters": {
-          "const": {"bandwidth": "auto", "target_eligibility": "all", "adaptive_trees": false}
+          "const": {"bandwidth": "auto"}
         },
         "fixed_parameter_rationales": {
           "const": {
-            "bandwidth": "The automatic bandwidth adapts to each dataset's distance units. The transferable bandwidth_scale parameter varies smoothing intensity without fitting a non-portable absolute width.",
-            "target_eligibility": "All requested targets define the exact scientific reference. Automatic target eligibility is developed and independently validated only as an efficiency policy.",
-            "adaptive_trees": "Fixed forests define the exact scientific reference. Adaptive stopping is developed and independently validated only as an efficiency policy."
+            "bandwidth": "The automatic bandwidth adapts to each dataset's distance units. The transferable bandwidth_scale parameter varies smoothing intensity without fitting a non-portable absolute width."
           }
         },
         "excluded_inputs": {"const": ["target_list", "centroid_weights"]},

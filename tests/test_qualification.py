@@ -55,7 +55,9 @@ def test_real_spathi_and_andrea_scientific_contracts(tmp_path: Path) -> None:
     )
     assert receipt["status"] == "complete"
     assert receipt["threads_tested"] == [1, 2]
-    assert receipt["models"]["automatic_adaptive"]["status_counts"]["target_not_estimable"] == 4
+    assert receipt["models"]["fixed"]["models"] == 16
+    assert receipt["models"]["fixed"]["status_counts"]["constant_target"] == 2
+    assert receipt["models"]["explicit_targets"]["models"] == 6
     assert len(receipt["metrics"]) == 8
     assert all(row["n_truth_rows_outside_candidate_space"] == 1 for row in receipt["metrics"])
     assert Path(receipt["report"]).is_file()

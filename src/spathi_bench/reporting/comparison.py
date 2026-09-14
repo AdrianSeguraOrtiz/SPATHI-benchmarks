@@ -303,19 +303,19 @@ def render_comparison_report(
         raise BenchmarkConfigError("Comparison workflow path disagrees with its profile")
     if comparison_root.name != workflow["flow_id"]:
         raise BenchmarkConfigError("Comparison workflow path disagrees with its flow ID")
-    efficiency_flow_id = workflow.get("efficiency_flow_id")
-    if not isinstance(efficiency_flow_id, str) or not efficiency_flow_id:
-        raise BenchmarkConfigError("Comparison workflow has no efficiency flow ID")
-    production_path = repo_file(
+    calibration_flow_id = workflow.get("calibration_flow_id")
+    if not isinstance(calibration_flow_id, str) or not calibration_flow_id:
+        raise BenchmarkConfigError("Comparison workflow has no calibration flow ID")
+    selection_path = repo_file(
         root,
-        workflow.get("production_config"),
-        "SPATHI production configuration",
+        workflow.get("selected_config"),
+        "SPATHI selection configuration",
         below=version,
     )
     verify_sha256(
-        production_path,
-        workflow.get("production_config_sha256"),
-        "SPATHI production configuration",
+        selection_path,
+        workflow.get("selected_config_sha256"),
+        "SPATHI selection configuration",
     )
     stage = require_mapping(
         require_mapping(workflow.get("stages"), "comparison workflow stages").get("comparison"),
@@ -412,8 +412,8 @@ def render_comparison_report(
             "href": safe_relative_link(report_path, state_path, benchmark_run),
         },
         {
-            "label": "Production configuration",
-            "href": safe_relative_link(report_path, production_path, version),
+            "label": "Calibrated configuration",
+            "href": safe_relative_link(report_path, selection_path, version),
         },
         {
             "label": "Summary JSON",
@@ -474,7 +474,7 @@ def render_comparison_report(
             "profile": profile,
             "profile_id": state["profile_id"],
             "purpose": state.get("purpose"),
-            "efficiency_flow_id": efficiency_flow_id,
+            "calibration_flow_id": calibration_flow_id,
             "analysis_roles": analysis_roles,
             "comparison_roles": comparison_roles,
             "runtime_plan": validate_runtime_plan(

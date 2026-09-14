@@ -147,7 +147,7 @@ def test_descriptive_catalog_runs_without_public_seeds_are_materializable() -> N
         profile_id="full-v1",
         bundle_path="work/test/catalog-bundle",
         policy_id="spathi_conditional_v1",
-        production_config_path="work/test/production-config.json",
+        selected_config_path="work/test/selected-config.json",
     )
 
     _validate_baseline_inputs(REPO_ROOT, profile)

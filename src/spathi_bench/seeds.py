@@ -27,7 +27,6 @@ SEED_STREAMS = (
     "augmentation",
     "inference",
     "statistical",
-    "execution_order",
 )
 
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
@@ -38,9 +37,6 @@ _ROLES = frozenset(
         "smoke",
         "development",
         "validation",
-        "efficiency_development",
-        "efficiency_validation",
-        "efficiency_safety",
         "test",
         "scalability",
         "dimensional_transfer",
@@ -362,19 +358,17 @@ def validate_seed_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
             for role in (
                 "development",
                 "validation",
-                "efficiency_development",
-                "efficiency_validation",
                 "test",
                 "scalability",
                 "dimensional_transfer",
                 "performance",
             )
         }
-    ) | {"full.efficiency_safety"}
+    )
     if set(namespaces) != expected_namespaces:
         raise SeedPlanError(
             "namespaces must define smoke plus disjoint reduced/full development, "
-            "validation, efficiency-development, efficiency-validation, efficiency-safety, test, scalability, "
+            "validation, test, scalability, "
             "dimensional-transfer, and performance namespaces"
         )
 
@@ -474,17 +468,7 @@ def validate_seed_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
             | ({"generation"} if role not in {"scalability"} else {"augmentation"})
             | (
                 {"statistical"}
-                if namespace in {"full.efficiency_validation", "full.test"}
-                else set()
-            )
-            | (
-                {"execution_order"}
-                if role
-                in {
-                    "efficiency_development",
-                    "efficiency_validation",
-                    "efficiency_safety",
-                }
+                if namespace == "full.test"
                 else set()
             )
         )

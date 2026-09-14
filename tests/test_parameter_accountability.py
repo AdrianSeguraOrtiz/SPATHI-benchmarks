@@ -24,7 +24,7 @@ def test_parameter_accountability_is_schema_valid_and_complete() -> None:
     entries = accountability["inference_parameters"]
     assert isinstance(entries, list)
     identifiers = [entry["id"] for entry in entries]
-    assert len(identifiers) == len(set(identifiers)) == 27
+    assert len(identifiers) == len(set(identifiers)) == 17
 
     search = _read(SEARCH_PATH)
     base = search["base_configuration"]
@@ -39,3 +39,11 @@ def test_optional_scientific_inputs_are_explicitly_outside_benchmarking() -> Non
         "target_list": "excluded_unavailable_input",
         "centroid_weights": "excluded_annotation_assisted_input",
     }
+
+
+def test_parallel_backend_is_declared_for_operational_equivalence() -> None:
+    accountability = _read(ACCOUNTABILITY_PATH)
+    operational = {entry["id"]: entry for entry in accountability["operational_parameters"]}
+    backend = operational["parallel_backend"]
+    assert backend["disposition"] == "operational_equivalence"
+    assert backend["levels"] == ["auto", "threads", "processes"]

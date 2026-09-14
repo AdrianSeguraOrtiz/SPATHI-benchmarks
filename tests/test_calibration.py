@@ -269,8 +269,6 @@ def test_search_is_bounded_staged_and_covers_current_scientific_parameters() -> 
     }
     assert search["calibration_constraints"]["fixed_parameters"] == {
         "bandwidth": "auto",
-        "target_eligibility": "all",
-        "adaptive_trees": False,
     }
 
 
@@ -812,7 +810,7 @@ def test_candidate_integrity_rejects_role_and_parameter_mutation() -> None:
         )
 
     parameters = dict(candidates[0].parameters)
-    parameters["adaptive_trees"] = True
+    parameters["n_estimators"] += 1
     mutated = (replace(candidates[0], parameters=parameters), *candidates[1:])
     with pytest.raises(CalibrationError, match="parameter digest is inconsistent"):
         rank_stage_candidates(

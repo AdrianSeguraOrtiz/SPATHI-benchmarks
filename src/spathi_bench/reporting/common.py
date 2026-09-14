@@ -24,7 +24,6 @@ _REPORT_SCOPES = {
     "calibration": {"reduced", "full"},
     "comparison": {"reduced", "full"},
     "dimensional_transfer": {"reduced", "full"},
-    "efficiency": {"reduced", "full"},
     "performance": {"reduced", "full"},
     "scalability": {"reduced", "full"},
 }
@@ -190,7 +189,6 @@ def _renderer_material(kind: str) -> dict[str, Any]:
         "calibration",
         "comparison",
         "dimensional_transfer",
-        "efficiency",
         "performance",
         "scalability",
     }:
@@ -262,7 +260,6 @@ def render_html(
         "calibration": "SPATHI calibration report",
         "comparison": "SPATHI benchmark comparison",
         "dimensional_transfer": "SPATHI dimensional accuracy transfer",
-        "efficiency": "SPATHI efficiency justification",
         "performance": "SPATHI computational performance",
         "scalability": "SPATHI computational scalability",
     }

@@ -62,7 +62,7 @@ def _workflow_paths(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return repo, work, andrea, spathi
 
 
-def _write_efficiency_workflow(
+def _write_calibration_workflow(
     repo: Path,
     work: Path,
     *,
@@ -70,25 +70,25 @@ def _write_efficiency_workflow(
     flow_id: str,
     status: str = "complete",
 ) -> tuple[Path, Path]:
-    workflow_root = work / "v1/workflows/efficiency" / budget / flow_id
+    workflow_root = work / "v1/workflows/calibration" / budget / flow_id
     production = _write_json(
-        workflow_root / "production-config.json",
-        {"artifact_type": "spathi_production_policy", "budget": budget},
+        workflow_root / "selected-config.json",
+        {"calibration_budget": budget},
     )
     state = {
         "schema_version": "1.0",
-        "workflow_type": "efficiency",
+        "workflow_type": "calibration",
         "flow_id": flow_id,
         "identity": IDENTITY,
-        "profile": budget,
+        "calibration_budget": budget,
         "status": status,
         "stages": {},
     }
     if status == "complete":
         state.update(
             {
-                "production_config": str(production.relative_to(repo)),
-                "production_config_sha256": sha256_file(production),
+                "selected_config": str(production.relative_to(repo)),
+                "selected_config_sha256": sha256_file(production),
             }
         )
     _write_json(workflow_root / "workflow.json", state)
@@ -297,27 +297,27 @@ def test_calibrate_chains_ten_phases_freezes_and_resumes_idempotently(
     assert second["interactive_report"] == second["reports"]["html"]["path"]
 
 
-def test_compare_requires_a_completed_matching_efficiency_study(
+def test_compare_requires_a_completed_matching_calibration_study(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
-    _write_efficiency_workflow(
-        repo, work, budget="full", flow_id="incomplete-efficiency", status="running"
+    _write_calibration_workflow(
+        repo, work, budget="full", flow_id="incomplete-calibration", status="running"
     )
 
-    with pytest.raises(BenchmarkConfigError, match="No completed full efficiency study"):
+    with pytest.raises(BenchmarkConfigError, match="No completed full calibration"):
         workflows.run_comparison_workflow(
             repo_root=repo,
             andrea_repo=andrea,
             spathi_repo=spathi,
             work_root=work,
-            efficiency_run_id="incomplete-efficiency",
+            calibration_run_id="incomplete-calibration",
         )
 
 
-def test_compare_explains_when_efficiency_study_has_not_run(
+def test_compare_explains_when_calibration_study_has_not_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -326,7 +326,7 @@ def test_compare_explains_when_efficiency_study_has_not_run(
 
     with pytest.raises(
         BenchmarkConfigError,
-        match=r"run spathi-bench run full to complete the study's efficiency phase first",
+        match=r"run spathi-bench run full",
     ):
         workflows.run_comparison_workflow(
             repo_root=repo,
@@ -336,23 +336,23 @@ def test_compare_explains_when_efficiency_study_has_not_run(
         )
 
 
-def test_compare_never_reuses_a_different_efficiency_budget(
+def test_compare_never_reuses_a_different_calibration_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
-    efficiency_id = "shared-name"
-    _write_efficiency_workflow(repo, work, budget="reduced", flow_id=efficiency_id)
+    calibration_id = "shared-name"
+    _write_calibration_workflow(repo, work, budget="reduced", flow_id=calibration_id)
 
-    with pytest.raises(BenchmarkConfigError, match="No completed full efficiency study"):
+    with pytest.raises(BenchmarkConfigError, match="No completed full calibration"):
         workflows.run_comparison_workflow(
             repo_root=repo,
             andrea_repo=andrea,
             spathi_repo=spathi,
             work_root=work,
             profile="full",
-            efficiency_run_id=efficiency_id,
+            calibration_run_id=calibration_id,
         )
 
 
@@ -362,16 +362,16 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
 ) -> None:
     repo, work, andrea, spathi = _workflow_paths(tmp_path)
     monkeypatch.setattr(workflows, "_workflow_identity", lambda _root: IDENTITY)
-    efficiency_id = "complete-efficiency"
-    _efficiency_root, production = _write_efficiency_workflow(
+    calibration_id = "complete-calibration"
+    _calibration_root, production = _write_calibration_workflow(
         repo,
         work,
         budget="full",
-        flow_id=efficiency_id,
+        flow_id=calibration_id,
     )
     monkeypatch.setattr(
         workflows,
-        "completed_production_config",
+        "completed_selected_config",
         lambda **_kwargs: (production, {"budget": "full"}),
     )
     materializations: list[dict[str, Any]] = []
@@ -453,18 +453,18 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
         andrea_repo=andrea,
         spathi_repo=spathi,
         work_root=work,
-        efficiency_run_id=efficiency_id,
+        calibration_run_id=calibration_id,
     )
 
     assert result["status"] == "complete"
     assert result["profile"] == "full"
-    assert result["efficiency_budget"] == "full"
-    assert result["efficiency_flow_id"] == efficiency_id
+    assert result["calibration_budget"] == "full"
+    assert result["calibration_flow_id"] == calibration_id
     assert len(materializations) == 1
     request = materializations[0]
     assert request["template_profile_id"] == "full"
     assert request["baseline_plan_path"] == (repo / "experiments/v1/inference/plans/full-v1.json")
-    assert request["production_config_path"] == production
+    assert request["selected_config_path"] == production
     assert Path(request["profile_output"]).name == "full-v1.json"
     assert pipeline_calls == [
         "preflight",
@@ -480,7 +480,7 @@ def test_compare_defaults_to_full_materializes_and_runs_statistics(
     ]
     assert len(rendered) == 1
     assert result["reports"]["html"]["path"] == (
-        "work/v1/reports/full/full-complete-efficiency-5555555555/comparison.html"
+        "work/v1/reports/full/full-complete-calibration-5555555555/comparison.html"
     )
     assert result["reports"]["manifest"]["path"].endswith("/comparison-report.manifest.json")
     assert result["interactive_report"] == result["reports"]["html"]["path"]

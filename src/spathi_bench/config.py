@@ -25,9 +25,6 @@ _PROFILE_DATASET_ROLES = {
     "selection": frozenset({"validation"}),
     "regression": frozenset({"test"}),
     "benchmark": frozenset({"test"}),
-    "efficiency_development": frozenset({"efficiency_development"}),
-    "efficiency": frozenset({"efficiency_validation"}),
-    "efficiency_safety": frozenset({"efficiency_safety"}),
     "scalability": frozenset({"scalability"}),
     "dimensional_transfer": frozenset({"dimensional_transfer"}),
     "performance": frozenset({"performance"}),
@@ -468,7 +465,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
     if profile.get("status") != "runnable":
         return
     production: dict[str, Any] | None = None
-    raw_production = profile.get("production_config")
+    raw_production = profile.get("selected_config")
     if raw_production is not None and profile["purpose"] not in {
         "regression",
         "benchmark",
@@ -481,7 +478,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         raw_manifest = profile.get("materialization_manifest")
         if not isinstance(raw_production, str):
             raise BenchmarkConfigError(
-                f"Profile {profile['id']} requires an efficiency-gated SPATHI production "
+                f"Profile {profile['id']} requires a frozen calibrated SPATHI "
                 "policy path"
             )
         if profile["purpose"] in {"regression", "benchmark"} and not isinstance(raw_manifest, str):
@@ -494,15 +491,19 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
         production = load_json_object(production_path, "SPATHI production policy")
         validate_json(
             production,
-            repo_root / "schemas/spathi-production-config.schema.json",
+            repo_root / "schemas/spathi-selected-config.schema.json",
             "SPATHI production policy",
         )
+        if production["status"] != "selected" or production["phase"] != "frozen":
+            raise BenchmarkConfigError(
+                f"Profile {profile['id']} requires a frozen calibration selection"
+            )
         if isinstance(raw_manifest, str):
             manifest_path = resolve_repo_path(
                 repo_root, raw_manifest, f"{profile['id']} materialization manifest"
             )
             materialization = load_json_object(manifest_path, "benchmark materialization manifest")
-            manifest_policy = materialization.get("production_config")
+            manifest_policy = materialization.get("selected_config")
             if (
                 materialization.get("profile_id") != profile["id"]
                 or not isinstance(manifest_policy, dict)
@@ -520,9 +521,6 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 "generic statistics stage not_applicable; the calibration workflow owns selection"
             )
     elif profile["purpose"] in {
-        "efficiency_development",
-        "efficiency",
-        "efficiency_safety",
         "scalability",
         "dimensional_transfer",
         "performance",
@@ -707,9 +705,9 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
             raise BenchmarkConfigError(
                 f"SPATHI batch {batch['id']} cannot use selection_role=baseline"
             )
-        selected_production_batch = batch["dataset_role"] in {"test", "scalability"} or (
-            batch["dataset_role"] == "dimensional_transfer" and metadata_roles == {"selected"}
-        )
+        selected_production_batch = batch["dataset_role"] in {
+            "test", "scalability", "dimensional_transfer",
+        }
         if selected_production_batch and batch["kind"] == "spathi":
             if metadata_roles != {"selected"}:
                 raise BenchmarkConfigError(
@@ -720,7 +718,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 raise BenchmarkConfigError(
                     f"Production batch {batch['id']} has no production policy"
                 )
-            selected_policy = production["policy"]
+            selected_policy = production["selected_policy"]
             group_policy = selected_policy["group_policy"]
             selected_digest = canonical_json_sha256(group_policy)
             if (
@@ -744,7 +742,7 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                     params.pop(seed_parameter)
                 target_scope = params.pop("target_scope", None)
                 if batch["dataset_role"] == "scalability":
-                    expected_scout_size = 64 if production["budget"] == "reduced" else 128
+                    expected_scout_size = 64 if production["calibration_budget"] == "reduced" else 128
                     scalability_dataset_ids: set[str] = set()
                     for generation_job_id in batch_generation_jobs:
                         generator_request = generation_jobs_by_id[generation_job_id].get(
@@ -783,45 +781,6 @@ def validate_profile_references(repo_root: Path, profile: dict[str, Any]) -> Non
                 if params != {"group_policy": group_policy}:
                     raise BenchmarkConfigError(
                         f"Production batch {batch['id']} parameters differ from the frozen policy"
-                    )
-        if (
-            batch["dataset_role"] == "dimensional_transfer"
-            and batch["kind"] == "spathi"
-            and metadata_roles != {"selected"}
-        ):
-            if metadata_roles != {"base"} or production is None:
-                raise BenchmarkConfigError(
-                    f"Dimensional diagnostic batch {batch['id']} must be the exact base policy"
-                )
-            provenance = production["provenance"]["efficiency_plan"]
-            plan_path = resolve_repo_path(
-                repo_root,
-                str(provenance["path"]),
-                f"{batch['id']} efficiency plan",
-            )
-            if sha256_file(plan_path) != provenance["sha256"]:
-                raise BenchmarkConfigError("Dimensional exact-policy provenance has changed")
-            plan = load_json_object(plan_path, "dimensional exact-policy efficiency plan")
-            validate_json(
-                plan,
-                repo_root / "schemas/noninferiority-plan.schema.json",
-                "dimensional exact-policy efficiency plan",
-            )
-            exact = plan["reference"]
-            if {str(item["configuration_id"]) for item in metadata["runs"]} != {
-                "spathi_exact_reference"
-            }:
-                raise BenchmarkConfigError(
-                    "Dimensional diagnostic must use configuration_id=spathi_exact_reference"
-                )
-            for item in metadata["runs"]:
-                params = dict(params_by_run[str(item["run_id"])])
-                seed_parameter = item["algorithm_seed_parameter"]
-                if seed_parameter is not None:
-                    params.pop(seed_parameter)
-                if params != {"group_policy": exact["group_policy"]}:
-                    raise BenchmarkConfigError(
-                        f"Dimensional diagnostic batch {batch['id']} differs from the exact policy"
                     )
         if is_calibration_batch:
             raw_manifest = batch.get("calibration_manifest")
@@ -1293,309 +1252,6 @@ def _validate_calibration_budget_profiles(
                 )
 
 
-def _validate_efficiency_budget_profiles(
-    repo_root: Path,
-    profiles_by_id: dict[str, dict[str, Any]],
-) -> None:
-    expected_conditions = {
-        "linear_baseline",
-        "linear_noisy",
-        "bifurcating_baseline",
-        "bifurcating_noisy",
-        "scmultisim_dynamic",
-    }
-    expected_safety: dict[str, dict[str, Any]] = {
-        "g3000_tf100_c300": {
-            "job_id": "scmultisim_efficiency_safety_g3000_tf100_c300",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf100.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf100-c300-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_tf100_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf100.tsv",
-            "cells": 300,
-            "genes": 3_000,
-            "transcription_factors": 100,
-            "targets_in_regulatory_core": 1_000,
-            "cifs": 50,
-            "group_sizes": [100, 100, 100],
-        },
-        "g100_tf10_c500_single_group": {
-            "job_id": "scmultisim_efficiency_safety_g100_tf10_c500_single_group",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf10-single-group.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c500-single-group-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_tf10_single_group_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf10.tsv",
-            "cells": 500,
-            "genes": 100,
-            "transcription_factors": 10,
-            "targets_in_regulatory_core": 50,
-            "cifs": 10,
-            "group_sizes": [500],
-        },
-        "g100_tf10_c300_groups_10_40_250": {
-            "job_id": "scmultisim_efficiency_safety_g100_tf10_c300_groups_10_40_250",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf10.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c300-groups-10-40-250-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_tf10_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf10.tsv",
-            "cells": 300,
-            "genes": 100,
-            "transcription_factors": 10,
-            "targets_in_regulatory_core": 50,
-            "cifs": 10,
-            "group_sizes": [10, 40, 250],
-        },
-        "g100_tf10_c10000": {
-            "job_id": "scmultisim_efficiency_safety_g100_tf10_c10000",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf10.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c10000-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_tf10_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf10.tsv",
-            "cells": 10_000,
-            "genes": 100,
-            "transcription_factors": 10,
-            "targets_in_regulatory_core": 50,
-            "cifs": 10,
-            "group_sizes": [3_333, 3_333, 3_334],
-        },
-        "g3000_tf1500_c300": {
-            "job_id": "scmultisim_efficiency_safety_g3000_tf1500_c300",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-g3000-tf1500.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf1500-c300-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_g3000_tf1500_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-g3000-tf1500.tsv",
-            "cells": 300,
-            "genes": 3_000,
-            "transcription_factors": 1_500,
-            "targets_in_regulatory_core": 1_000,
-            "cifs": 50,
-            "group_sizes": [100, 100, 100],
-        },
-        "g15000_tf100_c300": {
-            "job_id": "scmultisim_efficiency_safety_g15000_tf100_c300",
-            "scenario": "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-g15000-tf100.json",
-            "runs": "experiments/v1/simulations/scmultisim/efficiency_safety/g15000-tf100-c300-runs.json",
-            "scenario_id": "spathi_scmultisim_efficiency_safety_g15000_tf100_v1",
-            "regulatory_network": "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-g15000-tf100.tsv",
-            "cells": 300,
-            "genes": 15_000,
-            "transcription_factors": 100,
-            "targets_in_regulatory_core": 1_000,
-            "cifs": 50,
-            "group_sizes": [100, 100, 100],
-        },
-    }
-    profiles: dict[str, dict[str, Any]] = {}
-    for budget, expected_replicates in (("reduced", 1), ("full", 5)):
-        profile_id = f"efficiency-{budget}"
-        profile = profiles_by_id[profile_id]
-        profiles[budget] = profile
-        jobs = profile["generation_jobs"]
-        validation_jobs = [job for job in jobs if job["dataset_role"] == "efficiency_validation"]
-        safety_jobs = [job for job in jobs if job["dataset_role"] == "efficiency_safety"]
-        if (
-            profile["purpose"] != "efficiency"
-            or len(validation_jobs) != len(expected_conditions)
-            or {str(job["condition_id"]) for job in validation_jobs} != expected_conditions
-            or safety_jobs
-            or profile["planned_design"]["replicates_per_condition"] != expected_replicates
-            or profile["execution_class"] != "bulk_full"
-            or "replicate_exceptions" in profile["planned_design"]
-        ):
-            raise BenchmarkConfigError(
-                f"Profile {profile_id} differs from the predeclared efficiency budget"
-            )
-        validation_profile = {**profile, "generation_jobs": validation_jobs}
-        runs = _profile_runs(repo_root, validation_profile)
-        if len(runs) != len(expected_conditions) or any(
-            run.get("replicates") != expected_replicates for run in runs
-        ):
-            raise BenchmarkConfigError(
-                f"Profile {profile_id} has the wrong efficiency replicate budget"
-            )
-    full_jobs = {
-        str(job["id"]): job
-        for job in profiles["full"]["generation_jobs"]
-        if job["dataset_role"] == "efficiency_validation"
-    }
-    reduced_jobs = {str(job["id"]): job for job in profiles["reduced"]["generation_jobs"]}
-    if full_jobs.keys() != reduced_jobs.keys():
-        raise BenchmarkConfigError("Full and reduced efficiency profiles cover different jobs")
-    for job_id, full_job in full_jobs.items():
-        reduced_job = reduced_jobs[job_id]
-        for field in ("scenario", "dataset_role", "split_id", "condition_id"):
-            if full_job[field] != reduced_job[field]:
-                raise BenchmarkConfigError(
-                    f"Full and reduced efficiency job {job_id} differ in {field}"
-                )
-        full_runs = load_json_object(
-            resolve_repo_path(repo_root, str(full_job["simulator_runs"]), job_id)
-        )["runs"]
-        reduced_runs = load_json_object(
-            resolve_repo_path(repo_root, str(reduced_job["simulator_runs"]), job_id)
-        )["runs"]
-
-        def strip_budget(run: dict[str, Any]) -> dict[str, Any]:
-            return {
-                key: value
-                for key, value in run.items()
-                if key not in {"run_id", "replicates", "base_seed", "notes"}
-            }
-
-        if [strip_budget(run) for run in full_runs] != [strip_budget(run) for run in reduced_runs]:
-            raise BenchmarkConfigError(
-                f"Full and reduced efficiency job {job_id} differ scientifically"
-            )
-        full_seeds = {
-            int(run["base_seed"]) + offset
-            for run in full_runs
-            for offset in range(int(run["replicates"]))
-        }
-        reduced_seeds = {
-            int(run["base_seed"]) + offset
-            for run in reduced_runs
-            for offset in range(int(run["replicates"]))
-        }
-        if full_seeds & reduced_seeds:
-            raise BenchmarkConfigError(
-                f"Full and reduced efficiency job {job_id} reuse generation seeds"
-            )
-
-    safety_profile = profiles_by_id["efficiency-safety-full"]
-    safety_jobs = safety_profile["generation_jobs"]
-    if (
-        safety_profile["status"] != "runnable"
-        or safety_profile["purpose"] != "efficiency_safety"
-        or safety_profile["inference_batches"]
-        or safety_profile["statistics"] != {"status": "not_applicable", "comparisons": []}
-        or safety_profile["planned_design"]["replicates_per_condition"] != 3
-        or "replicate_exceptions" in safety_profile["planned_design"]
-        or safety_profile["execution_class"] != "bulk_full"
-        or len(safety_jobs) != len(expected_safety)
-        or {str(job["condition_id"]) for job in safety_jobs} != set(expected_safety)
-    ):
-        raise BenchmarkConfigError(
-            "Profile efficiency-safety-full differs from the conditional safety budget"
-        )
-    for safety in safety_jobs:
-        condition_id = str(safety["condition_id"])
-        expected = expected_safety[condition_id]
-        if (
-            safety["id"] != expected["job_id"]
-            or safety["scenario"] != expected["scenario"]
-            or safety["simulator_runs"] != expected["runs"]
-            or safety["split_id"] != "efficiency_safety_v1"
-        ):
-            raise BenchmarkConfigError(
-                f"Efficiency-safety profile changes condition {condition_id}"
-            )
-        scenario = load_json_object(
-            resolve_repo_path(repo_root, str(safety["scenario"]), condition_id),
-            f"efficiency-safety scenario {condition_id}",
-        )
-        raw_runs = load_json_object(
-            resolve_repo_path(repo_root, str(safety["simulator_runs"]), condition_id),
-            f"efficiency-safety runs {condition_id}",
-        ).get("runs")
-        if (
-            scenario.get("id") != expected["scenario_id"]
-            or not isinstance(raw_runs, list)
-            or len(raw_runs) != 1
-        ):
-            raise BenchmarkConfigError(f"Efficiency-safety inputs are invalid for {condition_id}")
-        scenario_inputs = scenario.get("inputs")
-        scenario_network = (
-            scenario_inputs.get("regulatory_network") if isinstance(scenario_inputs, dict) else None
-        )
-        if (
-            not isinstance(scenario_network, dict)
-            or scenario_network.get("path") != Path(expected["regulatory_network"]).name
-        ):
-            raise BenchmarkConfigError(
-                f"Efficiency-safety scenario changes the topology for {condition_id}"
-            )
-        safety_run = raw_runs[0]
-        params = safety_run.get("params")
-        population = params.get("discrete_population") if isinstance(params, dict) else None
-        if (
-            safety_run.get("run_id") != expected["job_id"]
-            or safety_run.get("simulator_id") != "scmultisim"
-            or safety_run.get("replicates") != 3
-            or not isinstance(params, dict)
-            or params.get("num_cells") != expected["cells"]
-            or params.get("num_genes") != expected["genes"]
-            or params.get("num_cifs") != expected["cifs"]
-            or not isinstance(population, dict)
-            or population.get("pop_size") != expected["group_sizes"]
-        ):
-            raise BenchmarkConfigError(
-                f"Efficiency-safety dimensions are invalid for {condition_id}"
-            )
-
-    def directed_topology(relative: str) -> set[tuple[str, str]]:
-        path = resolve_repo_path(repo_root, relative, "protected regulatory topology")
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except (OSError, UnicodeDecodeError) as exc:
-            raise BenchmarkConfigError(
-                f"Cannot read protected regulatory topology: {path}"
-            ) from exc
-        if not lines or lines[0] != "target\tregulator\teffect":
-            raise BenchmarkConfigError(
-                f"Protected regulatory topology has an invalid header: {path}"
-            )
-        edges: set[tuple[str, str]] = set()
-        for line in lines[1:]:
-            fields = line.split("\t")
-            if len(fields) != 3 or not fields[0] or not fields[1]:
-                raise BenchmarkConfigError(
-                    f"Protected regulatory topology contains an invalid row: {path}"
-                )
-            edge = (fields[0], fields[1])
-            if edge in edges:
-                raise BenchmarkConfigError(
-                    f"Protected regulatory topology contains duplicate directed edges: {path}"
-                )
-            edges.add(edge)
-        return edges
-
-    safety_topologies: dict[str, set[tuple[str, str]]] = {}
-    for expected in expected_safety.values():
-        relative = str(expected["regulatory_network"])
-        if relative not in safety_topologies:
-            safety_topologies[relative] = directed_topology(relative)
-        edges = safety_topologies[relative]
-        targets = {target for target, _regulator in edges}
-        regulators = {regulator for _target, regulator in edges}
-        if (
-            len(targets) != expected["targets_in_regulatory_core"]
-            or len(regulators) != expected["transcription_factors"]
-            or len(edges) != 2 * expected["targets_in_regulatory_core"]
-        ):
-            raise BenchmarkConfigError(
-                f"Efficiency-safety topology dimensions are invalid: {relative}"
-            )
-
-    safety_items = sorted(safety_topologies.items())
-    for index, (left_path, left_edges) in enumerate(safety_items):
-        for right_path, right_edges in safety_items[index + 1 :]:
-            if left_edges & right_edges:
-                raise BenchmarkConfigError(
-                    "Efficiency-safety topologies share directed edges: "
-                    f"{left_path} and {right_path}"
-                )
-
-    transfer_paths = (
-        "experiments/v1/simulations/scmultisim/dimensional_transfer/regulatory-network-tf10.tsv",
-        "experiments/v1/simulations/scmultisim/dimensional_transfer/regulatory-network-tf100.tsv",
-        "experiments/v1/simulations/scmultisim/dimensional_transfer/regulatory-network-tf1500.tsv",
-    )
-    transfer_edges = set().union(*(directed_topology(path) for path in transfer_paths))
-    if set().union(*safety_topologies.values()) & transfer_edges:
-        raise BenchmarkConfigError(
-            "Efficiency-safety and dimensional-transfer topologies share directed edges"
-        )
-
-
 def _validate_dimensional_transfer_profiles(
     repo_root: Path,
     profiles_by_id: dict[str, dict[str, Any]],
@@ -1716,11 +1372,6 @@ def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
         "selection-full",
         "calibration-reduced",
         "selection-reduced",
-        "efficiency-full",
-        "efficiency-reduced",
-        "efficiency-development-full",
-        "efficiency-development-reduced",
-        "efficiency-safety-full",
         "scalability-full",
         "scalability-reduced",
         "dimensional-transfer-full",
@@ -1737,7 +1388,7 @@ def validate_all_profiles(repo_root: Path) -> list[dict[str, Any]]:
         repo_root,
         {str(profile["id"]): profile for profile in profiles},
     )
-    _validate_efficiency_budget_profiles(
+    _validate_calibration_budget_profiles(
         repo_root,
         {str(profile["id"]): profile for profile in profiles},
     )
@@ -1850,11 +1501,6 @@ def validate_design_contracts(repo_root: Path, andrea_repo: Path | None = None) 
             f"missing={sorted(expected_parameter_ids - set(parameter_ids))}, "
             f"extra={sorted(set(parameter_ids) - expected_parameter_ids)}"
         )
-    # Imported lazily because the study helper itself uses the generic JSON
-    # loading and validation primitives from this module.
-    from .noninferiority import load_noninferiority_study
-
-    load_noninferiority_study(repo_root)
     regimes: dict[str, dict[str, Any]] = {}
     regime_root = repo_root / "experiments" / "v1" / "inference" / "regimes"
     for path in sorted(regime_root.glob("*.json")):

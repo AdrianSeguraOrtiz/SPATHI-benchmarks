@@ -29,7 +29,7 @@
         }
       ],
       "tools": [
-        {"configuration_id": "spathi_production", "tool_id": "spathi", "origin": "spathi_production_policy"},
+        {"configuration_id": "spathi_selected", "tool_id": "spathi", "origin": "spathi_selected_policy"},
         {"configuration_id": "genie3_default", "tool_id": "genie3", "origin": "catalog"},
         {"configuration_id": "grnboost2_default", "tool_id": "grnboost2", "origin": "catalog"},
         {"configuration_id": "infercsn_none", "tool_id": "infercsn", "origin": "catalog"}
@@ -59,7 +59,7 @@
         }
       ],
       "tools": [
-        {"configuration_id": "spathi_production", "tool_id": "spathi", "origin": "spathi_production_policy"},
+        {"configuration_id": "spathi_selected", "tool_id": "spathi", "origin": "spathi_selected_policy"},
         {"configuration_id": "aracne3_default", "tool_id": "aracne3", "origin": "catalog"},
         {"configuration_id": "genie3_default", "tool_id": "genie3", "origin": "catalog"},
         {"configuration_id": "grnboost2_default", "tool_id": "grnboost2", "origin": "catalog"},

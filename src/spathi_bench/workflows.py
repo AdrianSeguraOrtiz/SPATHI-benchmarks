@@ -35,7 +35,6 @@ from .pipeline import (
     run_inference,
     validate_handoffs,
 )
-from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_calibration_report, render_comparison_report
@@ -48,6 +47,7 @@ from .runtime import (
     docker_runtime_environment,
 )
 from .safe_io import atomic_write_json, path_below_no_symlinks
+from .selected_policy import completed_selected_config
 from .state import run_lock
 from .statistics import analyze_statistics
 from .study_context import bind_phase_identity, phase_flow_id
@@ -454,7 +454,7 @@ def run_comparison_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str = "full",
-    efficiency_run_id: str | None = None,
+    calibration_run_id: str | None = None,
     max_cores: int | None = None,
     max_ram_gb: float | None = None,
     reserve_cores: int = 0,
@@ -466,14 +466,14 @@ def run_comparison_workflow(
         raise BenchmarkConfigError("Comparison profile must be 'reduced' or 'full'")
     root, work = _workflow_work_root(repo_root, work_root)
     identity = _workflow_identity(root)
-    production_config, _production = completed_production_config(
+    selected_config, _production = completed_selected_config(
         repo_root=root,
         work_root=work,
         budget=profile,
-        efficiency_run_id=efficiency_run_id,
+        calibration_run_id=calibration_run_id,
     )
-    efficiency_id = production_config.parent.name
-    flow_id = phase_flow_id(f"{profile}-{efficiency_id}-{identity['fingerprint'][:10]}")
+    calibration_id = selected_config.parent.name
+    flow_id = phase_flow_id(f"{profile}-{calibration_id}-{identity['fingerprint'][:10]}")
     workflow_root = work / "v1/workflows/comparison" / profile / flow_id
     identity = bind_phase_identity(workflow_root, identity)
     state_path = workflow_root / "workflow.json"
@@ -495,10 +495,10 @@ def run_comparison_workflow(
             identity=identity,
             extra={
                 "profile": profile,
-                "efficiency_budget": profile,
-                "efficiency_flow_id": efficiency_id,
-                "production_config": str(production_config.relative_to(root)),
-                "production_config_sha256": sha256_file(production_config),
+                "calibration_budget": profile,
+                "calibration_flow_id": calibration_id,
+                "selected_config": str(selected_config.relative_to(root)),
+                "selected_config_sha256": sha256_file(selected_config),
                 "runtime_plan": runtime_plan,
             },
         )
@@ -517,7 +517,7 @@ def run_comparison_workflow(
                 baseline_plan_path=root / f"experiments/v1/inference/plans/{profile}-v1.json",
                 output_dir=bundle,
                 profile_output=profile_file,
-                production_config_path=production_config,
+                selected_config_path=selected_config,
             )
             run_root = work / "v1" / profile_id / flow_id
             pipeline = run_profile_pipeline(

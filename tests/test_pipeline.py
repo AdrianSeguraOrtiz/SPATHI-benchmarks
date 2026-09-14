@@ -18,7 +18,6 @@ from spathi_bench.pipeline import (
     _artifact_store,
     _batch_selects_dataset,
     _copy_locked_spathi_source,
-    _counterbalanced_efficiency_development_tasks,
     _dataset_execution_run,
     _dataset_job_attribution,
     _evaluation_spec,
@@ -94,62 +93,6 @@ def test_locked_source_export_uses_original_commit_after_head_and_worktree_chang
     assert (snapshot / "src/spathi/resource.bin").read_bytes() == b"\x00\xff\xfe\x80"
     assert (snapshot / "src/spathi/script.py").stat().st_mode & 0o777 == 0o755
     assert not (snapshot / "src/spathi/new.py").exists()
-
-
-def test_efficiency_development_tasks_are_counterbalanced_by_dataset_and_seed() -> None:
-    labels = ("adaptive", "combined", "eligibility", "reference")
-    tasks = [
-        {
-            "dataset": {"dataset_id": dataset_id},
-            "metadata": {
-                "algorithm_seed": seed,
-                "configuration_id": label,
-                "efficiency_development_step": "joint_confirmation",
-                "execution_order_seed": 99,
-                "family": "spathi_efficiency_development",
-                "seed_role": "timing" if seed == 12 else "accuracy",
-            },
-        }
-        for dataset_id in ("dataset_a", "dataset_b", "dataset_c", "dataset_d", "dataset_e")
-        for seed in (11, 12)
-        for label in labels
-    ]
-
-    ordered = _counterbalanced_efficiency_development_tasks(list(reversed(tasks)))
-    assert all(task["metadata"]["seed_role"] == "timing" for task in ordered[:20])
-    assert all(task["metadata"]["seed_role"] == "accuracy" for task in ordered[20:])
-    blocks = [ordered[index : index + len(labels)] for index in range(0, len(ordered), 4)]
-    position_counts = {
-        label: [
-            sum(block[position]["metadata"]["configuration_id"] == label for block in blocks)
-            for position in range(len(labels))
-        ]
-        for label in labels
-    }
-
-    assert all(
-        len({(task["dataset"]["dataset_id"], task["metadata"]["algorithm_seed"]) for task in block})
-        == 1
-        for block in blocks
-    )
-    assert all(max(counts) - min(counts) <= 1 for counts in position_counts.values())
-    for algorithm_seed in (11, 12):
-        seed_blocks = [
-            block for block in blocks if block[0]["metadata"]["algorithm_seed"] == algorithm_seed
-        ]
-        seed_position_counts = {
-            label: [
-                sum(
-                    block[position]["metadata"]["configuration_id"] == label
-                    for block in seed_blocks
-                )
-                for position in range(len(labels))
-            ]
-            for label in labels
-        }
-        assert all(
-            max(counts) - min(counts) <= 1 for counts in seed_position_counts.values()
-        )
 
 
 def test_workload_allocation_counts_physical_convergence_fits_and_selected_datasets(

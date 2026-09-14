@@ -9,7 +9,6 @@ engineering scales without claiming biological realism.
 from __future__ import annotations
 
 import csv
-import gzip
 import hashlib
 import json
 import math
@@ -21,14 +20,9 @@ from statistics import fmean, median
 from typing import Any
 
 from .artifacts import (
-    Artifact,
-    ArtifactError,
-    ArtifactKey,
-    ArtifactStore,
     canonical_json_sha256,
     sha256_file,
 )
-from .calibration import resolve_group_policy
 from .config import (
     BenchmarkConfigError,
     load_json_object,
@@ -45,7 +39,6 @@ from .provenance import (
 )
 from .safe_io import write_idempotent_json
 from .seeds import derive_plan_seed, load_seed_plan
-from .spathi_diagnostics import read_model_accounting
 from .state import load_state
 from .summarize import validate_summary_reports
 
@@ -70,8 +63,6 @@ REDUCED_CONDITION_IDS = (
     "g100_tf10_c500_single_group",
     "g100_tf10_c300_groups_10_40_250",
 )
-EXACT_DIAGNOSTIC_CONDITIONS = ("g3000_tf100_c300", "g100_tf10_c300")
-EXACT_REFERENCE_ID = "spathi_exact_reference"
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:
@@ -422,44 +413,6 @@ def transfer_algorithm_seed(repo_root: Path, *, budget: str) -> tuple[int, dict[
     )
 
 
-def exact_reference_policy(
-    repo_root: Path,
-    production: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Recover the efficiency study's exact calibrated reference, by hash."""
-
-    raw_reference = production.get("provenance", {}).get("efficiency_plan")
-    if not isinstance(raw_reference, Mapping):
-        raise BenchmarkConfigError("Production policy has no efficiency-plan provenance")
-    plan_path = resolve_repo_path(
-        repo_root,
-        str(raw_reference.get("path")),
-        "dimensional-transfer exact-reference efficiency plan",
-    )
-    if sha256_file(plan_path) != raw_reference.get("sha256"):
-        raise BenchmarkConfigError("Dimensional-transfer efficiency plan has changed")
-    plan = load_json_object(plan_path, "dimensional-transfer efficiency plan")
-    validate_json(
-        plan,
-        repo_root / "schemas/noninferiority-plan.schema.json",
-        "dimensional-transfer efficiency plan",
-    )
-    reference = plan.get("reference")
-    if not isinstance(reference, Mapping) or not isinstance(reference.get("group_policy"), Mapping):
-        raise BenchmarkConfigError("Efficiency plan has no exact calibrated reference policy")
-    group_policy = dict(reference["group_policy"])
-    policy_sha256 = hashlib.sha256(_canonical_json(group_policy)).hexdigest()
-    if reference.get("policy_sha256") != policy_sha256:
-        raise BenchmarkConfigError("Efficiency exact reference policy has a stale digest")
-    return {
-        "policy_id": EXACT_REFERENCE_ID,
-        "policy_sha256": policy_sha256,
-        "group_policy": group_policy,
-        "spathi_commit": reference["spathi_commit"],
-        "source_policy_id": reference["policy_id"],
-    }
-
-
 def _reference(repo_root: Path, path: Path) -> dict[str, str]:
     absolute = Path(os.path.abspath(path))
     resolved = path.resolve()
@@ -525,7 +478,7 @@ def _bound_analysis_inputs(
     *,
     repo_root: Path,
     profile_path: Path,
-    production_config_path: Path,
+    selected_config_path: Path,
     run_root: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], Path, Path]:
     """Load analysis inputs only after proving they are the pipeline's frozen bytes."""
@@ -579,12 +532,12 @@ def _bound_analysis_inputs(
             "Dimensional-transfer runtime profile differs from its frozen copy"
         )
 
-    raw_production = profile.get("production_config")
+    raw_production = profile.get("selected_config")
     if not isinstance(raw_production, str) or not raw_production:
         raise BenchmarkConfigError(
             "Dimensional-transfer runtime profile has no frozen production policy"
         )
-    live_production_reference = _reference(root, production_config_path)
+    live_production_reference = _reference(root, selected_config_path)
     if live_production_reference["path"] != raw_production:
         raise BenchmarkConfigError(
             "Dimensional-transfer analyzer was given a different production policy"
@@ -609,10 +562,10 @@ def _bound_analysis_inputs(
     )
     validate_json(
         production,
-        frozen_root / "schemas/spathi-production-config.schema.json",
+        frozen_root / "schemas/spathi-selected-config.schema.json",
         "frozen SPATHI production config",
     )
-    policy = production.get("policy")
+    policy = production.get("selected_policy")
     group_policy = policy.get("group_policy") if isinstance(policy, Mapping) else None
     if not isinstance(group_policy, Mapping) or policy.get(
         "policy_sha256"
@@ -643,204 +596,13 @@ def _mean_or_none(values: Sequence[float | None]) -> float | None:
     return fmean(observed) if observed else None
 
 
-def _artifact_from_state(store: ArtifactStore, raw: Any, *, expected_kind: str) -> Artifact:
-    if not isinstance(raw, Mapping) or raw.get("kind") != expected_kind:
-        raise BenchmarkConfigError(
-            f"Dimensional diagnostic requires a {expected_kind} artifact reference"
-        )
-    try:
-        key = ArtifactKey(kind=expected_kind, digest=str(raw.get("digest")))
-        if raw.get("key") != key.value:
-            raise ArtifactError("artifact key and digest differ")
-        return store.validate(key)
-    except (ArtifactError, ValueError) as exc:
-        raise BenchmarkConfigError(
-            f"Dimensional diagnostic has an invalid {expected_kind} artifact: {exc}"
-        ) from exc
-
-
-def _single_artifact_member(artifact: Artifact, suffix: str, label: str) -> Path:
-    matches = [
-        str(entry["path"])
-        for entry in artifact.manifest["files"]
-        if str(entry["path"]) == suffix or str(entry["path"]).endswith("/" + suffix)
-    ]
-    if len(matches) != 1:
-        raise BenchmarkConfigError(
-            f"Dimensional diagnostic expected one {label}, observed {matches}"
-        )
-    return artifact.file(matches[0])
-
-
-def _tabular_rows(path: Path, *, delimiter: str, compressed: bool = False) -> list[dict[str, str]]:
-    try:
-        if compressed:
-            handle = gzip.open(path, "rt", encoding="utf-8", newline="")
-        else:
-            handle = path.open("r", encoding="utf-8", newline="")
-        with handle:
-            reader = csv.DictReader(handle, delimiter=delimiter)
-            if not reader.fieldnames:
-                raise BenchmarkConfigError(f"Dimensional diagnostic table has no header: {path}")
-            return list(reader)
-    except (OSError, UnicodeDecodeError, csv.Error) as exc:
-        raise BenchmarkConfigError(
-            f"Cannot read dimensional diagnostic table {path}: {exc}"
-        ) from exc
-
-
-def _configuration_accounting(
-    *,
-    store: ArtifactStore,
-    evaluation: Mapping[str, Any],
-    dataset: Mapping[str, Any],
-    expected_contexts: frozenset[str],
-    expected_configuration_id: str,
-    expected_configuration_sha256: str,
-    expected_parameters: Mapping[str, Any],
-    expected_algorithm_seed: int,
-) -> dict[str, float | int]:
-    """Recover coverage and fitted-tree cost from immutable SPATHI sidecars."""
-
-    if (
-        evaluation.get("configuration_id") != expected_configuration_id
-        or evaluation.get("configuration_sha256") != expected_configuration_sha256
-        or evaluation.get("algorithm_seed") != expected_algorithm_seed
-    ):
-        raise BenchmarkConfigError(
-            "Dimensional evaluation differs from its frozen policy or algorithm seed"
-        )
-
-    inference = _artifact_from_state(
-        store, evaluation.get("inference_artifact"), expected_kind="inference"
-    )
-    dataset_artifact = _artifact_from_state(
-        store, dataset.get("dataset_artifact"), expected_kind="dataset"
-    )
-    eligibility_path = _single_artifact_member(
-        inference, "io/out/target_eligibility.tsv.gz", "target-eligibility sidecar"
-    )
-    diagnostics_path = _single_artifact_member(
-        inference, "io/out/model_diagnostics.tsv.gz", "model-diagnostics sidecar"
-    )
-    metadata_path = _single_artifact_member(
-        inference, "io/out/run_metadata.json", "SPATHI run metadata"
-    )
-    truth_path = _single_artifact_member(
-        dataset_artifact, "truth/networks.csv", "group-specific truth network"
-    )
-    genes_path = _single_artifact_member(
-        dataset_artifact, "truth/gene_universe.txt", "truth gene universe"
-    )
-    tf_path = _single_artifact_member(dataset_artifact, "extras/tf_list.txt", "TF list")
-    genes = frozenset(genes_path.read_text(encoding="utf-8").splitlines())
-    sources = frozenset(tf_path.read_text(encoding="utf-8").splitlines())
-    if not sources or not sources <= genes:
-        raise BenchmarkConfigError("Dimensional TF candidates differ from the gene universe")
-    eligibility = _tabular_rows(eligibility_path, delimiter="\t", compressed=True)
-    truth = _tabular_rows(truth_path, delimiter=",")
-    if not eligibility or len({row.get("target") for row in eligibility}) != len(eligibility):
-        raise BenchmarkConfigError("Dimensional target eligibility is empty or duplicated")
-    modes = {str(row.get("mode")) for row in eligibility}
-    expected_mode = expected_parameters.get("target_eligibility")
-    if modes != {expected_mode} or expected_mode not in {"all", "automatic"}:
-        raise BenchmarkConfigError("Dimensional target eligibility differs from the frozen policy")
-    targets: set[str] = set()
-    globally_eligible: set[str] = set()
-    for row in eligibility:
-        target = str(row.get("target", ""))
-        eligible = str(row.get("eligible", "")).lower()
-        if not target or eligible not in {"true", "false"}:
-            raise BenchmarkConfigError("Dimensional target eligibility contains invalid records")
-        targets.add(target)
-        if eligible == "true":
-            globally_eligible.add(target)
-    targets_frozen = frozenset(targets)
-    if targets_frozen != genes:
-        raise BenchmarkConfigError("Dimensional target eligibility omits expression genes")
-    globally_eligible_frozen = frozenset(globally_eligible)
-    if expected_mode == "all" and globally_eligible_frozen != targets_frozen:
-        raise BenchmarkConfigError("The all-target policy omitted a target from eligibility")
-    if not globally_eligible_frozen:
-        raise BenchmarkConfigError("Dimensional diagnostic retained no targets")
-    accounting = read_model_accounting(
-        diagnostics_path,
-        contexts=tuple(sorted(expected_contexts)),
-        targets=tuple(sorted(targets_frozen)),
-        globally_eligible=tuple(sorted(globally_eligible_frozen)),
-        parameters=expected_parameters,
-        algorithm_seed=expected_algorithm_seed,
-    )
-    eligible_by_context = accounting.eligible_targets
-    truth_edges: dict[str, set[tuple[str, str]]] = defaultdict(set)
-    seen_truth: set[tuple[str, str, str]] = set()
-    for row in truth:
-        context = str(row.get("context"))
-        source, target = str(row.get("source")), str(row.get("target"))
-        key = (context, source, target)
-        if key in seen_truth or source not in genes or target not in genes:
-            raise BenchmarkConfigError("Dimensional truth contains duplicate or unknown gene edges")
-        seen_truth.add(key)
-        if context not in expected_contexts and context != "global":
-            raise BenchmarkConfigError("Dimensional truth contains an unknown group")
-        if source not in sources or source == target:
-            continue
-        if context in expected_contexts:
-            truth_edges[context].add((source, target))
-    if set(truth_edges) != set(expected_contexts) or any(
-        not edges for edges in truth_edges.values()
-    ):
-        raise BenchmarkConfigError("Dimensional diagnostic lacks group-specific truth")
-    retained_truth = sum(
-        sum(edge[1] in eligible_by_context[context] for edge in truth_edges[context])
-        for context in expected_contexts
-    )
-    total_truth = sum(len(truth_edges[context]) for context in expected_contexts)
-    metadata = load_json_object(metadata_path, "dimensional SPATHI run metadata")
-    dimensions = metadata.get("input_dimensions")
-    models = metadata.get("models")
-    requested_parameters = metadata.get("requested_parameters")
-    effective = metadata.get("effective_parameters")
-    effective_eligibility = (
-        effective.get("target_eligibility") if isinstance(effective, Mapping) else None
-    )
-    expected_requested = {**dict(expected_parameters), "random_seed": expected_algorithm_seed}
-    if (
-        metadata.get("status") != "complete"
-        or metadata.get("random_seed") != expected_algorithm_seed
-        or not isinstance(dimensions, Mapping)
-        or not isinstance(models, Mapping)
-        or not isinstance(requested_parameters, Mapping)
-        or any(requested_parameters.get(key) != value for key, value in expected_requested.items())
-        or requested_parameters.get("target_list") not in {None, ""}
-        or dimensions.get("targets") != len(targets_frozen)
-        or dimensions.get("groups") != len(expected_contexts)
-        or not isinstance(effective_eligibility, Mapping)
-        or effective_eligibility.get("globally_eligible_targets") != len(globally_eligible_frozen)
-    ):
-        raise BenchmarkConfigError("Dimensional SPATHI accounting metadata is incomplete")
-    accounting.validate_metadata(models)
-    return {
-        "target_coverage": fmean(
-            len(eligible_by_context[context]) / len(targets_frozen) for context in expected_contexts
-        ),
-        "truth_edge_coverage": retained_truth / total_truth,
-        "targets_requested": len(targets_frozen) * len(expected_contexts),
-        "targets_retained": sum(len(eligible_by_context[context]) for context in expected_contexts),
-        "truth_edges_requested": total_truth,
-        "truth_edges_retained": retained_truth,
-        "models_trained": accounting.trained,
-        "fitted_estimators": accounting.trees_fitted,
-    }
-
-
 def analyze_dimensional_transfer(
     *,
     repo_root: Path,
     budget: str,
     panel_path: Path,
     profile_path: Path,
-    production_config_path: Path,
+    selected_config_path: Path,
     run_root: Path,
     output_path: Path,
 ) -> Path:
@@ -851,30 +613,21 @@ def analyze_dimensional_transfer(
     profile, production, state, frozen_root, canonical_store = _bound_analysis_inputs(
         repo_root=root,
         profile_path=profile_path,
-        production_config_path=production_config_path,
+        selected_config_path=selected_config_path,
         run_root=run_root,
     )
     if (
         budget not in {"reduced", "full"}
         or profile.get("id") != f"dimensional-transfer-{budget}-runtime"
         or profile.get("purpose") != "dimensional_transfer"
-        or production.get("budget") != budget
+        or production.get("calibration_budget") != budget
     ):
         raise BenchmarkConfigError(
             "Dimensional-transfer profile, production policy, and requested budget differ"
         )
-    exact_policy = exact_reference_policy(frozen_root, production)
-    production_policy = production["policy"]
+    production_policy = production["selected_policy"]
     production_id = str(production_policy["policy_id"])
-    production_is_exact = production_policy["policy_sha256"] == exact_policy["policy_sha256"]
-    if production_id == EXACT_REFERENCE_ID:
-        raise BenchmarkConfigError("Production policy uses the reserved exact-reference identity")
-    production_configuration_sha256 = canonical_json_sha256(
-        {"group_policy": production_policy["group_policy"]}
-    )
-    exact_configuration_sha256 = canonical_json_sha256(
-        {"group_policy": exact_policy["group_policy"]}
-    )
+    production_configuration_sha256 = canonical_json_sha256({"group_policy": production_policy["group_policy"]})
     metrics_path, summary_path = validate_summary_reports(state, run_root)
     if state.get("purpose") != "dimensional_transfer" or state.get("status") != "completed":
         raise BenchmarkConfigError("Dimensional-transfer pipeline is not completely summarized")
@@ -977,32 +730,13 @@ def analyze_dimensional_transfer(
         or row.get("dataset_role") != "dimensional_transfer"
         or row.get("regime") != "group_only"
         or row.get("family") != "spathi"
-        or row.get("configuration_id") not in {production_id, EXACT_REFERENCE_ID}
+        or row.get("configuration_id") != production_id
         or row.get("configuration_sha256")
-        != (
-            production_configuration_sha256
-            if row.get("configuration_id") == production_id
-            else exact_configuration_sha256
-        )
+        != production_configuration_sha256
         for row in directed_all
     ):
         raise BenchmarkConfigError("Dimensional-transfer contains missing or invalid metrics")
     directed = [row for row in directed_all if row["configuration_id"] == production_id]
-    exact_directed = [row for row in directed_all if row["configuration_id"] == EXACT_REFERENCE_ID]
-    expected_exact_datasets = {
-        dataset_id
-        for dataset_id, condition_id in dataset_condition.items()
-        if condition_id in EXACT_DIAGNOSTIC_CONDITIONS
-    }
-    if production_is_exact:
-        if exact_directed:
-            raise BenchmarkConfigError(
-                "Dimensional transfer duplicated the exact policy under another run identity"
-            )
-    elif {str(row["dataset_id"]) for row in exact_directed} != expected_exact_datasets:
-        raise BenchmarkConfigError(
-            "Dimensional exact diagnostic does not cover its two predeclared conditions"
-        )
     algorithm_seed, seed_derivation = transfer_algorithm_seed(frozen_root, budget=budget)
     if {int(row["algorithm_seed"]) for row in directed_all} != {algorithm_seed}:
         raise BenchmarkConfigError("Dimensional-transfer metrics use an undeclared algorithm seed")
@@ -1041,41 +775,6 @@ def analyze_dimensional_transfer(
         raise BenchmarkConfigError(
             "Every dimensional-transfer dataset must expose its declared group contexts"
         )
-
-    exact_contexts: dict[str, list[dict[str, float]]] = defaultdict(list)
-    exact_context_names: dict[str, set[str]] = defaultdict(set)
-    for row in exact_directed:
-        dataset_id = str(row["dataset_id"])
-        context = str(row["context"])
-        if (
-            dataset_id not in expected_exact_datasets
-            or not context.startswith("group:")
-            or context in exact_context_names[dataset_id]
-        ):
-            raise BenchmarkConfigError("Dimensional exact diagnostic contexts are invalid")
-        exact_context_names[dataset_id].add(context)
-        n_candidates = int(row["n_candidates"])
-        n_truth_edges = int(row["n_truth_edges"])
-        if n_candidates < 1 or not 0 < n_truth_edges < n_candidates:
-            raise BenchmarkConfigError("Dimensional exact diagnostic universe is invalid")
-        prevalence = n_truth_edges / n_candidates
-        aupr = _finite(row["aupr"], f"{dataset_id}/{context}/exact-aupr")
-        exact_contexts[dataset_id].append(
-            {
-                "adjusted_aupr": (aupr - prevalence) / (1.0 - prevalence),
-                "wall_time_seconds": _finite(
-                    row["wall_time_seconds"], f"{dataset_id}/exact-wall-time"
-                ),
-            }
-        )
-    if not production_is_exact and (
-        set(exact_contexts) != expected_exact_datasets
-        or any(
-            len(rows) != expected_contexts[dataset_condition[dataset_id]]
-            for dataset_id, rows in exact_contexts.items()
-        )
-    ):
-        raise BenchmarkConfigError("Dimensional exact diagnostic group coverage is incomplete")
 
     per_condition: dict[str, list[dict[str, float | None]]] = defaultdict(list)
     dataset_results = []
@@ -1156,147 +855,6 @@ def analyze_dimensional_transfer(
                 "estimate": estimate,
             }
         )
-    zero_delta = {
-        "adjusted_aupr": 0.0,
-        "target_coverage": 0.0,
-        "truth_edge_coverage": 0.0,
-        "wall_time_seconds": 0.0,
-        "fitted_estimators": 0,
-    }
-    exact_diagnostic: dict[str, Any] = {
-        "analysis_role": "post_freeze_descriptive_diagnostic",
-        "selection_feedback": False,
-        "conditions": list(EXACT_DIAGNOSTIC_CONDITIONS),
-        "exact_policy": {
-            "policy_id": EXACT_REFERENCE_ID,
-            "source_policy_id": exact_policy["source_policy_id"],
-            "policy_sha256": exact_policy["policy_sha256"],
-        },
-        "production_policy": {
-            "policy_id": production_id,
-            "policy_sha256": production_policy["policy_sha256"],
-        },
-        "paired_algorithm_seed": algorithm_seed,
-        "pairs": [],
-        "condition_summaries": [],
-        "identity_delta": None,
-    }
-    if production_is_exact:
-        exact_diagnostic.update(
-            {
-                "status": "not_applicable_production_is_exact",
-                "identity_delta": zero_delta,
-                "interpretation": (
-                    "The frozen production policy is byte-identical to the calibrated exact "
-                    "reference; duplicate inference was not executed and every paired delta "
-                    "is exactly zero by verified policy identity."
-                ),
-            }
-        )
-    else:
-        raw_evaluations = state.get("evaluations")
-        if not isinstance(raw_evaluations, list):
-            raise BenchmarkConfigError(
-                "Dimensional exact diagnostic requires pipeline evaluations and artifact store"
-            )
-        evaluation_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
-        for evaluation in raw_evaluations:
-            if not isinstance(evaluation, Mapping):
-                raise BenchmarkConfigError("Dimensional state contains an invalid evaluation")
-            key = (str(evaluation.get("dataset_id")), str(evaluation.get("configuration_id")))
-            if key in evaluation_by_key:
-                raise BenchmarkConfigError("Dimensional state repeats an evaluation")
-            evaluation_by_key[key] = evaluation
-        store = ArtifactStore(canonical_store)
-        production_result_by_dataset = {str(item["dataset_id"]): item for item in dataset_results}
-        pairs: list[dict[str, Any]] = []
-        for dataset_id in sorted(expected_exact_datasets):
-            production_evaluation = evaluation_by_key.get((dataset_id, production_id))
-            exact_evaluation = evaluation_by_key.get((dataset_id, EXACT_REFERENCE_ID))
-            if production_evaluation is None or exact_evaluation is None:
-                raise BenchmarkConfigError(
-                    f"Dimensional diagnostic lacks a paired evaluation for {dataset_id}"
-                )
-            contexts = frozenset(exact_context_names[dataset_id])
-            production_parameters = resolve_group_policy(
-                production_policy["group_policy"], len(contexts)
-            )
-            exact_parameters = resolve_group_policy(exact_policy["group_policy"], len(contexts))
-            exact_accounting = _configuration_accounting(
-                store=store,
-                evaluation=exact_evaluation,
-                dataset=dataset_state_by_id[dataset_id],
-                expected_contexts=contexts,
-                expected_configuration_id=EXACT_REFERENCE_ID,
-                expected_configuration_sha256=exact_configuration_sha256,
-                expected_parameters=exact_parameters,
-                expected_algorithm_seed=algorithm_seed,
-            )
-            production_accounting = _configuration_accounting(
-                store=store,
-                evaluation=production_evaluation,
-                dataset=dataset_state_by_id[dataset_id],
-                expected_contexts=contexts,
-                expected_configuration_id=production_id,
-                expected_configuration_sha256=production_configuration_sha256,
-                expected_parameters=production_parameters,
-                expected_algorithm_seed=algorithm_seed,
-            )
-            exact_metrics = {
-                "adjusted_aupr": fmean(
-                    item["adjusted_aupr"] for item in exact_contexts[dataset_id]
-                ),
-                "target_coverage": exact_accounting["target_coverage"],
-                "truth_edge_coverage": exact_accounting["truth_edge_coverage"],
-                "wall_time_seconds": exact_contexts[dataset_id][0]["wall_time_seconds"],
-                "fitted_estimators": exact_accounting["fitted_estimators"],
-            }
-            production_dataset = production_result_by_dataset[dataset_id]
-            production_metrics = {
-                "adjusted_aupr": production_dataset["adjusted_aupr"],
-                "target_coverage": production_accounting["target_coverage"],
-                "truth_edge_coverage": production_accounting["truth_edge_coverage"],
-                "wall_time_seconds": production_dataset["wall_time_seconds"],
-                "fitted_estimators": production_accounting["fitted_estimators"],
-            }
-            delta = {key: production_metrics[key] - exact_metrics[key] for key in zero_delta}
-            pairs.append(
-                {
-                    "dataset_id": dataset_id,
-                    "condition_id": dataset_condition[dataset_id],
-                    "generation_seed": generation_seeds[dataset_id],
-                    "exact": exact_metrics,
-                    "production": production_metrics,
-                    "delta_production_minus_exact": delta,
-                }
-            )
-        condition_summaries = []
-        for condition_id in EXACT_DIAGNOSTIC_CONDITIONS:
-            members = [item for item in pairs if item["condition_id"] == condition_id]
-            condition_summaries.append(
-                {
-                    "condition_id": condition_id,
-                    "pairs": len(members),
-                    "mean_delta_production_minus_exact": {
-                        key: fmean(
-                            float(item["delta_production_minus_exact"][key]) for item in members
-                        )
-                        for key in zero_delta
-                    },
-                }
-            )
-        exact_diagnostic.update(
-            {
-                "status": "paired_descriptive",
-                "pairs": pairs,
-                "condition_summaries": condition_summaries,
-                "interpretation": (
-                    "Paired deltas quantify post-freeze transfer of the already selected "
-                    "efficiency policy. They are descriptive, use no confidence interval or "
-                    "decision rule, and cannot reopen policy selection."
-                ),
-            }
-        )
     payload = {
         "schema_version": "1.0",
         "artifact_type": "spathi_dimensional_transfer_results",
@@ -1306,10 +864,10 @@ def analyze_dimensional_transfer(
         "status": "complete",
         "panel": _reference(root, panel_path),
         "profile": _reference(root, profile_path),
-        "production_config": {
-            **_reference(root, production_config_path),
-            "policy_id": production["policy"]["policy_id"],
-            "policy_sha256": production["policy"]["policy_sha256"],
+        "selected_config": {
+            **_reference(root, selected_config_path),
+            "policy_id": production["selected_policy"]["policy_id"],
+            "policy_sha256": production["selected_policy"]["policy_sha256"],
         },
         "algorithm_seed": {"value": algorithm_seed, "derivation": seed_derivation},
         "summary_inputs": {
@@ -1326,7 +884,6 @@ def analyze_dimensional_transfer(
         "datasets": sorted(dataset_results, key=lambda item: str(item["dataset_id"])),
         "conditions": conditions,
         "contrasts": contrasts,
-        "exact_production_diagnostic": exact_diagnostic,
         "limitations": [
             "The panel is generated by scMultiSim from a fully public synthetic design and makes no biological-realism claim.",
             "The full budget expands genes, candidate TFs, and cells only in separate one-axis pairs; their joint interaction is not estimated. The reduced budget contains no scale endpoint and reports no scale contrast.",
@@ -1355,7 +912,6 @@ def analyze_dimensional_transfer(
 __all__ = [
     "analyze_dimensional_transfer",
     "condition_ids_for_budget",
-    "exact_reference_policy",
     "topology_rows",
     "topology_text",
     "transfer_algorithm_seed",

@@ -25,18 +25,6 @@ from run_tool import (
     _validated_scalar_params,
 )
 
-TARGET_ELIGIBILITY_COLUMNS = (
-    "target",
-    "mode",
-    "eligible",
-    "detected_cells",
-    "detected_fraction",
-    "expression_min",
-    "expression_max",
-    "required_detected_cells",
-    "reason",
-)
-
 
 def _positive_int(raw: str) -> int:
     value = int(raw)
@@ -88,8 +76,6 @@ def _validated_plan(
     )
     if model["random_seed"] != algorithm_seed:
         raise ValueError("convergence plan seed differs from its physical model")
-    if model["adaptive_trees"] is not False:
-        raise ValueError("convergence fan-out requires adaptive_trees=false")
     prefixes = plan["logical_prefixes"]
     if not isinstance(prefixes, list) or len(prefixes) != 4:
         raise ValueError("convergence plan must declare exactly four logical prefixes")
@@ -158,7 +144,7 @@ def run(args: argparse.Namespace) -> None:
 
     from spathi import SpathiConfig, prepare_forest_prefixes
     from spathi.diagnostics import compute_weight_diagnostics
-    from spathi.outputs import IncrementalRunWriter, write_tsv_gzip_records
+    from spathi.outputs import IncrementalRunWriter
 
     with TemporaryDirectory(prefix=".spathi-convergence-", dir=args.output_dir.parent) as name:
         staging = Path(name)
@@ -221,11 +207,6 @@ def run(args: argparse.Namespace) -> None:
         logical_outputs: list[dict[str, Any]] = []
         for logical, count in zip(prefixes, counts, strict=True):
             prefix_dir = prefix_dirs[count]
-            write_tsv_gzip_records(
-                (record.to_dict() for record in prepared.prepared_inference.target_eligibility),
-                prefix_dir / "target_eligibility.tsv.gz",
-                TARGET_ELIGIBILITY_COLUMNS,
-            )
             metadata = {
                 "schema_version": "1.0",
                 "artifact_type": "spathi_forest_prefix",

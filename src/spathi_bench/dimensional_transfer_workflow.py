@@ -18,16 +18,12 @@ from .config import (
     validate_profile_references,
 )
 from .dimensional_transfer import (
-    EXACT_DIAGNOSTIC_CONDITIONS,
-    EXACT_REFERENCE_ID,
     PANEL_PATH,
     analyze_dimensional_transfer,
     condition_ids_for_budget,
-    exact_reference_policy,
     transfer_algorithm_seed,
     validate_transfer_panel,
 )
-from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_dimensional_transfer_report
@@ -39,6 +35,7 @@ from .runtime import (
     docker_runtime_environment,
 )
 from .safe_io import path_below_no_symlinks, write_idempotent_json
+from .selected_policy import completed_selected_config
 from .state import run_lock
 from .study_context import bind_phase_identity, phase_flow_id
 from .workflows import run_profile_pipeline
@@ -53,10 +50,10 @@ _IDENTITY_INPUTS = (
     "schemas/execution-policy.schema.json",
     "schemas/dimensional-transfer-results.schema.json",
     "schemas/profile.schema.json",
-    "schemas/spathi-production-config.schema.json",
+    "schemas/spathi-selected-config.schema.json",
     "src/spathi_bench/dimensional_transfer.py",
     "src/spathi_bench/dimensional_transfer_workflow.py",
-    "src/spathi_bench/production_policy.py",
+    "src/spathi_bench/selected_policy.py",
     "src/spathi_bench/report_publication.py",
 )
 
@@ -100,37 +97,12 @@ def _panel_dependency_hashes(repo_root: Path, panel: Mapping[str, Any]) -> dict[
     }
 
 
-def _relabel_exact_request(
-    tools: dict[str, Any],
-    custom_tools: dict[str, Any],
-    metadata: dict[str, Any],
-    *,
-    seed: int,
-) -> None:
-    """Give the paired exact reference a distinct, auditable run identity."""
-
-    run_id = f"spathi_exact_reference__seed_{seed}"
-    tool_id = f"custom_{run_id}"
-    tools["runs"][0]["run_id"] = run_id
-    tools["runs"][0]["tool_id"] = tool_id
-    custom_tools["tools"][0]["run_id"] = run_id
-    custom_tools["tools"][0]["name"] = f"SPATHI exact reference seed {seed}"
-    metadata["runs"][0].update(
-        {
-            "run_id": run_id,
-            "configuration_id": EXACT_REFERENCE_ID,
-            "selection_role": "base",
-            "notes": ["Post-freeze exact diagnostic only; it cannot alter the production policy."],
-        }
-    )
-
-
 def materialize_dimensional_transfer_profile(
     *,
     repo_root: Path,
     budget: str,
     template_profile: Mapping[str, Any],
-    production_config_path: Path,
+    selected_config_path: Path,
     production: Mapping[str, Any],
     panel: Mapping[str, Any],
     output_dir: Path,
@@ -147,9 +119,9 @@ def materialize_dimensional_transfer_profile(
         or template_profile.get("status") != "runnable"
     ):
         raise BenchmarkConfigError("Dimensional-transfer template does not match its budget")
-    if production.get("budget") != budget:
+    if production.get("calibration_budget") != budget:
         raise BenchmarkConfigError("Production policy and transfer profile use different budgets")
-    policy = production.get("policy")
+    policy = production.get("selected_policy")
     if not isinstance(policy, Mapping):
         raise BenchmarkConfigError("Dimensional-transfer production policy is missing")
 
@@ -193,12 +165,6 @@ def materialize_dimensional_transfer_profile(
         "run-metadata request",
         boundary=root,
     )
-    exact_policy = exact_reference_policy(root, production)
-    exact_jobs = [
-        str(job["id"]) for job in jobs if str(job["condition_id"]) in EXACT_DIAGNOSTIC_CONDITIONS
-    ]
-    if len(exact_jobs) != len(EXACT_DIAGNOSTIC_CONDITIONS):
-        raise BenchmarkConfigError("Dimensional exact diagnostic has incomplete condition routing")
     inference_batches = [
         {
             "id": f"infer_dimensional_transfer_{budget}",
@@ -211,59 +177,6 @@ def materialize_dimensional_transfer_profile(
             "run_metadata": _relative(root, metadata_path, "run-metadata request"),
         }
     ]
-    exact_paths: dict[str, Path] = {}
-    diagnostic_required = exact_policy["policy_sha256"] != policy.get("policy_sha256")
-    if diagnostic_required:
-        exact_tools, exact_custom_tools, exact_metadata = build_selected_spathi_requests(
-            exact_policy,
-            [algorithm_seed],
-            docker_image=load_image_lock(root)["images"]["spathi"]["tag"],
-            seed_namespace=f"{budget}.dimensional_transfer",
-        )
-        _relabel_exact_request(
-            exact_tools,
-            exact_custom_tools,
-            exact_metadata,
-            seed=algorithm_seed,
-        )
-        exact_paths = {
-            "exact_tools_path": write_idempotent_json(
-                runtime_dir / "exact-tools-params.json",
-                exact_tools,
-                "exact tools request",
-                boundary=root,
-            ),
-            "exact_custom_tools_path": write_idempotent_json(
-                runtime_dir / "exact-custom-tools.json",
-                exact_custom_tools,
-                "exact custom-tools request",
-                boundary=root,
-            ),
-            "exact_metadata_path": write_idempotent_json(
-                runtime_dir / "exact-run-metadata.json",
-                exact_metadata,
-                "exact run-metadata request",
-                boundary=root,
-            ),
-        }
-        inference_batches.append(
-            {
-                "id": f"infer_dimensional_exact_diagnostic_{budget}",
-                "kind": "spathi",
-                "dataset_role": "dimensional_transfer",
-                "generation_jobs": exact_jobs,
-                "regime": "group_only",
-                "tools_params": _relative(
-                    root, exact_paths["exact_tools_path"], "exact tools request"
-                ),
-                "custom_tools": _relative(
-                    root, exact_paths["exact_custom_tools_path"], "exact custom-tools request"
-                ),
-                "run_metadata": _relative(
-                    root, exact_paths["exact_metadata_path"], "exact run-metadata request"
-                ),
-            }
-        )
     runtime_profile = copy.deepcopy(dict(template_profile))
     profile_id = f"dimensional-transfer-{budget}-runtime"
     runtime_profile.update(
@@ -273,7 +186,7 @@ def materialize_dimensional_transfer_profile(
                 "Runtime dimensional-transfer profile executing exactly one frozen SPATHI "
                 f"policy over the {budget} truth-bearing condition panel."
             ),
-            "production_config": _relative(root, production_config_path, "production policy"),
+            "selected_config": _relative(root, selected_config_path, "production policy"),
             "inference_batches": inference_batches,
         }
     )
@@ -295,12 +208,6 @@ def materialize_dimensional_transfer_profile(
         "tools_path": tools_path,
         "custom_tools_path": custom_path,
         "metadata_path": metadata_path,
-        **exact_paths,
-        "exact_diagnostic_status": (
-            "paired_execution_required"
-            if diagnostic_required
-            else "not_applicable_production_is_exact"
-        ),
         "algorithm_seed": algorithm_seed,
     }
 
@@ -312,7 +219,7 @@ def run_dimensional_transfer_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str,
-    efficiency_run_id: str | None = None,
+    calibration_run_id: str | None = None,
     max_cores: int | None = None,
     max_ram_gb: float | None = None,
     reserve_cores: int = 0,
@@ -329,11 +236,11 @@ def run_dimensional_transfer_workflow(
         "Dimensional-transfer work root",
     )
 
-    production_path, production = completed_production_config(
+    production_path, production = completed_selected_config(
         repo_root=root,
         work_root=work,
         budget=profile,
-        efficiency_run_id=efficiency_run_id,
+        calibration_run_id=calibration_run_id,
     )
     template_id = f"dimensional-transfer-{profile}"
     template_path = root / f"experiments/v1/profiles/{template_id}.json"
@@ -345,7 +252,7 @@ def run_dimensional_transfer_workflow(
         {
             "template_profile_sha256": sha256_file(template_path),
             "panel_dependencies": _panel_dependency_hashes(root, panel),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config_sha256": sha256_file(production_path),
             "benchmark_repository": {
                 "commit": benchmark["commit"],
                 "origin": benchmark["origin"],
@@ -374,7 +281,7 @@ def run_dimensional_transfer_workflow(
             repo_root=root,
             budget=profile,
             template_profile=template,
-            production_config_path=production_path,
+            selected_config_path=production_path,
             production=production,
             panel=panel,
             output_dir=workflow_root / "materialized",
@@ -397,7 +304,7 @@ def run_dimensional_transfer_workflow(
             budget=profile,
             panel_path=panel_path,
             profile_path=runtime_profile_path,
-            production_config_path=production_path,
+            selected_config_path=production_path,
             run_root=run_root,
             output_path=workflow_root / "dimensional-transfer-results.json",
         )
@@ -410,8 +317,8 @@ def run_dimensional_transfer_workflow(
             "identity": {"fingerprint": identity},
             "status": "publishing",
             "runtime_plan": runtime_plan,
-            "production_config": _relative(root, production_path, "production policy"),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config": _relative(root, production_path, "production policy"),
+            "selected_config_sha256": sha256_file(production_path),
             "template_profile": _relative(root, template_path, "template profile"),
             "template_profile_sha256": sha256_file(template_path),
             "runtime_profile": _relative(root, runtime_profile_path, "runtime profile"),

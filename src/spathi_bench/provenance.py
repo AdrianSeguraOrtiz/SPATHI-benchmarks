@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -31,59 +30,6 @@ class SnapshotSource:
     path: Path
     relative: str
     kind: str
-
-
-_PRODUCTION_PROVENANCE_KEYS = {
-    "calibration_selection",
-    "efficiency_plan",
-    "efficiency_evidence",
-    "efficiency_results",
-}
-_SAFETY_PROVENANCE_KEYS = {"panel", "plan", "evidence", "results"}
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-def production_provenance_artifacts(
-    production: dict[str, Any],
-) -> list[tuple[str, dict[str, str]]]:
-    """Return labeled v1 production-evidence leaves after strict shape validation."""
-
-    provenance = production.get("provenance")
-    if not isinstance(provenance, dict):
-        raise BenchmarkConfigError("SPATHI production policy has no provenance")
-    observed_keys = set(provenance)
-    allowed_keys = _PRODUCTION_PROVENANCE_KEYS | {"efficiency_safety"}
-    if not _PRODUCTION_PROVENANCE_KEYS.issubset(observed_keys) or not observed_keys.issubset(
-        allowed_keys
-    ):
-        raise BenchmarkConfigError("SPATHI production policy provenance is invalid")
-
-    raw_artifacts: list[tuple[str, Any]] = [
-        (key, provenance[key]) for key in sorted(_PRODUCTION_PROVENANCE_KEYS)
-    ]
-    safety = provenance.get("efficiency_safety")
-    if safety is not None:
-        if not isinstance(safety, dict) or set(safety) != _SAFETY_PROVENANCE_KEYS:
-            raise BenchmarkConfigError(
-                "SPATHI production policy efficiency-safety provenance is invalid"
-            )
-        raw_artifacts.extend(
-            (f"efficiency_safety_{key}", safety[key]) for key in sorted(_SAFETY_PROVENANCE_KEYS)
-        )
-
-    artifacts: list[tuple[str, dict[str, str]]] = []
-    for label, artifact in raw_artifacts:
-        if (
-            not isinstance(artifact, dict)
-            or set(artifact) != {"path", "sha256"}
-            or not isinstance(artifact.get("path"), str)
-            or not artifact["path"]
-            or not isinstance(artifact.get("sha256"), str)
-            or _SHA256_RE.fullmatch(artifact["sha256"]) is None
-        ):
-            raise BenchmarkConfigError("SPATHI production policy provenance is invalid")
-        artifacts.append((label, artifact))
-    return artifacts
 
 
 def _git(repo: Path, *arguments: str) -> str:
@@ -188,10 +134,10 @@ def _snapshot_source_records(
     if selected_profile.is_relative_to((repo_root / "work").resolve()):
         runtime_candidates.add(profile_relative)
 
-    production_relative = profile.get("production_config")
+    production_relative = profile.get("selected_config")
     if production_relative is not None:
         if not isinstance(production_relative, str):
-            raise BenchmarkConfigError("Profile production_config must be a relative path")
+            raise BenchmarkConfigError("Profile selected_config must be a relative path")
         production_path = resolve_repo_path(
             repo_root, production_relative, "SPATHI production policy"
         )
@@ -199,13 +145,8 @@ def _snapshot_source_records(
         if production_path.is_relative_to((repo_root / "work").resolve()):
             runtime_candidates.add(production_relative)
         production = load_json_object(production_path, "SPATHI production policy")
-        for _label, artifact in production_provenance_artifacts(production):
-            artifact_path = resolve_repo_path(
-                repo_root, artifact["path"], "production policy provenance"
-            )
-            relative_paths.add(artifact["path"])
-            if artifact_path.is_relative_to((repo_root / "work").resolve()):
-                runtime_candidates.add(artifact["path"])
+        evidence = production["selection_evidence"]
+        _add_ranking_chain(repo_root, relative_paths, evidence["validation_ranking"], runtime_candidates)
     materialization_path = profile.get("materialization_manifest")
     if materialization_path is not None:
         if not isinstance(materialization_path, str):

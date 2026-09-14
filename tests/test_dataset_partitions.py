@@ -145,8 +145,6 @@ def test_equal_filenames_with_different_content_do_not_conflict(tmp_path: Path) 
     assert contract["protected_roles"] == [
         "development",
         "dimensional_transfer",
-        "efficiency_safety",
-        "efficiency_validation",
         "test",
         "validation",
     ]

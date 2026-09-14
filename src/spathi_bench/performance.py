@@ -31,7 +31,7 @@ _EXPECTED_BUDGETS = {
         "catalog_metadata": "experiments/v1/inference/group_only/reduced-primary-metadata.json",
         "datasets": (("scmultisim_performance_medium", 1, "medium"),),
         "tools": (
-            ("spathi_production", "spathi", "spathi_production_policy"),
+            ("spathi_selected", "spathi", "spathi_selected_policy"),
             ("genie3_default", "genie3", "catalog"),
             ("grnboost2_default", "grnboost2", "catalog"),
             ("infercsn_none", "infercsn", "catalog"),
@@ -50,7 +50,7 @@ _EXPECTED_BUDGETS = {
             ("scmultisim_performance_medium", 1, "medium"),
         ),
         "tools": (
-            ("spathi_production", "spathi", "spathi_production_policy"),
+            ("spathi_selected", "spathi", "spathi_selected_policy"),
             ("aracne3_default", "aracne3", "catalog"),
             ("genie3_default", "genie3", "catalog"),
             ("grnboost2_default", "grnboost2", "catalog"),
@@ -296,7 +296,7 @@ def _spathi_scientific_request(
     production: Mapping[str, Any],
     algorithm_seed: int,
 ) -> dict[str, Any]:
-    policy = production.get("policy")
+    policy = production.get("selected_policy")
     if not isinstance(policy, Mapping):
         raise BenchmarkConfigError("Performance production configuration has no policy")
     tools, custom_tools, metadata = build_selected_spathi_requests(
@@ -309,14 +309,14 @@ def _spathi_scientific_request(
     custom = custom_tools["tools"][0]
     run_metadata = metadata["runs"][0]
     expected = [
-        item for item in budget_design["tools"] if item["origin"] == "spathi_production_policy"
+        item for item in budget_design["tools"] if item["origin"] == "spathi_selected_policy"
     ]
     if len(expected) != 1:
         raise BenchmarkConfigError("Performance design requires exactly one SPATHI policy entry")
     return {
         "configuration_id": str(expected[0]["configuration_id"]),
         "tool_id": str(expected[0]["tool_id"]),
-        "origin": "spathi_production_policy",
+        "origin": "spathi_selected_policy",
         "algorithm_seed": algorithm_seed,
         "request": request,
         "custom_tool": custom,
@@ -533,7 +533,7 @@ def materialize_performance_protocol(
     runtime_profile.update(
         {
             "id": runtime_profile_id,
-            "production_config": _relative(root, production_path, "production config"),
+            "selected_config": _relative(root, production_path, "production config"),
             "inference_batches": [
                 {
                     "id": f"performance_catalog_{budget}",
@@ -591,11 +591,11 @@ def materialize_performance_protocol(
             "path": _relative(root, template_path, "performance template"),
             "sha256": sha256_file(template_path),
         },
-        "production_config": {
+        "selected_config": {
             "path": _relative(root, production_path, "production config"),
             "sha256": sha256_file(production_path),
-            "policy_id": production["policy"]["policy_id"],
-            "policy_sha256": production["policy"]["policy_sha256"],
+            "policy_id": production["selected_policy"]["policy_id"],
+            "policy_sha256": production["selected_policy"]["policy_sha256"],
         },
         "runtime_plan": {
             "path": _relative(root, runtime_plan_path, "runtime plan"),

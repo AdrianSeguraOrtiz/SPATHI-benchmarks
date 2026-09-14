@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .algorithm_seed_contract import algorithm_seeds_by_configuration
-from .artifacts import canonical_json_sha256, sha256_file
+from .artifacts import canonical_json_sha256
 from .config import validate_json
 from .safe_io import atomic_write_json
 from .seeds import (
@@ -203,7 +203,7 @@ def _audit_dimensional_transfer_inference_seeds(
                     "budget": budget,
                     "algorithm_seed": seed,
                     "seed_derivation": derivation,
-                    "reuse_contract": "paired_exact_and_production_within_dataset",
+                    "reuse_contract": "fixed_selected_policy_within_dataset",
                 }
             )
     except BenchmarkConfigError as exc:
@@ -854,263 +854,6 @@ def _audit_scalability_inference_seeds(
     return artifacts, seed_count
 
 
-def _audit_efficiency_study(
-    root: Path,
-    plan: Mapping[str, Any],
-) -> tuple[dict[str, Any], int, int, int]:
-    path = root / "experiments/v1/spathi/efficiency-study.json"
-    payload = _read_object(path, "efficiency study")
-    budgets = payload.get("budgets")
-    if payload.get("schema_version") != "1.0" or not isinstance(budgets, Mapping):
-        raise ReproducibilityAuditError("Efficiency study must contain v1 budget definitions")
-    assignments: list[dict[str, Any]] = []
-    algorithm_seed_count = 0
-    statistical_seed_count = 0
-    execution_order_seed_count = 0
-    for budget_id in ("reduced", "full"):
-        budget = budgets.get(budget_id)
-        if not isinstance(budget, Mapping):
-            raise ReproducibilityAuditError(f"Efficiency study has no {budget_id!r} budget")
-        seeds = budget.get("algorithm_seeds")
-        if not isinstance(seeds, list) or not seeds:
-            raise ReproducibilityAuditError(
-                f"Efficiency {budget_id} algorithm seeds must be a non-empty array"
-            )
-        namespace = f"{budget_id}.efficiency_validation"
-        for index, value in enumerate(seeds, start=1):
-            seed = _positive_seed(value, f"efficiency.{budget_id}.algorithm_seeds[{index - 1}]")
-            coordinates = {
-                "purpose": "algorithm_replicate",
-                "replicate_index": index,
-            }
-            expected = derive_plan_seed(
-                plan,
-                namespace=namespace,
-                stream="inference",
-                coordinates=coordinates,
-            )
-            if seed != expected:
-                raise ReproducibilityAuditError(
-                    f"Efficiency {budget_id} algorithm seed {index} derives {expected}, "
-                    f"but the committed value is {seed}"
-                )
-            assignments.append(
-                {
-                    "budget": budget_id,
-                    "purpose": "algorithm_replicate",
-                    "replicate_index": index,
-                    **plan_seed_record(
-                        plan,
-                        namespace=namespace,
-                        stream="inference",
-                        coordinates=coordinates,
-                    ),
-                }
-            )
-            algorithm_seed_count += 1
-        if budget.get("analysis_role") == "confirmatory":
-            statistical_seed = _positive_seed(
-                budget.get("statistical_seed"), f"efficiency.{budget_id}.statistical_seed"
-            )
-            statistical_coordinates = {"purpose": "noninferiority_analysis"}
-            expected_statistical = derive_plan_seed(
-                plan,
-                namespace=namespace,
-                stream="statistical",
-                coordinates=statistical_coordinates,
-            )
-            if statistical_seed != expected_statistical:
-                raise ReproducibilityAuditError(
-                    f"Efficiency {budget_id} statistical seed derives {expected_statistical}, "
-                    f"but the committed value is {statistical_seed}"
-                )
-            assignments.append(
-                {
-                    "budget": budget_id,
-                    "purpose": "noninferiority_analysis",
-                    **plan_seed_record(
-                        plan,
-                        namespace=namespace,
-                        stream="statistical",
-                        coordinates=statistical_coordinates,
-                    ),
-                }
-            )
-            statistical_seed_count += 1
-        elif "statistical_seed" in budget:
-            raise ReproducibilityAuditError(
-                f"Efficiency {budget_id} descriptive budget reserves a statistical seed"
-            )
-        execution_order_seed = _positive_seed(
-            budget.get("execution_order_seed"),
-            f"efficiency.{budget_id}.execution_order_seed",
-        )
-        execution_coordinates = {"purpose": "counterbalanced_execution_order"}
-        expected_execution_order = derive_plan_seed(
-            plan,
-            namespace=namespace,
-            stream="execution_order",
-            coordinates=execution_coordinates,
-        )
-        if execution_order_seed != expected_execution_order:
-            raise ReproducibilityAuditError(
-                f"Efficiency {budget_id} execution-order seed derives "
-                f"{expected_execution_order}, but the committed value is "
-                f"{execution_order_seed}"
-            )
-        assignments.append(
-            {
-                "budget": budget_id,
-                "purpose": "counterbalanced_execution_order",
-                **plan_seed_record(
-                    plan,
-                    namespace=namespace,
-                    stream="execution_order",
-                    coordinates=execution_coordinates,
-                ),
-            }
-        )
-        execution_order_seed_count += 1
-    return (
-        {
-            "artifact_id": "spathi.efficiency-study",
-            "kind": "efficiency_study",
-            "content_sha256": canonical_json_sha256(payload),
-            "seed_assignment_sha256": canonical_json_sha256(assignments),
-            "stochastic_units": len(assignments),
-        },
-        algorithm_seed_count,
-        statistical_seed_count,
-        execution_order_seed_count,
-    )
-
-
-def _audit_efficiency_design_sensitivity(root: Path) -> dict[str, Any]:
-    from .config import BenchmarkConfigError
-    from .design_sensitivity import load_design_sensitivity_contract
-
-    try:
-        contract, operating_characteristics = load_design_sensitivity_contract(root)
-    except BenchmarkConfigError as exc:
-        raise ReproducibilityAuditError(
-            f"Invalid prospective efficiency design sensitivity: {exc}"
-        ) from exc
-    return {
-        "artifact_id": "spathi.efficiency-design-sensitivity",
-        "kind": "efficiency_design_sensitivity_contract",
-        "content_sha256": canonical_json_sha256(contract),
-        "seed_assignment_sha256": operating_characteristics["operating_characteristics_sha256"],
-        "stochastic_units": 0,
-    }
-
-
-def _audit_efficiency_safety_seed_contract(
-    root: Path,
-    plan: Mapping[str, Any],
-) -> tuple[dict[str, Any], int, int, int]:
-    """Bind all pre-freeze safety conditions to disjoint data and paired execution seeds."""
-
-    namespace = "full.efficiency_safety"
-
-    algorithm = plan_seed_record(
-        plan,
-        namespace=namespace,
-        stream="inference",
-        coordinates={"purpose": "common_algorithm_seed"},
-    )
-    execution_order = plan_seed_record(
-        plan,
-        namespace=namespace,
-        stream="execution_order",
-        coordinates={"purpose": "counterbalanced_execution_order"},
-    )
-    json_members = (
-        "experiments/v1/profiles/efficiency-safety-full.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf100.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf10.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-tf10-single-group.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-g3000-tf1500.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/scenario-g15000-tf100.json",
-    )
-    run_members = (
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf100-c300-runs.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c500-single-group-runs.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c300-groups-10-40-250-runs.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g100-tf10-c10000-runs.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g3000-tf1500-c300-runs.json",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/g15000-tf100-c300-runs.json",
-    )
-    raw_members = (
-        "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf100.tsv",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-tf10.tsv",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-g3000-tf1500.tsv",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/regulatory-network-g15000-tf100.tsv",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/tree-three-groups.nwk",
-        "experiments/v1/simulations/scmultisim/efficiency_safety/tree-single-group.nwk",
-    )
-    design_inputs = {
-        relative: canonical_json_sha256(
-            _read_object(root / relative, f"efficiency-safety input {relative}")
-        )
-        for relative in (*json_members, *run_members)
-    }
-    design_inputs.update({relative: sha256_file(root / relative) for relative in raw_members})
-
-    generation_blocks: list[dict[str, Any]] = []
-    generation_seeds: set[int] = set()
-    for relative in run_members:
-        runs = _read_object(root / relative, f"efficiency-safety runs {relative}").get("runs")
-        if not isinstance(runs, list) or len(runs) != 1:
-            raise ReproducibilityAuditError(
-                f"Efficiency-safety input {relative} must contain exactly one simulator run"
-            )
-        run = runs[0]
-        if not isinstance(run, Mapping):
-            raise ReproducibilityAuditError(
-                f"Efficiency-safety input {relative} contains an invalid simulator run"
-            )
-        base_seed = _positive_seed(run.get("base_seed"), f"{relative}.base_seed")
-        replicates = run.get("replicates")
-        if replicates != 3:
-            raise ReproducibilityAuditError(
-                f"Efficiency-safety input {relative} must contain three replicates"
-            )
-        seeds = set(range(base_seed, base_seed + replicates))
-        if generation_seeds & seeds:
-            raise ReproducibilityAuditError("Efficiency-safety generation seeds are not unique")
-        generation_seeds.update(seeds)
-        generation_blocks.append(
-            {
-                "path": relative,
-                "run_id": run.get("run_id"),
-                "base_seed": base_seed,
-                "replicates": replicates,
-            }
-        )
-    if len(generation_seeds) != 18:
-        raise ReproducibilityAuditError(
-            "Efficiency-safety design must contain eighteen unique generation seeds"
-        )
-    assignments = {
-        "generation_blocks": generation_blocks,
-        "algorithm_seed": algorithm,
-        "execution_order_seed": execution_order,
-        "reuse_contract": "one_common_algorithm_seed_for_exact_and_candidate_on_all_datasets",
-    }
-    return (
-        {
-            "artifact_id": "spathi.efficiency-safety",
-            "kind": "efficiency_safety_seed_contract",
-            "content_sha256": canonical_json_sha256(design_inputs),
-            "seed_assignment_sha256": canonical_json_sha256(assignments),
-            "stochastic_units": 20,
-        },
-        len(generation_seeds),
-        1,
-        1,
-    )
-
-
 def audit_reproducibility(repo_root: Path) -> dict[str, Any]:
     """Validate every committed seed and return stable, hash-backed audit evidence."""
 
@@ -1140,19 +883,6 @@ def audit_reproducibility(repo_root: Path) -> dict[str, Any]:
         dimensional_artifact, dimensional_seeds = _audit_dimensional_transfer_inference_seeds(
             root, plan
         )
-        (
-            efficiency_artifact,
-            efficiency_algorithm_seeds,
-            efficiency_statistical_seeds,
-            efficiency_execution_order_seeds,
-        ) = _audit_efficiency_study(root, plan)
-        efficiency_sensitivity_artifact = _audit_efficiency_design_sensitivity(root)
-        (
-            efficiency_safety_artifact,
-            efficiency_safety_generation_seeds,
-            efficiency_safety_algorithm_seeds,
-            efficiency_safety_execution_order_seeds,
-        ) = _audit_efficiency_safety_seed_contract(root, plan)
     except (TypeError, SeedPlanError) as exc:
         raise ReproducibilityAuditError(f"Invalid seed assignment: {exc}") from exc
     artifacts = sorted(
@@ -1164,9 +894,6 @@ def audit_reproducibility(repo_root: Path) -> dict[str, Any]:
             *scalability_artifacts,
             calibration_artifact,
             comparison_artifact,
-            efficiency_artifact,
-            efficiency_sensitivity_artifact,
-            efficiency_safety_artifact,
             dimensional_artifact,
         ],
         key=lambda item: (item["kind"], item["artifact_id"]),
@@ -1193,13 +920,6 @@ def audit_reproducibility(repo_root: Path) -> dict[str, Any]:
             "statistical_contract_documents": len(statistical_artifacts),
             "statistical_root_seeds": statistical_root_seeds,
             "comparison_algorithm_seeds": comparison_seeds,
-            "efficiency_algorithm_seeds": efficiency_algorithm_seeds,
-            "efficiency_statistical_root_seeds": efficiency_statistical_seeds,
-            "efficiency_execution_order_seeds": efficiency_execution_order_seeds,
-            "efficiency_design_sensitivity_contracts": 1,
-            "efficiency_safety_generation_seeds": efficiency_safety_generation_seeds,
-            "efficiency_safety_algorithm_seeds": efficiency_safety_algorithm_seeds,
-            "efficiency_safety_execution_order_seeds": (efficiency_safety_execution_order_seeds),
             "scalability_algorithm_seeds": scalability_seeds,
             "dimensional_transfer_algorithm_seeds": dimensional_seeds,
         },

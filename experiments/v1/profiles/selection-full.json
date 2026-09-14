@@ -82,7 +82,7 @@
       "Contains 24 validation datasets: twelve dyngen and twelve scMultiSim instances spanning balanced, imbalanced, single-group, small and medium-scale conditions.",
       "Single-group and multigroup outcomes are summarized independently before the predeclared conditional policy is frozen.",
       "Its seeds are disjoint from both development and test partitions.",
-      "Its winner is the exact reference for the full efficiency-validation study and cannot enter comparison directly.",
+      "Its selected configuration is frozen and feeds dimensional transfer, comparison, scalability and performance directly.",
       "The scMultiSim validation topology is independent of development and test."
     ]
   },

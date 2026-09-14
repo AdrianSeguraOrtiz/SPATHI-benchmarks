@@ -81,7 +81,7 @@
     "notes": [
       "Contains eight validation datasets: four dyngen and four scMultiSim conditions covering balance, group count and scale.",
       "Its stochastic streams are disjoint from development and test.",
-      "Its winner is the exact reference for the reduced efficiency-validation study and cannot enter comparison directly."
+      "Its selected configuration is frozen and feeds dimensional transfer, comparison, scalability and performance directly."
     ]
   },
   "statistics": {

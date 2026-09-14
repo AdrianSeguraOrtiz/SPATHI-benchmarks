@@ -56,16 +56,13 @@ config_field_partitions = {
     "paths": {"expression", "tf_list", "groups", "output_dir"},
     "scientific_inputs": {"target_list", "centroid_weights"},
     "scientific_parameters": {
-        "adaptive_min_estimators", "adaptive_patience", "adaptive_tolerance",
-        "adaptive_tree_step", "adaptive_trees", "bandwidth", "bandwidth_scale", "bootstrap",
+        "bandwidth", "bandwidth_scale", "bootstrap",
         "distance_metric", "distance_space", "distance_standardization",
         "group_size_correction", "kernel", "max_depth", "max_features",
-        "min_samples_leaf", "n_components", "min_target_detected_cells",
-        "min_target_detected_fraction", "min_target_weighted_detected_ess",
-        "min_target_weighted_detected_fraction", "n_estimators", "pca_svd_solver",
-        "random_seed", "target_eligibility", "tree_method", "weight_mode",
+        "min_samples_leaf", "n_components", "n_estimators", "pca_svd_solver",
+        "random_seed", "tree_method", "weight_mode",
     },
-    "operational_options": {"threads", "report"},
+    "operational_options": {"threads", "parallel_backend", "report"},
 }
 config_definition = dataclasses.fields(config_type)
 config_fields = {field.name for field in config_definition}

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from selection_helpers import selected_document
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
+from spathi_bench.calibration import load_search_space, materialize_group_policy
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.report_publication import publish_workflow_report
 from spathi_bench.reporting.common import central_report_path, render_html
@@ -127,21 +130,6 @@ def _results_and_panel(budget: str = "reduced") -> tuple[dict[str, Any], dict[st
         "datasets": datasets,
         "conditions": conditions,
         "contrasts": contrasts,
-        "exact_production_diagnostic": {
-            "analysis_role": "post_freeze_descriptive_diagnostic",
-            "selection_feedback": False,
-            "conditions": ["g3000_tf100_c300", "g100_tf10_c300"],
-            "status": "not_applicable_production_is_exact",
-            "pairs": [],
-            "condition_summaries": [],
-            "identity_delta": {
-                "adjusted_aupr": 0.0,
-                "target_coverage": 0.0,
-                "truth_edge_coverage": 0.0,
-                "wall_time_seconds": 0.0,
-                "fitted_estimators": 0,
-            },
-        },
     }, panel
 
 
@@ -178,38 +166,11 @@ def _report_payload() -> dict[str, Any]:
         **results,
         "design": panel["design"],
         "feasibility": panel["feasibility_basis"],
-        "exact_production_diagnostic": {
-            "analysis_role": "post_freeze_descriptive_diagnostic",
-            "selection_feedback": False,
-            "conditions": ["g3000_tf100_c300", "g100_tf10_c300"],
-            "exact_policy": {
-                "policy_id": "spathi_exact_reference",
-                "source_policy_id": "spathi_production_v1",
-                "policy_sha256": "1" * 64,
-            },
-            "production_policy": {
-                "policy_id": "spathi_production_v1",
-                "policy_sha256": "1" * 64,
-            },
-            "paired_algorithm_seed": 123,
-            "status": "not_applicable_production_is_exact",
-            "pairs": [],
-            "condition_summaries": [],
-            "identity_delta": {
-                "adjusted_aupr": 0.0,
-                "target_coverage": 0.0,
-                "truth_edge_coverage": 0.0,
-                "wall_time_seconds": 0.0,
-                "fitted_estimators": 0,
-            },
-            "interpretation": "Production is the exact reference.",
-        },
-        "production": {
+        "selection": {
             "budget": "reduced",
             "evidence_role": "descriptive",
-            "decision": "descriptive_only",
             "policy": {
-                "policy_id": "spathi_production_v1",
+                "policy_id": "spathi_conditional_v1",
                 "policy_sha256": "1" * 64,
                 "group_policy": group_policy,
             },
@@ -233,7 +194,6 @@ def test_renderer_is_english_interactive_self_contained_and_scope_safe() -> None
 
     assert "Does SPATHI preserve accuracy" in html
     assert "Budget-specific truth-bearing conditions and routing controls" in html
-    assert "Exact reference versus production policy" in html
     assert "Full-budget change from each matched anchor" in html
     assert "No scale contrast in the reduced budget" in html
     assert "ANDREA inter-stage ZIPs" in html
@@ -241,6 +201,86 @@ def test_renderer_is_english_interactive_self_contained_and_scope_safe() -> None
     assert "<script src=" not in html.lower()
     assert "</script><script>alert(1)</script>" not in html
     assert "\\u003c/script\\u003e" in html
+
+
+def test_interactive_transfer_report_uses_shared_rendering_contracts() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to execute the report's JavaScript contract test")
+    payload = _report_payload()
+    payload["workflow"].update(
+        runtime_plan={"detected": {"effective_cpu_threads": 8, "effective_memory_bytes": 1024}},
+        execution_plan={
+            "operations": {"inference": {"cpu_threads": 4, "memory_bytes": 512}},
+            "exclusive_inference": True,
+        },
+    )
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+const nodes = new Map();
+const seen = new Set();
+const report = {
+  query(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, {appendChild(child) { return child; }});
+    return nodes.get(selector);
+  },
+  element(tag, options) {
+    assert.ok(arguments.length <= 2);
+    return {tag, ...(options || {})};
+  },
+  append(parent, ...children) { assert.ok(parent); return children; },
+  boot(callback) { callback(payload); },
+  notice(target, tone, title, message) {
+    assert.ok(['warning', 'success', 'info'].includes(tone));
+    assert.equal(typeof title, 'string');
+    assert.equal(typeof message, 'string');
+  },
+  renderHeader(workflow, kind) {
+    assert.equal(workflow, payload.workflow);
+    assert.equal(kind, 'dimensional_transfer');
+    seen.add('header');
+  },
+  csvButton(label, filename, columns, rows) {
+    assert.equal(filename, 'dimensional-transfer-conditions.csv');
+    assert.ok(Array.isArray(columns) && columns.length > 0);
+    assert.equal(rows, payload.conditions);
+    seen.add('csv');
+    return {};
+  },
+  renderLinks(target, title, links) {
+    assert.equal(typeof title, 'string');
+    assert.equal(links, payload.links);
+    seen.add('links');
+  },
+  createTable(target, columns, rows) {
+    assert.ok(Array.isArray(columns) && Array.isArray(rows));
+  },
+  addStatCards(target, cards) { assert.ok(Array.isArray(cards)); },
+  plot(target, traces, layout) {
+    assert.ok(layout.xaxis.title && layout.yaxis.title);
+    assert.ok(Array.isArray(traces));
+    seen.add('plots');
+  },
+  empty() {},
+  bytes: String,
+  formatInteger: String,
+  formatNumber: String,
+  formatSeconds: String,
+  humanize: String,
+};
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {window: {SpathiReport: report}});
+assert.deepEqual([...seen].sort(), ['csv', 'header', 'links', 'plots']);
+"""
+    subprocess.run(
+        [node, "-e", script, str(REPO_ROOT / "src/spathi_bench/reporting/assets/dimensional_transfer.js")],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstruction(
@@ -302,74 +342,22 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
         },
     )
 
-    group_policy = {
-        "routing_parameter": "group_count",
-        "branches": {
-            "single_group": {
-                "condition": {"minimum_group_count": 1, "maximum_group_count": 1},
-                "parameters": {},
-            },
-            "multi_group": {
-                "condition": {"minimum_group_count": 2},
-                "parameters": {},
-            },
-        },
-    }
-    policy_sha256 = canonical_json_sha256(group_policy)
-    production_path = _write_json(
-        workflow_root / "production-config.json",
+    search = load_search_space(REPO_ROOT)
+    group_policy = materialize_group_policy(search, search["base_configuration"])
+    selection = selected_document(
         {
-            "schema_version": "1.0",
-            "artifact_type": "spathi_production_policy",
-            "budget": "reduced",
-            "evidence_role": "descriptive",
-            "status": "descriptive",
-            "decision": "descriptive_only",
-            "policy": {
-                "policy_id": "spathi_production_v1",
-                "policy_sha256": policy_sha256,
-                "group_policy": group_policy,
-                "spathi_commit": "b" * 40,
-            },
-            "provenance": {
-                label: {"path": f"work/v1/evidence/{label}.json", "sha256": "c" * 64}
-                for label in (
-                    "calibration_selection",
-                    "efficiency_plan",
-                    "efficiency_evidence",
-                    "efficiency_results",
-                )
-            },
+            "policy_id": "spathi_conditional_v1",
+            "group_policy": group_policy,
+            "spathi_commit": "b" * 40,
         },
+    )
+    policy_sha256 = selection["selected_policy"]["policy_sha256"]
+    selection_path = _write_json(
+        version / "workflows/calibration/reduced/calibration-fixture/selected-config.json",
+        selection,
     )
     panel_path = root / ("experiments/v1/simulations/scmultisim/dimensional_transfer/panel.json")
     result_rows, _panel = _results_and_panel()
-    exact_diagnostic = {
-        "analysis_role": "post_freeze_descriptive_diagnostic",
-        "selection_feedback": False,
-        "conditions": ["g3000_tf100_c300", "g100_tf10_c300"],
-        "exact_policy": {
-            "policy_id": "spathi_exact_reference",
-            "source_policy_id": "spathi_production_v1",
-            "policy_sha256": policy_sha256,
-        },
-        "production_policy": {
-            "policy_id": "spathi_production_v1",
-            "policy_sha256": policy_sha256,
-        },
-        "paired_algorithm_seed": 2078775612,
-        "status": "not_applicable_production_is_exact",
-        "pairs": [],
-        "condition_summaries": [],
-        "identity_delta": {
-            "adjusted_aupr": 0.0,
-            "target_coverage": 0.0,
-            "truth_edge_coverage": 0.0,
-            "wall_time_seconds": 0.0,
-            "fitted_estimators": 0,
-        },
-        "interpretation": "The frozen production policy is the exact reference.",
-    }
     results_path = _write_json(
         workflow_root / "dimensional-transfer-results.json",
         {
@@ -387,10 +375,10 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
                 "path": runtime_profile_path.relative_to(root).as_posix(),
                 "sha256": sha256_file(runtime_profile_path),
             },
-            "production_config": {
-                "path": production_path.relative_to(root).as_posix(),
-                "sha256": sha256_file(production_path),
-                "policy_id": "spathi_production_v1",
+            "selected_config": {
+                "path": selection_path.relative_to(root).as_posix(),
+                "sha256": sha256_file(selection_path),
+                "policy_id": "spathi_conditional_v1",
                 "policy_sha256": policy_sha256,
             },
             "algorithm_seed": {
@@ -424,7 +412,6 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
             "datasets": result_rows["datasets"],
             "conditions": result_rows["conditions"],
             "contrasts": result_rows["contrasts"],
-            "exact_production_diagnostic": exact_diagnostic,
             "limitations": [
                 "Synthetic dimensional shapes only.",
                 "Operational subset only.",
@@ -448,8 +435,8 @@ def test_real_renderer_is_byte_identical_after_workflow_completion_and_reconstru
         "identity": {"fingerprint": "d" * 64},
         "runtime_plan": _runtime_plan(),
         "status": "publishing",
-        "production_config": production_path.relative_to(root).as_posix(),
-        "production_config_sha256": sha256_file(production_path),
+        "selected_config": selection_path.relative_to(root).as_posix(),
+        "selected_config_sha256": sha256_file(selection_path),
         "template_profile": template_path.relative_to(root).as_posix(),
         "template_profile_sha256": sha256_file(template_path),
         "runtime_profile": runtime_profile_path.relative_to(root).as_posix(),

@@ -2,7 +2,7 @@
 
 Seeds use SPATHI's public scientific task identity: BLAKE2s-32 over canonical
 JSON ``[run_seed, group, target]``, personalized with ``SPATHI-1``. Diagnostics
-cover every requested group/target, including globally excluded targets.
+cover every requested group/target, including models skipped for numerical safety.
 """
 
 from __future__ import annotations
@@ -35,14 +35,7 @@ MODEL_COLUMNS = (
     "n_edges",
     "importance_sum",
     "fit_seconds",
-    "target_detected_cells",
-    "target_detected_fraction",
-    "target_weighted_detected_fraction",
-    "target_weighted_detected_ess",
     "n_estimators_fitted",
-    "adaptive_converged",
-    "convergence_delta",
-    "convergence_checks",
     "message",
 )
 TRAINED_STATUSES = frozenset({"trained", "trained_no_positive_importance"})
@@ -52,7 +45,6 @@ SKIPPED_STATUSES = frozenset(
         "constant_target",
         "no_predictors_after_self_exclusion",
         "no_variable_predictors",
-        "target_not_estimable",
     }
 )
 
@@ -86,7 +78,6 @@ def _number(raw: str, label: str) -> float:
 
 @dataclass(frozen=True)
 class ModelAccounting:
-    eligible_targets: dict[str, tuple[str, ...]]
     status_counts: dict[str, int]
     models_requested: int
     trees_fitted: int
@@ -102,7 +93,6 @@ class ModelAccounting:
             "completed": self.models_requested,
             "trained": self.trained,
             "preflight_skipped": skipped,
-            "target_not_estimable": self.status_counts.get("target_not_estimable", 0),
             "fit_or_importance_failures": 0,
             "skipped_target_records": skipped,
             "fitted_estimators_total": self.trees_fitted,
@@ -121,11 +111,10 @@ def read_model_accounting(
     *,
     contexts: Sequence[str],
     targets: Sequence[str],
-    globally_eligible: Sequence[str],
     parameters: Mapping[str, Any],
     algorithm_seed: int,
 ) -> ModelAccounting:
-    """Check completion, seeds, eligibility precedence and actual tree budgets."""
+    """Check exact model coverage, deterministic seeds and fixed tree counts."""
     try:
         with gzip.open(path, "rt", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
@@ -140,13 +129,6 @@ def read_model_accounting(
     observed_keys = {(row["target_group"], row["target"]) for row in rows}
     if observed_keys != expected_keys or len(rows) != len(expected_keys):
         raise BenchmarkConfigError("Model diagnostics do not cover the exact group-target product")
-    automatic = parameters["target_eligibility"] == "automatic"
-    global_targets = set(globally_eligible)
-    if not global_targets <= set(targets) or (not automatic and global_targets != set(targets)):
-        raise BenchmarkConfigError(
-            "Global target eligibility contradicts the requested target space"
-        )
-    eligible: dict[str, list[str]] = {context: [] for context in contexts}
     counts: Counter[str] = Counter()
     trees = 0
     for row in rows:
@@ -161,66 +143,20 @@ def read_model_accounting(
         ):
             raise BenchmarkConfigError(f"Model diagnostic seed differs for {label}")
         fitted = _integer(row["n_estimators_fitted"], f"trees[{label}]")
-        maximum = int(parameters["n_estimators"])
-        adaptive = parameters["adaptive_trees"]
-        raw_converged = row["adaptive_converged"].lower()
-        if raw_converged not in {"true", "false"}:
-            raise BenchmarkConfigError(f"Model adaptive_converged is not a boolean for {label}")
-        converged = raw_converged == "true"
+        required = parameters["n_estimators"]
+        if type(required) is not int or required < 1:
+            raise BenchmarkConfigError("Requested tree count must be a positive integer")
         if status in TRAINED_STATUSES:
-            if not 0 < fitted <= maximum:
-                raise BenchmarkConfigError(f"Trained model has an invalid tree budget for {label}")
-            if adaptive:
-                step = int(parameters["adaptive_tree_step"])
-                minimum = int(parameters["adaptive_min_estimators"])
-                if fitted != maximum and (fitted % step or fitted < minimum or not converged):
-                    raise BenchmarkConfigError(f"Adaptive tree count is off schedule for {label}")
-                if converged:
-                    delta = _number(row["convergence_delta"], f"convergence_delta[{label}]")
-                    if (
-                        fitted < minimum
-                        or delta > float(parameters["adaptive_tolerance"])
-                        or fitted <= step * int(parameters["adaptive_patience"])
-                    ):
-                        raise BenchmarkConfigError(
-                            f"Adaptive convergence is inconsistent for {label}"
-                        )
-            elif fitted != maximum or converged:
+            if fitted != required:
                 raise BenchmarkConfigError(
                     f"Fixed-tree model has an invalid tree budget for {label}"
                 )
-        elif fitted or converged:
-            raise BenchmarkConfigError(
-                f"Untrained model reports fitted trees/convergence for {label}"
-            )
-
-        estimable = target in global_targets
-        if automatic and estimable:
-            # SPATHI checks sample support before group-specific detection.
-            positive = _integer(row["n_positive_weight_samples"], f"positive_samples[{label}]")
-            if positive < 2:
-                if status != "insufficient_positive_weight_samples":
-                    raise BenchmarkConfigError(
-                        f"Model status contradicts sample support for {label}"
-                    )
-            else:
-                fraction = _number(row["target_weighted_detected_fraction"], f"fraction[{label}]")
-                ess = _number(row["target_weighted_detected_ess"], f"ESS[{label}]")
-                if fraction > 1 + 1e-12 or ess > positive + 1e-9:
-                    raise BenchmarkConfigError(
-                        f"Weighted detection is outside its range for {label}"
-                    )
-                estimable = fraction >= float(
-                    parameters["min_target_weighted_detected_fraction"]
-                ) and ess >= float(parameters["min_target_weighted_detected_ess"])
-        if (status == "target_not_estimable") != (not estimable):
-            raise BenchmarkConfigError(f"Model status contradicts target eligibility for {label}")
-        if estimable:
-            eligible[f"group:{group}"].append(target)
+        elif fitted:
+            raise BenchmarkConfigError(f"Untrained model reports fitted trees for {label}")
+        _number(row["fit_seconds"], f"fit_seconds[{label}]")
         counts[status] += 1
         trees += fitted
     return ModelAccounting(
-        eligible_targets={context: tuple(sorted(values)) for context, values in eligible.items()},
         status_counts=dict(counts),
         models_requested=len(rows),
         trees_fitted=trees,

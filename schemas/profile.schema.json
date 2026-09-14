@@ -20,14 +20,14 @@
     "id": {"$ref": "#/$defs/id"},
     "status": {"enum": ["runnable", "planned"]},
     "purpose": {
-      "enum": ["smoke", "calibration", "selection", "regression", "benchmark", "efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer", "performance"]
+      "enum": ["smoke", "calibration", "selection", "regression", "benchmark", "scalability", "dimensional_transfer", "performance"]
     },
     "calibration_budget": {"enum": ["full", "reduced"]},
     "calibration_stage": {
       "enum": ["geometry", "estimator", "interaction", "estimator_scale_transfer", "convergence", "validation"]
     },
     "calibration_fidelity": {"enum": ["scout", "confirmation", "final"]},
-    "production_config": {"$ref": "#/$defs/relative_path"},
+    "selected_config": {"$ref": "#/$defs/relative_path"},
     "materialization_manifest": {"$ref": "#/$defs/relative_path"},
     "description": {"type": "string", "minLength": 1},
     "generation_jobs": {
@@ -42,7 +42,6 @@
       "enum": [
         "bulk_canonical",
         "bulk_full",
-        "efficiency_development_canonical",
         "performance_full",
         "scale_canonical",
         "scale_full",
@@ -57,7 +56,7 @@
       "if": {
         "properties": {
           "status": {"const": "runnable"},
-          "purpose": {"not": {"enum": ["efficiency_development", "efficiency", "efficiency_safety", "scalability", "dimensional_transfer"]}}
+          "purpose": {"not": {"enum": ["scalability", "dimensional_transfer"]}}
         },
         "required": ["status", "purpose"]
       },
@@ -125,7 +124,7 @@
         },
         "required": ["status", "purpose"]
       },
-      "then": {"required": ["production_config", "materialization_manifest"]}
+      "then": {"required": ["selected_config", "materialization_manifest"]}
     }
   ],
   "$defs": {
@@ -150,7 +149,7 @@
         "simulator_runs": {"$ref": "#/$defs/relative_path"},
         "generator_request": {"$ref": "#/$defs/relative_path"},
         "dataset_role": {
-          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
+          "enum": ["smoke", "development", "validation", "test", "scalability", "dimensional_transfer", "performance"]
         },
         "split_id": {"$ref": "#/$defs/id"},
         "condition_id": {"$ref": "#/$defs/id"}
@@ -181,7 +180,7 @@
         "id": {"$ref": "#/$defs/id"},
         "kind": {"enum": ["baseline", "spathi"]},
         "dataset_role": {
-          "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
+          "enum": ["smoke", "development", "validation", "test", "scalability", "dimensional_transfer", "performance"]
         },
         "generation_jobs": {
           "type": "array",
@@ -396,7 +395,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["smoke", "development", "validation", "efficiency_development", "efficiency_validation", "efficiency_safety", "test", "scalability", "dimensional_transfer", "performance"]
+            "enum": ["smoke", "development", "validation", "test", "scalability", "dimensional_transfer", "performance"]
           }
         },
         "generation_jobs": {

@@ -9,8 +9,9 @@ from typing import Any
 import pytest
 
 import spathi_bench.pipeline as pipeline
-import spathi_bench.production_policy as production_policy
 import spathi_bench.scalability_workflow as scalability
+import spathi_bench.selected_policy as selected_policy
+from selection_helpers import selected_document
 from spathi_bench.artifacts import Artifact, ArtifactStore, canonical_json_sha256, sha256_file
 from spathi_bench.config import (
     BenchmarkConfigError,
@@ -193,6 +194,8 @@ def _andrea_logical_measurement(resources: dict[str, Any]) -> dict[str, Any]:
 
 def _group_policy(parameters: dict[str, Any]) -> dict[str, Any]:
     multi = dict(parameters)
+    if multi["bootstrap"] is None:
+        multi["bootstrap"] = multi["tree_method"] == "random-forest"
     multi.pop("random_seed")
     single = {
         **multi,
@@ -219,29 +222,12 @@ def _group_policy(parameters: dict[str, Any]) -> dict[str, Any]:
 
 def _production(parameters: dict[str, Any], *, budget: str = "reduced") -> dict[str, Any]:
     policy = _group_policy(parameters)
-    return {
-        "schema_version": "1.0",
-        "artifact_type": "spathi_production_policy",
-        "budget": budget,
-        "evidence_role": "descriptive" if budget == "reduced" else "confirmatory",
-        "status": "descriptive" if budget == "reduced" else "confirmed",
-        "decision": "descriptive_only" if budget == "reduced" else "reference_retained",
-        "policy": {
-            "policy_id": "spathi_production_v1",
+    return selected_document({
+            "policy_id": "spathi_conditional_v1",
             "policy_sha256": canonical_json_sha256(policy),
             "group_policy": policy,
             "spathi_commit": LOCKED_SPATHI_COMMIT,
-        },
-        "provenance": {
-            name: {"path": f"work/efficiency/{name}.json", "sha256": "9" * 64}
-            for name in (
-                "calibration_selection",
-                "efficiency_plan",
-                "efficiency_evidence",
-                "efficiency_results",
-            )
-        },
-    }
+        }, budget=budget)
 
 
 def _copy_materialization_repository(tmp_path: Path) -> Path:
@@ -252,7 +238,7 @@ def _copy_materialization_repository(tmp_path: Path) -> Path:
         "schemas/profile.schema.json",
         "schemas/repos-lock.schema.json",
         "schemas/run-metadata.schema.json",
-        "schemas/spathi-production-config.schema.json",
+        "schemas/spathi-selected-config.schema.json",
         "experiments/v1/seeds/seed-plan.json",
         "repos.lock.json",
     ):
@@ -287,13 +273,13 @@ def test_materialization_executes_one_shape_with_scalability_seed(
         )
     )
     production = _production(frozen_spathi_params)
-    production_path = _write_json(root / "work/efficiency/production-config.json", production)
+    production_path = _write_json(root / "work/calibration/selected-config.json", production)
 
     materialized = scalability.materialize_scalability_dataset(
         repo_root=root,
         budget="reduced",
         template_profile=template,
-        production_config_path=production_path,
+        selected_config_path=production_path,
         production=production,
         panel=panel,
         dataset=panel["datasets"][0],
@@ -311,7 +297,7 @@ def test_materialization_executes_one_shape_with_scalability_seed(
     profile = json.loads(Path(materialized["profile_path"]).read_text(encoding="utf-8"))
     request = json.loads(Path(materialized["request_path"]).read_text(encoding="utf-8"))
     metadata = json.loads(Path(materialized["metadata_path"]).read_text(encoding="utf-8"))
-    assert profile["production_config"] == "work/efficiency/production-config.json"
+    assert profile["selected_config"] == "work/calibration/selected-config.json"
     assert len(request["datasets"]) == 1
     assert request["datasets"][0]["id"] == panel["datasets"][0]["id"]
     assert request["scale_grid"] == {
@@ -354,7 +340,7 @@ def test_materialized_synthetic_control_declares_its_own_scale_grid(
         )
     )
     production = _production(frozen_spathi_params, budget="full")
-    production_path = _write_json(root / "work/efficiency/production-config.json", production)
+    production_path = _write_json(root / "work/calibration/selected-config.json", production)
     control = next(
         dataset
         for dataset in panel["datasets"]
@@ -365,7 +351,7 @@ def test_materialized_synthetic_control_declares_its_own_scale_grid(
         repo_root=root,
         budget="full",
         template_profile=template,
-        production_config_path=production_path,
+        selected_config_path=production_path,
         production=production,
         panel=panel,
         dataset=control,
@@ -397,7 +383,7 @@ def test_materialization_rejects_a_scope_inconsistent_with_its_budget(
         )
     )
     production = _production(frozen_spathi_params)
-    production_path = _write_json(root / "work/efficiency/production-config.json", production)
+    production_path = _write_json(root / "work/calibration/selected-config.json", production)
     dataset = panel["datasets"][0]
 
     with pytest.raises(BenchmarkConfigError, match="invalid target scope"):
@@ -405,7 +391,7 @@ def test_materialization_rejects_a_scope_inconsistent_with_its_budget(
             repo_root=root,
             budget="reduced",
             template_profile=template,
-            production_config_path=production_path,
+            selected_config_path=production_path,
             production=production,
             panel=panel,
             dataset=dataset,
@@ -494,12 +480,7 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
             "transcription_factors": 2,
             "targets": 12,
         },
-        "effective_parameters": {
-            "target_eligibility": {
-                "globally_eligible_targets": 10,
-                "globally_ineligible_targets": 2,
-            }
-        },
+        "effective_parameters": {"n_estimators": 100},
         "models": {
             "requested": 12,
             "completed": 12,
@@ -578,7 +559,7 @@ def test_measurement_reconciles_completion_resources_and_disk(tmp_path: Path) ->
 
     assert measurement["policy_branch"] == "single_group"
     assert measurement["dimensions"]["targets"] == 12
-    assert measurement["inference"]["targets_eligible"] == 10
+    assert measurement["inference"]["models_trained"] == 10
     assert measurement["inference"]["andrea_execution_measurement"]["wall_time_seconds"] == 9.0
     assert measurement["inference"]["models_completed"] == 12
     assert measurement["inference"]["trees_fitted"] == 1000
@@ -1057,8 +1038,6 @@ def _fake_measurement(
             "inference_artifact_bytes": 200,
             "spathi_output_bytes": 70,
             "targets_requested": target_count,
-            "targets_eligible": target_count,
-            "targets_ineligible": 0,
             "models_requested": target_count * groups,
             "models_completed": target_count * groups,
             "models_trained": target_count * groups,
@@ -1182,9 +1161,8 @@ def test_result_document_completes_and_reports_a_mixed_scale_panel(tmp_path: Pat
         },
     ]
     production = {
-        "decision": "reference_retained",
-        "policy": {
-            "policy_id": "spathi_production_v1",
+        "selected_policy": {
+            "policy_id": "spathi_selected_v1",
             "policy_sha256": "9" * 64,
             "spathi_commit": "1" * 40,
         },
@@ -1301,11 +1279,11 @@ def test_high_level_workflow_freezes_publication_scale_results(
         shutil.copyfile(REPO_ROOT / relative, destination)
     work = root / "work"
     production = _production(frozen_spathi_params, budget="full")
-    production_path = _write_json(work / "efficiency/production-config.json", production)
+    production_path = _write_json(work / "calibration/selected-config.json", production)
 
     monkeypatch.setattr(
         scalability,
-        "completed_production_config",
+        "completed_selected_config",
         lambda **_kwargs: (production_path, production),
     )
     monkeypatch.setattr(
@@ -1433,79 +1411,79 @@ def test_high_level_workflow_freezes_publication_scale_results(
     assert rendered["workflow_root"].name == state["flow_id"]
 
 
-def test_scalability_rejects_missing_efficiency_policy(tmp_path: Path) -> None:
+def test_scalability_rejects_missing_calibration_policy(tmp_path: Path) -> None:
     with pytest.raises(BenchmarkConfigError, match="spathi-bench run reduced"):
-        production_policy.completed_production_config(
+        selected_policy.completed_selected_config(
             repo_root=tmp_path,
             work_root=tmp_path / "work",
             budget="reduced",
-            efficiency_run_id=None,
+            calibration_run_id=None,
         )
 
 
-def _completed_efficiency_reference(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+def _completed_calibration_reference(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     root = tmp_path / "repo"
     work = root / "work"
-    workflow_root = work / "v1/workflows/efficiency/reduced/efficiency-current"
-    production_path = _write_json(workflow_root / "production-config.json", {})
+    workflow_root = work / "v1/workflows/calibration/reduced/calibration-current"
+    production_path = _write_json(workflow_root / "selected-config.json", {})
     workflow_path = _write_json(
         workflow_root / "workflow.json",
         {
-            "workflow_type": "efficiency",
-            "profile": "reduced",
+            "workflow_type": "calibration",
+            "calibration_budget": "reduced",
             "status": "complete",
-            "production_config": production_path.relative_to(root).as_posix(),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config": production_path.relative_to(root).as_posix(),
+            "selected_config_sha256": sha256_file(production_path),
         },
     )
     return root, work, workflow_root, workflow_path
 
 
-def test_completed_production_policy_must_belong_to_the_requested_efficiency_run(
+def test_completed_selected_policy_must_belong_to_the_requested_calibration_run(
     tmp_path: Path,
 ) -> None:
-    root, work, workflow_root, workflow_path = _completed_efficiency_reference(tmp_path)
-    production_path = workflow_root / "production-config.json"
-    foreign_path = _write_json(workflow_root.parent / "foreign-production-config.json", {})
+    root, work, workflow_root, workflow_path = _completed_calibration_reference(tmp_path)
+    production_path = workflow_root / "selected-config.json"
+    foreign_path = _write_json(workflow_root.parent / "foreign-selected-config.json", {})
     state = json.loads(workflow_path.read_text(encoding="utf-8"))
-    state["production_config"] = foreign_path.relative_to(root).as_posix()
-    state["production_config_sha256"] = sha256_file(foreign_path)
+    state["selected_config"] = foreign_path.relative_to(root).as_posix()
+    state["selected_config_sha256"] = sha256_file(foreign_path)
     _write_json(workflow_path, state)
     production_path.unlink()
 
-    with pytest.raises(BenchmarkConfigError, match="policy is missing or changed"):
-        production_policy.completed_production_config(
+    with pytest.raises(BenchmarkConfigError, match="escapes|missing or changed"):
+        selected_policy.completed_selected_config(
             repo_root=root,
             work_root=work,
             budget="reduced",
-            efficiency_run_id="efficiency-current",
+            calibration_run_id="calibration-current",
         )
 
 
 @pytest.mark.parametrize("symlink_kind", ["workflow", "production", "directory"])
-def test_completed_production_policy_rejects_symlinked_workflow_material(
+def test_completed_selected_policy_rejects_symlinked_workflow_material(
     tmp_path: Path,
     symlink_kind: str,
 ) -> None:
-    root, work, workflow_root, workflow_path = _completed_efficiency_reference(tmp_path)
+    root, work, workflow_root, workflow_path = _completed_calibration_reference(tmp_path)
     if symlink_kind == "workflow":
         target = workflow_root / "workflow-target.json"
         workflow_path.rename(target)
         workflow_path.symlink_to(target.name)
     elif symlink_kind == "production":
-        production_path = workflow_root / "production-config.json"
+        production_path = workflow_root / "selected-config.json"
         target = workflow_root / "production-target.json"
         production_path.rename(target)
         production_path.symlink_to(target.name)
     else:
-        target = workflow_root.with_name("efficiency-target")
+        target = workflow_root.with_name("calibration-target")
         workflow_root.rename(target)
         workflow_root.symlink_to(target.name, target_is_directory=True)
 
-    with pytest.raises(BenchmarkConfigError, match="must not be a symlink|missing or changed"):
-        production_policy.completed_production_config(
+    with pytest.raises(BenchmarkConfigError, match="symlink|missing or changed"):
+        selected_policy.completed_selected_config(
             repo_root=root,
             work_root=work,
             budget="reduced",
-            efficiency_run_id="efficiency-current",
+            calibration_run_id="calibration-current",
         )

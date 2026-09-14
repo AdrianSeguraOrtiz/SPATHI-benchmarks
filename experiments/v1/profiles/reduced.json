@@ -103,7 +103,7 @@
     ],
     "notes": [
       "Reduced is a descriptive end-to-end check, not publication evidence.",
-      "Its ten datasets use only test/*-reduced-runs.json manifests and are disjoint from full test, calibration development, calibration validation and efficiency data.",
+      "Its ten datasets use only test/*-reduced-runs.json manifests and are disjoint from full test, calibration development, calibration validation and other protected roles.",
       "The six dynamic conditions and four invariant controls remain separate descriptive comparisons.",
       "No run receives a truth-derived regulatory prior or target list.",
       "Each independently simulated dataset contributes one equally weighted paired block; this profile intentionally runs no hypothesis test, confidence interval or statistical winner selection."

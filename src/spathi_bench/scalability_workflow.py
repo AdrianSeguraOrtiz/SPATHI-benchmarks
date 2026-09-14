@@ -1,4 +1,4 @@
-"""Post-efficiency SPATHI computational scalability workflow.
+"""Post-calibration SPATHI computational scalability workflow.
 
 This workflow deliberately answers a narrower question than the simulator-based
 accuracy experiments: can the frozen production policy complete on a rounded,
@@ -35,7 +35,6 @@ from .pipeline import (
     run_inference,
     scale_stress_generation_wall_time,
 )
-from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_scalability_report
@@ -54,6 +53,7 @@ from .scalability_boundary import (
     target_scout_scope,
 )
 from .seeds import derive_plan_seed, load_seed_plan
+from .selected_policy import completed_selected_config
 from .state import load_state, run_lock, write_state
 from .study_context import bind_phase_identity, phase_flow_id
 from .tool_contract import spathi_runtime_resources
@@ -69,11 +69,11 @@ _IDENTITY_INPUTS = (
     "schemas/profile.schema.json",
     "schemas/scalability-results.schema.json",
     "schemas/scalability-boundary.schema.json",
-    "schemas/spathi-production-config.schema.json",
+    "schemas/spathi-selected-config.schema.json",
     "src/spathi_bench/scale_stress.py",
     "src/spathi_bench/pipeline.py",
     "src/spathi_bench/execution_policy.py",
-    "src/spathi_bench/production_policy.py",
+    "src/spathi_bench/selected_policy.py",
     "src/spathi_bench/provenance.py",
     "src/spathi_bench/scalability_workflow.py",
     "src/spathi_bench/scalability_boundary.py",
@@ -248,7 +248,7 @@ def materialize_scalability_dataset(
     repo_root: Path,
     budget: str,
     template_profile: Mapping[str, Any],
-    production_config_path: Path,
+    selected_config_path: Path,
     production: Mapping[str, Any],
     panel: Mapping[str, Any],
     dataset: Mapping[str, Any],
@@ -286,10 +286,10 @@ def materialize_scalability_dataset(
     generation_jobs = template_profile.get("generation_jobs")
     if not isinstance(generation_jobs, list) or len(generation_jobs) != 1:
         raise BenchmarkConfigError("Scalability template must define one generator request")
-    policy = production.get("policy")
+    policy = production.get("selected_policy")
     if not isinstance(policy, Mapping) or not isinstance(policy.get("group_policy"), Mapping):
         raise BenchmarkConfigError("Production config contains no executable group policy")
-    if production.get("budget") != budget:
+    if production.get("calibration_budget") != budget:
         raise BenchmarkConfigError("Production config budget differs from scalability budget")
     dataset_id = dataset.get("id")
     if not isinstance(dataset_id, str) or not dataset_id:
@@ -397,7 +397,7 @@ def materialize_scalability_dataset(
                 f"Runtime scale-stress profile for {dataset_id} ({stage}); executes only "
                 "the frozen production SPATHI policy."
             ),
-            "production_config": _relative(root, production_config_path, "production config"),
+            "selected_config": _relative(root, selected_config_path, "production config"),
             "generation_jobs": [
                 {
                     "id": generation_job_id,
@@ -1110,9 +1110,6 @@ def collect_scalability_measurement(
     assert isinstance(phases, Mapping)
     assert isinstance(parallelism, Mapping)
     assert isinstance(memory_estimate, Mapping)
-    target_eligibility = effective.get("target_eligibility")
-    if not isinstance(target_eligibility, Mapping):
-        raise BenchmarkConfigError("SPATHI run metadata lacks target eligibility counts")
     observed_dimensions = {
         key: _required_int(dimensions, key, "input_dimensions")
         for key in ("cells", "genes", "groups", "transcription_factors", "targets")
@@ -1126,14 +1123,6 @@ def collect_scalability_measurement(
             f"SPATHI dimensions differ from the scale request: {observed_dimensions} != "
             f"{expected_dimensions}"
         )
-    targets_eligible = _required_int(
-        target_eligibility, "globally_eligible_targets", "target_eligibility"
-    )
-    targets_ineligible = _required_int(
-        target_eligibility, "globally_ineligible_targets", "target_eligibility"
-    )
-    if targets_eligible + targets_ineligible != observed_dimensions["targets"]:
-        raise BenchmarkConfigError("SPATHI target eligibility counts are incomplete")
     models_requested = _required_int(models, "requested", "models")
     models_completed = _required_int(models, "completed", "models")
     models_trained = _required_int(models, "trained", "models")
@@ -1181,8 +1170,6 @@ def collect_scalability_measurement(
             "inference_artifact_bytes": _tree_bytes(inference_artifact),
             "spathi_output_bytes": _tree_bytes(inference_artifact, output_prefix),
             "targets_requested": observed_dimensions["targets"],
-            "targets_eligible": targets_eligible,
-            "targets_ineligible": targets_ineligible,
             "models_requested": models_requested,
             "models_completed": models_completed,
             "models_trained": models_trained,
@@ -1232,7 +1219,7 @@ def _run_one_dataset(
         repo_root=repo_root,
         budget=budget,
         template_profile=template_profile,
-        production_config_path=production_path,
+        selected_config_path=production_path,
         production=production,
         panel=panel,
         dataset=dataset,
@@ -1564,15 +1551,14 @@ def _result_document(
             "path": _relative(repo_root, template_path, "scalability profile"),
             "sha256": sha256_file(template_path),
         },
-        "production_config": {
+        "selected_config": {
             "path": _relative(repo_root, production_path, "production config"),
             "sha256": sha256_file(production_path),
-            "policy_id": production["policy"]["policy_id"],
-            "policy_sha256": production["policy"]["policy_sha256"],
-            "decision": production["decision"],
+            "policy_id": production["selected_policy"]["policy_id"],
+            "policy_sha256": production["selected_policy"]["policy_sha256"],
         },
         "execution_environment": {
-            "spathi_commit": production["policy"]["spathi_commit"],
+            "spathi_commit": production["selected_policy"]["spathi_commit"],
             "andrea_commit": runtime_environment["andrea_commit"],
             "spathi_image_id": image_id,
             "andrea_environment_fingerprint": runtime_environment["andrea_environment_fingerprint"],
@@ -1652,7 +1638,7 @@ def run_scalability_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str,
-    efficiency_run_id: str | None = None,
+    calibration_run_id: str | None = None,
     max_cores: int | None = None,
     max_ram_gb: float | None = None,
     reserve_cores: int = 0,
@@ -1668,11 +1654,11 @@ def run_scalability_workflow(
         root / "work",
         "Scalability work root",
     )
-    production_path, production = completed_production_config(
+    production_path, production = completed_selected_config(
         repo_root=root,
         work_root=work,
         budget=profile,
-        efficiency_run_id=efficiency_run_id,
+        calibration_run_id=calibration_run_id,
     )
     template_id = f"scalability-{profile}"
     template_path = root / f"experiments/v1/profiles/{template_id}.json"
@@ -1693,7 +1679,7 @@ def run_scalability_workflow(
         {
             "profile_sha256": sha256_file(template_path),
             "request_sha256": sha256_file(request_path),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config_sha256": sha256_file(production_path),
             "benchmark_repository": {
                 "commit": benchmark["commit"],
                 "origin": benchmark["origin"],
@@ -1922,8 +1908,8 @@ def run_scalability_workflow(
             "identity": {"fingerprint": identity},
             "status": "publishing",
             "runtime_plan": runtime_plan,
-            "production_config": _relative(root, production_path, "production config"),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config": _relative(root, production_path, "production config"),
+            "selected_config_sha256": sha256_file(production_path),
             "results": _relative(root, results_path, "scalability results"),
             "results_sha256": sha256_file(results_path),
             "interactive_report": _relative(root, report_path, "scalability report"),

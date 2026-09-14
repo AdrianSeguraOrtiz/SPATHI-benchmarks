@@ -49,7 +49,7 @@
         "technical_noise": {"const": "umi"},
         "dynamic_group_truth": {"const": true},
         "target_list_supplied_to_inference": {"const": false},
-        "policy_stage": {"const": "post_efficiency_freeze"},
+        "policy_stage": {"const": "post_calibration_freeze"},
         "selection_feedback": {"const": false},
         "confirmatory_ranking_eligible": {"const": false},
         "external_comparison_use": {"const": "forbidden"}

@@ -12,7 +12,7 @@
     "status",
     "design",
     "materialization",
-    "production_config",
+    "selected_config",
     "execution_environment",
     "protocol",
     "summary",
@@ -39,7 +39,7 @@
         "schedule_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
-    "production_config": {
+    "selected_config": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "sha256", "policy_id", "policy_sha256"],
@@ -234,7 +234,7 @@
         "dataset": {"$ref": "#/$defs/dataset"},
         "configuration_id": {"$ref": "#/$defs/id"},
         "tool_id": {"$ref": "#/$defs/id"},
-        "origin": {"enum": ["catalog", "spathi_production_policy"]},
+        "origin": {"enum": ["catalog", "spathi_selected_policy"]},
         "threads": {"type": "integer", "minimum": 1},
         "ram_gb": {"type": "number", "exclusiveMinimum": 0},
         "cpuset_cpus": {

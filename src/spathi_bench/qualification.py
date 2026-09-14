@@ -7,7 +7,6 @@ does not claim to qualify Docker simulators, competitors or all study phases.
 from __future__ import annotations
 
 import csv
-import gzip
 import html
 import json
 import math
@@ -33,8 +32,8 @@ _SOURCES = ("TF1", "TF2")
 _CONTEXTS = ("group:A", "group:B")
 _SEED = 738291
 _COVERED = (
-    "Real SPATHI CLI: fixed trees, automatic target eligibility and adaptive trees",
-    "Complete model sidecars: task seeds, excluded targets, tree budgets and metadata counters",
+    "Real SPATHI CLI: fixed trees and explicit target lists",
+    "Complete model sidecars: task seeds, numerical skips, tree counts and metadata counters",
     "Deterministic networks with identical seeds and different thread budgets",
     "Real ANDREA evaluation of external grouped networks and completed empty networks",
     "AUPR and AUROC compared with an independent dense oracle, including score ties",
@@ -43,7 +42,7 @@ _COVERED = (
 )
 _NOT_COVERED = (
     "Docker image execution and simulator-specific contracts",
-    "The six complete study workflows or interruption of their expensive tasks",
+    "The five complete study workflows or interruption of their expensive tasks",
     "Competitor wrappers, scalability, performance measurements or runtime forecasts",
     "Scientific evidence for a configuration choice or published tool ranking",
 )
@@ -298,7 +297,12 @@ def _dataset(root: Path) -> dict[str, Any]:
 
 
 def _infer(
-    *, spathi_repo: Path, dataset: Mapping[str, Any], output: Path, adaptive: bool, threads: int
+    *,
+    spathi_repo: Path,
+    dataset: Mapping[str, Any],
+    output: Path,
+    threads: int,
+    targets: Sequence[str] = _GENES,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     inputs = dataset["root"]
     command = [
@@ -326,56 +330,29 @@ def _infer(
         "cap-to-target",
         "--n-estimators",
         "30",
-        "--adaptive-min-estimators",
-        "10",
-        "--adaptive-tree-step",
-        "5",
-        "--adaptive-patience",
-        "2",
-        "--adaptive-tolerance",
-        "1.0",
-        "--min-target-detected-cells",
-        "3",
-        "--min-target-detected-fraction",
-        "0.01",
-        "--min-target-weighted-detected-fraction",
-        "0.01",
-        "--min-target-weighted-detected-ess",
-        "2",
-        "--target-eligibility",
-        "automatic" if adaptive else "all",
-        "--adaptive-trees" if adaptive else "--no-adaptive-trees",
         "--no-progress",
         "--report",
     ]
+    if tuple(targets) != _GENES:
+        target_list = output.parent / f"{output.name}-targets.txt"
+        atomic_write_text(target_list, "".join(f"{target}\n" for target in targets), "target list")
+        command.extend(("--target-list", str(target_list)))
     _run(command, repo=spathi_repo, log_path=output.parent / f"{output.name}.log")
     metadata = load_json_object(output / "run_metadata.json")
-    with gzip.open(output / "target_eligibility.tsv.gz", "rt", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle, delimiter="\t"))
-    globally_eligible = tuple(row["target"] for row in rows if row["eligible"].lower() == "true")
-    expected_targets = set(_GENES) - {"Rare", "Constant"} if adaptive else set(_GENES)
-    if set(globally_eligible) != expected_targets:
-        raise BenchmarkConfigError("Real SPATHI eligibility differs from qualification truth")
     accounting = read_model_accounting(
         output / "model_diagnostics.tsv.gz",
         contexts=_CONTEXTS,
-        targets=_GENES,
-        globally_eligible=globally_eligible,
+        targets=targets,
         parameters=metadata["requested_parameters"],
         algorithm_seed=_SEED,
     )
     accounting.validate_metadata(metadata["models"])
-    if adaptive and (
-        not metadata["models"]["adaptive_early_stopped"]
-        or accounting.status_counts.get("target_not_estimable") != 4
-    ):
-        raise BenchmarkConfigError(
-            "Qualification did not exercise adaptive stopping and excluded targets"
-        )
     if not (output / "report.html").is_file():
         raise BenchmarkConfigError("Real SPATHI HTML report was not generated")
     with (output / "network.csv").open(encoding="utf-8", newline="") as handle:
         network = list(csv.DictReader(handle))
+    if any(row["target"] not in targets for row in network):
+        raise BenchmarkConfigError("SPATHI network exceeds the requested target list")
     return network, {
         "models": accounting.models_requested,
         "trees": accounting.trees_fitted,
@@ -540,26 +517,24 @@ def run_qualification(
             spathi_repo=spathi_repo,
             dataset=dataset,
             output=attempt / "fixed",
-            adaptive=False,
             threads=1,
         )
         repeated, repeated_counts = _infer(
             spathi_repo=spathi_repo,
             dataset=dataset,
             output=attempt / "fixed-repeat",
-            adaptive=False,
             threads=threads,
         )
         if fixed != repeated:
             raise BenchmarkConfigError(
                 "SPATHI networks differ between identical-seed qualification runs"
             )
-        adaptive, adaptive_counts = _infer(
+        subset, subset_counts = _infer(
             spathi_repo=spathi_repo,
             dataset=dataset,
-            output=attempt / "automatic-adaptive",
-            adaptive=True,
+            output=attempt / "explicit-targets",
             threads=threads,
+            targets=("TF1", "G1", "G2"),
         )
         golden = [
             {
@@ -583,7 +558,7 @@ def run_qualification(
             dataset=dataset,
             networks={
                 "fixed": fixed,
-                "automatic_adaptive": adaptive,
+                "explicit_targets": subset,
                 "golden_ties": golden,
                 "empty": [],
             },
@@ -595,7 +570,7 @@ def run_qualification(
                 "models": {
                     "fixed": fixed_counts,
                     "repeat": repeated_counts,
-                    "automatic_adaptive": adaptive_counts,
+                    "explicit_targets": subset_counts,
                 },
                 "metrics": evaluation["directed_metrics"],
                 "andrea_report": evaluation["report"],

@@ -30,7 +30,6 @@ from .performance import (
     validate_performance_catalog_threading,
 )
 from .pipeline import build_spathi_image, generate_data, preflight
-from .production_policy import completed_production_config
 from .provenance import observe_benchmark_repository
 from .report_publication import publish_workflow_report
 from .reporting import render_performance_report
@@ -46,6 +45,7 @@ from .runtime import (
     docker_runtime_environment,
 )
 from .safe_io import atomic_write_text, path_below_no_symlinks, write_idempotent_json
+from .selected_policy import completed_selected_config
 from .state import load_state, run_lock
 from .study_context import bind_phase_identity, phase_flow_id
 from .tool_contract import oom_observed
@@ -715,7 +715,7 @@ def run_performance_workflow(
     spathi_repo: Path,
     work_root: Path,
     profile: str,
-    efficiency_run_id: str | None = None,
+    calibration_run_id: str | None = None,
     max_cores: int | None = None,
     max_ram_gb: float | None = None,
     reserve_cores: int = 0,
@@ -732,11 +732,11 @@ def run_performance_workflow(
     root = repo_root.resolve()
     work = path_below_no_symlinks(work_root, root / "work", "Performance work root")
     work.mkdir(parents=True, exist_ok=True)
-    production_path, production = completed_production_config(
+    production_path, production = completed_selected_config(
         repo_root=root,
         work_root=work,
         budget=profile,
-        efficiency_run_id=efficiency_run_id,
+        calibration_run_id=calibration_run_id,
     )
     design = load_performance_design(root)
     validate_performance_catalog_threading(andrea_repo, design)
@@ -756,7 +756,7 @@ def run_performance_workflow(
             "budget": profile,
             "design_sha256": sha256_file(root / DESIGN_PATH),
             "template_sha256": sha256_file(template_path),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config_sha256": sha256_file(production_path),
             "resource_request": resource_request,
             "benchmark_repository": {
                 "commit": benchmark["commit"],
@@ -853,7 +853,7 @@ def run_performance_workflow(
                 "sha256": sha256_file(Path(materialized["manifest_path"])),
                 "schedule_sha256": materialized["manifest"]["schedule_sha256"],
             },
-            "production_config": materialized["manifest"]["production_config"],
+            "selected_config": materialized["manifest"]["selected_config"],
             "execution_environment": {
                 "runtime_plan": materialized["manifest"]["runtime_plan"],
                 "andrea": generation_state["host_environment"],
@@ -911,8 +911,8 @@ def run_performance_workflow(
             "flow_id": flow_id,
             "identity": {"fingerprint": identity},
             "status": "publishing",
-            "production_config": _relative(root, production_path, "production config"),
-            "production_config_sha256": sha256_file(production_path),
+            "selected_config": _relative(root, production_path, "production config"),
+            "selected_config_sha256": sha256_file(production_path),
             "template_profile": _relative(root, template_path, "performance template"),
             "template_profile_sha256": sha256_file(template_path),
             "runtime_profile": _relative(

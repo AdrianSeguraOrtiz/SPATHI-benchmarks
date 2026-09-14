@@ -14,6 +14,7 @@ from plotly.offline import get_plotlyjs
 import spathi_bench.reporting.calibration as calibration_reporting
 import spathi_bench.reporting.common as reporting_common
 import spathi_bench.reporting.comparison as comparison_reporting
+from selection_helpers import base_policy, selected_document
 from spathi_bench.artifacts import ArtifactStore, canonical_json_sha256, sha256_file
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.reporting.common import json_for_script, render_html, write_report_bundle
@@ -575,9 +576,9 @@ def _comparison_fixture(
         "exports_manifest": str(exports_path.resolve()),
     }
     _write_json(run_root / "state.json", state)
-    production = _write_json(
-        version_root / "workflows/efficiency/reduced/efficiency-fixture/production-config.json",
-        {"artifact_type": "spathi_production_policy", "budget": "reduced"},
+    selection = _write_json(
+        version_root / "workflows/calibration/reduced/calibration-fixture/selected-config.json",
+        selected_document(base_policy()),
     )
     workflow = {
         "schema_version": "1.0",
@@ -587,9 +588,9 @@ def _comparison_fixture(
         "profile": "reduced",
         "profile_file": profile.relative_to(repo_root).as_posix(),
         "profile_sha256": sha256_file(profile),
-        "efficiency_flow_id": "efficiency-fixture",
-        "production_config": production.relative_to(repo_root).as_posix(),
-        "production_config_sha256": sha256_file(production),
+        "calibration_flow_id": "calibration-fixture",
+        "selected_config": selection.relative_to(repo_root).as_posix(),
+        "selected_config_sha256": sha256_file(selection),
         "identity": {"spathi_commit": "2" * 40, "fingerprint": "5" * 64},
         "runtime_plan": _runtime_plan(),
         "interactive_report": (version_root / "reports/reduced/comparison-fixture/comparison.html")

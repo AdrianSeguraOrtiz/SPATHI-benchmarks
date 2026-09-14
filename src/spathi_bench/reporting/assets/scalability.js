@@ -24,11 +24,6 @@
     return Number.isFinite(top) && Number.isFinite(bottom) && bottom > 0 ? top / bottom : null;
   }
 
-  function percent(numerator, denominator) {
-    const value = fraction(numerator, denominator);
-    return value === null ? "—" : `${formatNumber(value * 100, { maximumFractionDigits: 2 })}%`;
-  }
-
   function rangeText(range) {
     if (!range || range.minimum === undefined || range.maximum === undefined) return "—";
     return range.minimum === range.maximum ? formatInteger(range.minimum) : `${formatInteger(range.minimum)}–${formatInteger(range.maximum)}`;
@@ -171,7 +166,6 @@
       barmode: "group", xaxis: { title: "Dataset and preregistered stage", tickangle: -25 }, yaxis: { title: "Execution count (log scale)", type: "log" },
     });
     plot(query("#completion-chart"), [
-      { type: "bar", name: "Eligible targets", x: labels, y: rows.map((row) => fraction(row.inference.targets_eligible, row.inference.targets_requested)), marker: { color: "#2563eb" } },
       { type: "bar", name: "Completed models", x: labels, y: rows.map((row) => fraction(row.inference.models_completed, row.inference.models_requested)), marker: { color: "#0f8c84" } },
     ], { barmode: "group", xaxis: { title: "Dataset and preregistered stage", tickangle: -25 }, yaxis: { title: "Fraction of requested work", range: [0, 1.03], tickformat: ".0%" } });
   }
@@ -180,8 +174,7 @@
     const columns = [
       { label: "Dataset", value: (row) => row.dataset_id }, { label: "Stage", value: (row) => humanize(row.stage) }, { label: "Status", value: (row) => humanize(row.status) },
       { label: "Targets", value: (row) => row.dimensions.targets, format: formatInteger, numeric: true },
-      { label: "Eligible targets", value: (row) => row.inference ? row.inference.targets_eligible : null, format: formatInteger, numeric: true },
-      { label: "Eligibility", value: (row) => row.inference ? percent(row.inference.targets_eligible, row.inference.targets_requested) : "—" },
+      { label: "Completed models", value: (row) => row.inference ? row.inference.models_completed : null, format: formatInteger, numeric: true },
       { label: "Trees", value: (row) => row.inference ? row.inference.trees_fitted : null, format: formatInteger, numeric: true },
       { label: "ANDREA end-to-end time", value: (row) => andreaExecutionMeasurement(row).wall_time_seconds, format: formatSeconds, numeric: true },
       { label: "CPU time", value: (row) => andreaMeasurement(row).cpu_time_seconds, format: formatSeconds, numeric: true },
@@ -211,14 +204,13 @@
     ], failures);
   }
 
-  function renderPolicy(production) {
+  function renderPolicy(selection) {
     addStatCards(query("#policy-summary"), [
-      { label: "Policy", value: production.policy.policy_id, detail: `SHA-256 · ${shortId(production.policy.policy_sha256, 18)}` },
-      { label: "Decision", value: humanize(production.decision), detail: "Frozen by efficiency justification" },
-      { label: "Evidence role", value: humanize(production.evidence_role), detail: `Budget: ${humanize(production.budget)}` },
-      { label: "Policy status", value: humanize(production.status), detail: `SPATHI · ${shortId(production.policy.spathi_commit, 14)}` },
+      { label: "Policy", value: selection.policy.policy_id, detail: `SHA-256 · ${shortId(selection.policy.policy_sha256, 18)}` },
+      { label: "Evidence role", value: humanize(selection.evidence_role), detail: `Budget: ${humanize(selection.budget)}` },
+      { label: "Policy status", value: humanize(selection.status), detail: `SPATHI · ${shortId(selection.policy.spathi_commit, 14)}` },
     ]);
-    const branches = production.policy.group_policy.branches;
+    const branches = selection.policy.group_policy.branches;
     const names = new Set(); Object.values(branches).forEach((branch) => Object.keys(branch.parameters).forEach((name) => names.add(name)));
     const rows = Object.entries(branches).map(([branchId, branch]) => ({ branch_id: branchId, condition: branch.condition, parameters: branch.parameters }));
     createTable(query("#policy-table"), [{ label: "Branch", value: (row) => humanize(row.branch_id) }, { label: "Condition", value: (row) => parameterText(row.condition) }, ...Array.from(names).sort().map((name) => ({ label: humanize(name), value: (row) => parameterText(row.parameters[name]) }))], rows);
@@ -248,6 +240,6 @@
     renderOverview(summary, data.datasets.rows, data.scope.resource_boundary);
     const allAttempts = attempts(data.datasets.rows);
     const completedAttempts = allAttempts.filter((row) => row.status === "completed");
-    renderFailures(allAttempts); renderDimensions(data.datasets.rows); renderRuntime(completedAttempts); renderMemoryAndDisk(completedAttempts); renderWorkAndCompletion(completedAttempts); renderAttemptTable(allAttempts); renderPolicy(data.production); renderProvenance(data.environment, data.links, data.notes, data.scope.resource_boundary);
+    renderFailures(allAttempts); renderDimensions(data.datasets.rows); renderRuntime(completedAttempts); renderMemoryAndDisk(completedAttempts); renderWorkAndCompletion(completedAttempts); renderAttemptTable(allAttempts); renderPolicy(data.selection); renderProvenance(data.environment, data.links, data.notes, data.scope.resource_boundary);
   });
 }());

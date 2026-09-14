@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from selection_helpers import base_policy, selected_document
 from spathi_bench.artifacts import canonical_json_sha256, sha256_file
 from spathi_bench.config import BenchmarkConfigError, load_profile, validate_json
 from spathi_bench.performance import (
@@ -60,7 +61,7 @@ def _row(
     return {
         "phase": phase,
         "dataset": {"dataset_id": "dataset-a", "size_class": "medium"},
-        "configuration_id": "spathi_production",
+        "configuration_id": "spathi_selected",
         "tool_id": "spathi",
         "threads": threads,
         "system_repetition": repetition,
@@ -90,7 +91,7 @@ def test_frozen_performance_design_has_exact_panels_and_counts() -> None:
     assert full["expected_measured_runs"] == 144
     assert full["expected_warmup_runs"] == 48
     assert [item["configuration_id"] for item in full["tools"]] == [
-        "spathi_production",
+        "spathi_selected",
         "aracne3_default",
         "genie3_default",
         "grnboost2_default",
@@ -181,6 +182,8 @@ def test_materialization_freezes_runnable_requests_resources_and_schedule(
         text=True,
     ).stdout.split("\0")
     for relative in filter(None, tracked):
+        if not (REPO_ROOT / relative).is_file():
+            continue
         destination = repo / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO_ROOT / relative, destination)
@@ -214,37 +217,15 @@ def test_materialization_freezes_runnable_requests_resources_and_schedule(
         ],
         check=True,
     )
-    group_policy = {"shared": {"n_estimators": 250}}
     test_root = repo / "work/performance-test"
     test_root.mkdir(parents=True)
-    provenance = {}
-    for name in (
-        "calibration_selection",
-        "efficiency_plan",
-        "efficiency_evidence",
-        "efficiency_results",
-    ):
-        evidence = test_root / f"{name}.json"
-        evidence.write_text("{}\n", encoding="utf-8")
-        provenance[name] = {
-            "path": evidence.relative_to(repo).as_posix(),
-            "sha256": sha256_file(evidence),
-        }
-    production = {
-        "schema_version": "1.0",
-        "artifact_type": "spathi_production_policy",
-        "budget": budget,
-        "evidence_role": "descriptive" if budget == "reduced" else "confirmatory",
-        "status": "descriptive" if budget == "reduced" else "confirmed",
-        "decision": "descriptive_only" if budget == "reduced" else "reference_retained",
-        "policy": {
-            "policy_id": "test_policy",
-            "policy_sha256": canonical_json_sha256(group_policy),
-            "group_policy": group_policy,
-            "spathi_commit": "1" * 40,
-        },
-        "provenance": provenance,
-    }
+    ranking = test_root / "validation-ranking.json"
+    ranking.write_text('{}\n', encoding="utf-8")
+    locked_commit = json.loads((repo / "repos.lock.json").read_text())["repositories"]["spathi"]["commit"]
+    production = selected_document(
+        base_policy(spathi_commit=locked_commit), budget=budget,
+        ranking_path=ranking.relative_to(repo).as_posix(), ranking_sha256=sha256_file(ranking),
+    )
     detected = {
         "effective_cpu_threads": 8,
         "effective_memory_bytes": 64 * 1024**3,
@@ -282,7 +263,7 @@ def test_materialization_freezes_runnable_requests_resources_and_schedule(
     assert manifest["runtime_plan"]["detected"] == detected
     assert all(task["cpuset_cpus"] == list(range(task["threads"])) for task in manifest["tasks"])
     assert {task["ram_gb"] for task in manifest["tasks"]} == {64.0}
-    spathi = materialized["scientific_requests"]["spathi_production"]
+    spathi = materialized["scientific_requests"]["spathi_selected"]
     assert spathi["custom_tool"]["runtime_resources"] == {
         "threading": {
             "supported": True,
@@ -532,7 +513,7 @@ def test_semantic_network_hash_ignores_csv_row_order(tmp_path: Path) -> None:
 def test_measurement_record_requires_exact_affinity_and_preserves_telemetry(
     tmp_path: Path,
 ) -> None:
-    task_root = tmp_path / "runs" / "measure_medium_spathi_production_t8_r1"
+    task_root = tmp_path / "runs" / "measure_medium_spathi_selected_t8_r1"
     output = task_root / "output" / "dataset-a_20260101T000000Z"
     output.mkdir(parents=True)
     network = output / "merged_network_normalized.csv"
@@ -592,15 +573,15 @@ def test_measurement_record_requires_exact_affinity_and_preserves_telemetry(
     report_path = output / "run_report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
     task = {
-        "task_id": "measure_medium_spathi_production_t8_r1",
+        "task_id": "measure_medium_spathi_selected_t8_r1",
         "sequence_index": 9,
         "phase": "measurement",
         "generation_job_id": "scmultisim_performance_medium",
         "replicate_index": 1,
         "size_class": "medium",
-        "configuration_id": "spathi_production",
+        "configuration_id": "spathi_selected",
         "tool_id": "spathi",
-        "origin": "spathi_production_policy",
+        "origin": "spathi_selected_policy",
         "threads": 8,
         "ram_gb": 64.0,
         "cpuset_cpus": list(range(8)),
@@ -669,7 +650,7 @@ def test_measurement_record_rejects_noncanonical_performance_telemetry(
     mutation: tuple[str, object],
     message: str,
 ) -> None:
-    task_root = tmp_path / "runs" / "measure_medium_spathi_production_t1_r1"
+    task_root = tmp_path / "runs" / "measure_medium_spathi_selected_t1_r1"
     output = task_root / "output" / "dataset-a_20260101T000000Z"
     output.mkdir(parents=True)
     (output / "merged_network_normalized.csv").write_text(
@@ -743,15 +724,15 @@ def test_measurement_record_rejects_noncanonical_performance_telemetry(
         _measurement_record(
             repo_root=tmp_path,
             task={
-                "task_id": "measure_medium_spathi_production_t1_r1",
+                "task_id": "measure_medium_spathi_selected_t1_r1",
                 "sequence_index": 1,
                 "phase": "measurement",
                 "generation_job_id": "scmultisim_performance_medium",
                 "replicate_index": 1,
                 "size_class": "medium",
-                "configuration_id": "spathi_production",
+                "configuration_id": "spathi_selected",
                 "tool_id": "spathi",
-                "origin": "spathi_production_policy",
+                "origin": "spathi_selected_policy",
                 "threads": 1,
                 "ram_gb": 8.0,
                 "cpuset_cpus": [0],
@@ -801,7 +782,7 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
         "budget": "reduced",
         "design": {"path": "design.json", "sha256": "1" * 64},
         "template_profile": {"path": "profile.json", "sha256": "2" * 64},
-        "production_config": {
+        "selected_config": {
             "path": "production.json",
             "sha256": "3" * 64,
             "policy_id": "policy",
@@ -827,9 +808,9 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
         ],
         "scientific_requests": [
             {
-                "configuration_id": "spathi_production",
+                "configuration_id": "spathi_selected",
                 "tool_id": "spathi",
-                "origin": "spathi_production_policy",
+                "origin": "spathi_selected_policy",
                 "algorithm_seed": 11,
                 "request": {"run_id": "spathi"},
                 "custom_tool": {},
@@ -837,15 +818,15 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
         ],
         "tasks": [
             {
-                "task_id": "warmup_medium_spathi_production_t1_r0",
+                "task_id": "warmup_medium_spathi_selected_t1_r0",
                 "sequence_index": 1,
                 "phase": "warmup",
                 "generation_job_id": "scmultisim_performance_medium",
                 "replicate_index": 1,
                 "size_class": "medium",
-                "configuration_id": "spathi_production",
+                "configuration_id": "spathi_selected",
                 "tool_id": "spathi",
-                "origin": "spathi_production_policy",
+                "origin": "spathi_selected_policy",
                 "threads": 1,
                 "ram_gb": 64.0,
                 "cpuset_cpus": [0],
@@ -857,7 +838,7 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
     materialization_path = workflow_root / "performance-materialization.json"
     materialization_path.write_text(json.dumps(materialization), encoding="utf-8")
     configurations = (
-        ("spathi_production", "spathi", "spathi_production_policy"),
+        ("spathi_selected", "spathi", "spathi_selected_policy"),
         ("genie3_default", "genie3", "catalog"),
         ("grnboost2_default", "grnboost2", "catalog"),
         ("infercsn_none", "infercsn", "catalog"),
@@ -942,7 +923,7 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
             "sha256": sha256_file(materialization_path),
             "schedule_sha256": "5" * 64,
         },
-        "production_config": materialization["production_config"],
+        "selected_config": materialization["selected_config"],
         "execution_environment": {
             "runtime_plan": runtime_reference,
             "andrea": {"system": "Linux", "machine": "x86_64"},
@@ -987,7 +968,7 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
     measurements_csv = workflow_root / "performance-measurements.csv"
     summary_csv = workflow_root / "performance-summary.csv"
     measurements_csv.write_text("task_id\nfixture\n", encoding="utf-8")
-    summary_csv.write_text("configuration_id\nspathi_production\n", encoding="utf-8")
+    summary_csv.write_text("configuration_id\nspathi_selected\n", encoding="utf-8")
     report_path = version / f"reports/reduced/{flow_id}/performance.html"
     workflow = {
         "schema_version": "1.0",

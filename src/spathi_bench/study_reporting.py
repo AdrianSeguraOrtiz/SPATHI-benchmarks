@@ -15,7 +15,6 @@ from .reporting import (
     render_calibration_report,
     render_comparison_report,
     render_dimensional_transfer_report,
-    render_efficiency_report,
     render_performance_report,
     render_scalability_report,
 )
@@ -26,10 +25,6 @@ _PHASES = {
     "calibration": (
         "Calibration", "Select the exact SPATHI policy by directed AUPR.",
         "Independent dyngen and scMultiSim development, high-TF and validation panels.",
-    ),
-    "efficiency": (
-        "Efficiency", "Compare target eligibility and adaptive trees with exact SPATHI.",
-        "Separate development and validation panels; full adds a conditional safety veto.",
     ),
     "dimensional_transfer": (
         "Dimensional transfer", "Inspect the frozen policy across dimensions and routing controls.",
@@ -55,7 +50,6 @@ _PHASES = {
 
 _RENDERERS = {
     "calibration": render_calibration_report,
-    "efficiency": render_efficiency_report,
     "dimensional_transfer": render_dimensional_transfer_report,
     "comparison": render_comparison_report,
     "scalability": render_scalability_report,

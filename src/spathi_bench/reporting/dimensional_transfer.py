@@ -138,51 +138,6 @@ def _validate_results(results: Mapping[str, Any], panel: Mapping[str, Any]) -> N
         if not _close(contrasts[contrast_id].get("estimate"), expected):
             raise BenchmarkConfigError("Dimensional-transfer contrast is stale")
 
-    diagnostic = require_mapping(
-        results.get("exact_production_diagnostic"),
-        "dimensional exact-production diagnostic",
-    )
-    if (
-        diagnostic.get("analysis_role") != "post_freeze_descriptive_diagnostic"
-        or diagnostic.get("selection_feedback") is not False
-        or set(diagnostic.get("conditions", [])) != {"g3000_tf100_c300", "g100_tf10_c300"}
-    ):
-        raise BenchmarkConfigError("Dimensional exact-production diagnostic changes scope")
-    pairs = [
-        require_mapping(item, "dimensional diagnostic pair")
-        for item in require_array(diagnostic.get("pairs"), "dimensional diagnostic pairs")
-    ]
-    if diagnostic.get("status") == "not_applicable_production_is_exact":
-        if (
-            pairs
-            or diagnostic.get("condition_summaries")
-            or any(
-                not _close(value, 0.0)
-                for value in require_mapping(
-                    diagnostic.get("identity_delta"), "dimensional identity delta"
-                ).values()
-            )
-        ):
-            raise BenchmarkConfigError("Identical exact and production policies have stale deltas")
-    else:
-        if diagnostic.get("status") != "paired_descriptive" or not pairs:
-            raise BenchmarkConfigError("Dimensional exact-production diagnostic is incomplete")
-        seen: set[str] = set()
-        for pair in pairs:
-            dataset_id = str(pair.get("dataset_id"))
-            if dataset_id in seen or pair.get("condition_id") not in diagnostic["conditions"]:
-                raise BenchmarkConfigError("Dimensional diagnostic pairs are duplicated or routed")
-            seen.add(dataset_id)
-            exact = require_mapping(pair.get("exact"), "exact diagnostic metrics")
-            production = require_mapping(pair.get("production"), "production diagnostic metrics")
-            delta = require_mapping(
-                pair.get("delta_production_minus_exact"), "diagnostic metric delta"
-            )
-            if any(
-                not _close(delta.get(field), float(production[field]) - float(exact[field]))
-                for field in delta
-            ):
-                raise BenchmarkConfigError("Dimensional exact-production delta is stale")
 
 
 def _export_links(
@@ -280,30 +235,30 @@ def render_dimensional_transfer_report(
     panel = validate_transfer_panel(root, panel_path)
     _validate_results(results, panel)
 
-    production_path = repo_file(
+    selection_path = repo_file(
         root,
-        workflow.get("production_config"),
-        "dimensional-transfer production policy",
+        workflow.get("selected_config"),
+        "dimensional-transfer selection policy",
         below=version,
     )
     verify_sha256(
-        production_path,
-        workflow.get("production_config_sha256"),
-        "dimensional-transfer production policy",
+        selection_path,
+        workflow.get("selected_config_sha256"),
+        "dimensional-transfer selection policy",
     )
-    production = load_json_object(production_path, "dimensional-transfer production policy")
+    selection = load_json_object(selection_path, "dimensional-transfer selection policy")
     validate_json(
-        production,
-        root / "schemas/spathi-production-config.schema.json",
-        "dimensional-transfer production policy",
+        selection,
+        root / "schemas/spathi-selected-config.schema.json",
+        "dimensional-transfer selection policy",
     )
     policy_reference = require_mapping(
-        results.get("production_config"), "results production policy reference"
+        results.get("selected_config"), "results selection policy reference"
     )
-    policy = require_mapping(production.get("policy"), "SPATHI production policy")
+    policy = require_mapping(selection.get("selected_policy"), "SPATHI selection policy")
     if (
-        production.get("budget") != budget
-        or policy_reference.get("sha256") != workflow.get("production_config_sha256")
+        selection.get("calibration_budget") != budget
+        or policy_reference.get("sha256") != workflow.get("selected_config_sha256")
         or policy_reference.get("policy_id") != policy.get("policy_id")
         or policy_reference.get("policy_sha256") != policy.get("policy_sha256")
     ):
@@ -375,7 +330,7 @@ def render_dimensional_transfer_report(
         {"label": "Frozen dimensional panel", "path": panel_path},
         {"label": "Template profile", "path": template_path},
         {"label": "Runtime profile", "path": runtime_profile_path},
-        {"label": "Frozen production policy", "path": production_path},
+        {"label": "Frozen selection policy", "path": selection_path},
         {"label": "Execution policy", "path": policy_path},
     ]
     payload = {
@@ -418,13 +373,11 @@ def render_dimensional_transfer_report(
         "datasets": results["datasets"],
         "conditions": results["conditions"],
         "contrasts": results["contrasts"],
-        "exact_production_diagnostic": results["exact_production_diagnostic"],
         "design": panel["design"],
         "feasibility": panel["feasibility_basis"],
-        "production": {
-            "budget": production["budget"],
-            "evidence_role": production["evidence_role"],
-            "decision": production["decision"],
+        "selection": {
+            "budget": selection["calibration_budget"],
+            "evidence_role": "publication" if selection["calibration_budget"] == "full" else "descriptive",
             "policy": policy,
         },
         "limitations": results["limitations"],
@@ -447,7 +400,7 @@ def render_dimensional_transfer_report(
             input_paths=[
                 results_path,
                 panel_path,
-                production_path,
+                selection_path,
                 template_path,
                 runtime_profile_path,
                 policy_path,

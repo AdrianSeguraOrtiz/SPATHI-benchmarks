@@ -25,8 +25,6 @@ PROTECTED_DATASET_ROLES = frozenset(
     {
         "development",
         "validation",
-        "efficiency_validation",
-        "efficiency_safety",
         "test",
         "dimensional_transfer",
     }

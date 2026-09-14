@@ -80,7 +80,7 @@
       "properties": {
         "configuration_id": {"$ref": "#/$defs/id"},
         "tool_id": {"$ref": "#/$defs/id"},
-        "origin": {"enum": ["catalog", "spathi_production_policy"]}
+        "origin": {"enum": ["catalog", "spathi_selected_policy"]}
       }
     },
     "budget": {

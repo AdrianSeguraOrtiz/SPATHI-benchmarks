@@ -126,9 +126,9 @@
       "Simulator-derived group order is evaluated only as an explicitly labelled oracle-information sensitivity because it provides information unavailable to SPATHI; this upper-bound stratum never enters the primary ranking.",
       "No run receives a truth-derived regulatory prior or target list.",
       "Each independently simulated dataset contributes one equally weighted paired block. Conclusions therefore target this explicitly declared condition panel rather than a hypothetical equally weighted population of simulators.",
-      "All full-test generation seeds come from the full.test namespace in experiments/v1/seeds/seed-plan.json and are disjoint from reduced, development, validation and efficiency namespaces.",
-      "The statistical stream root for this profile is seed.full.test.statistical (1698096914)."
-      ,"Predeclared failure policy: a configuration is excluded from a paired comparison if any required block fails; failures, timeouts and resource-limit events remain reported and no failed block is silently imputed."
+      "All full-test generation seeds come from the full.test namespace in experiments/v1/seeds/seed-plan.json and are disjoint from reduced, development, validation and all other protected namespaces.",
+      "The statistical stream root for this profile is seed.full.test.statistical (1698096914).",
+      "Predeclared failure policy: a configuration is excluded from a paired comparison if any required block fails; failures, timeouts and resource-limit events remain reported and no failed block is silently imputed."
     ]
   },
   "statistics": {

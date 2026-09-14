@@ -163,72 +163,37 @@ def test_snapshot_includes_runtime_convergence_plan(tmp_path: Path) -> None:
     assert by_relative[paths["convergence_plans"]] == "runtime-derived"
 
 
-def _add_production_policy(
-    root: Path,
-    profile: dict[str, Any],
-    *,
-    safety: bool,
-) -> tuple[str, set[str]]:
-    production_path = "work/efficiency/production-config.json"
-    artifact_paths: set[str] = set()
+def test_snapshot_freezes_selected_configuration_and_entire_ranking_chain(tmp_path: Path) -> None:
+    root, profile = _tracked_repository(tmp_path)
+    selection_path = "work/calibration/selected-config.json"
+    validation_path = "work/calibration/validation-ranking.json"
+    development_path = "work/calibration/development-ranking.json"
+    _write_json(root, development_path, {"parent_ranking": None})
+    _write_json(root, validation_path, {"parent_ranking": {"path": development_path}})
+    _write_json(
+        root,
+        selection_path,
+        {
+            "selection_evidence": {"validation_ranking": validation_path},
+        },
+    )
+    profile["selected_config"] = selection_path
 
-    def artifact(name: str) -> dict[str, str]:
-        relative = f"work/efficiency/{name}.json"
-        _write_json(root, relative, {"artifact": name})
-        artifact_paths.add(relative)
-        return {"path": relative, "sha256": "9" * 64}
+    records = _snapshot_source_records(root, profile)
+    by_relative = {record.relative: record.kind for record in records}
 
-    provenance: dict[str, Any] = {
-        name: artifact(name)
-        for name in (
-            "calibration_selection",
-            "efficiency_plan",
-            "efficiency_evidence",
-            "efficiency_results",
+    assert {
+        path: by_relative[path]
+        for path in (
+            selection_path,
+            validation_path,
+            development_path,
+        )
+    } == {
+        path: "runtime-derived"
+        for path in (
+            selection_path,
+            validation_path,
+            development_path,
         )
     }
-    if safety:
-        provenance["efficiency_safety"] = {
-            name: artifact(f"safety-{name}") for name in ("panel", "plan", "evidence", "results")
-        }
-    _write_json(root, production_path, {"provenance": provenance})
-    profile["production_config"] = production_path
-    return production_path, artifact_paths
-
-
-def test_snapshot_includes_every_nested_safety_provenance_artifact(tmp_path: Path) -> None:
-    root, profile = _tracked_repository(tmp_path)
-    production_path, artifact_paths = _add_production_policy(root, profile, safety=True)
-
-    sources = {
-        source.path.relative_to(root).as_posix()
-        for source in _snapshot_source_records(root, profile)
-    }
-
-    assert production_path in sources
-    assert artifact_paths <= sources
-    assert len(artifact_paths) == 8
-
-
-@pytest.mark.parametrize(
-    "malformed_safety",
-    (
-        {"panel": {"path": "work/panel.json", "sha256": "9" * 64}},
-        {
-            name: {"path": f"work/{name}.json", "sha256": "not-a-digest"}
-            for name in ("panel", "plan", "evidence", "results")
-        },
-    ),
-)
-def test_snapshot_rejects_malformed_nested_safety_provenance(
-    tmp_path: Path,
-    malformed_safety: dict[str, Any],
-) -> None:
-    root, profile = _tracked_repository(tmp_path)
-    production_path, _artifact_paths = _add_production_policy(root, profile, safety=False)
-    production = json.loads((root / production_path).read_text(encoding="utf-8"))
-    production["provenance"]["efficiency_safety"] = malformed_safety
-    _write_json(root, production_path, production)
-
-    with pytest.raises(BenchmarkConfigError, match="provenance is invalid"):
-        _snapshot_source_records(root, profile)
