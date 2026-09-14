@@ -269,11 +269,12 @@ def _snapshot_source_records(
                     parent_ranking["path"],
                     runtime_candidates,
                 )
-        if batch.get("kind") == "spathi":
-            for relative in derived_batch_paths:
-                resolved = resolve_repo_path(repo_root, relative, "SPATHI runtime input")
-                if resolved.is_relative_to((repo_root / "work").resolve()):
-                    runtime_candidates.add(relative)
+        # Catalog requests can also be materialized for a runtime profile.
+        # Only explicit batch inputs below work/ qualify, not arbitrary sources.
+        for relative in derived_batch_paths:
+            resolved = resolve_repo_path(repo_root, relative, "Inference runtime input")
+            if resolved.is_relative_to((repo_root / "work").resolve()):
+                runtime_candidates.add(relative)
     relative_paths.update(
         path.relative_to(repo_root).as_posix() for path in (repo_root / "schemas").glob("*.json")
     )

@@ -211,6 +211,92 @@ def test_runtime_profile_freezes_schema_two_with_source_kinds(tmp_path: Path) ->
     }
 
 
+def _catalog_profile(root: Path) -> tuple[dict[str, Any], Path]:
+    profile = _runtime_profile()
+    profile.update(
+        id="performance-runtime",
+        purpose="performance",
+        execution_class="performance_full",
+        description="Runtime-derived catalog requests for performance.",
+    )
+    for field in ("calibration_budget", "calibration_stage", "calibration_fidelity"):
+        del profile[field]
+    profile["generation_jobs"][0]["dataset_role"] = "performance"
+    profile["inference_batches"] = [
+        {
+            "id": "performance-catalog",
+            "kind": "baseline",
+            "dataset_role": "performance",
+            "regime": "group_only",
+            "tools_params": "work/materialized/catalog-tools.json",
+            "run_metadata": "work/materialized/catalog-run-metadata.json",
+        }
+    ]
+    for field in ("tools_params", "run_metadata"):
+        _write_json(root, profile["inference_batches"][0][field], {"runs": []})
+    return profile, _write_json(root, "work/materialized/profile.json", profile)
+
+
+def test_catalog_runtime_inputs_are_frozen_and_integrity_checked(tmp_path: Path) -> None:
+    root, _ = _repository(tmp_path)
+    profile, profile_path = _catalog_profile(root)
+    run_root = root / "work/v1/performance-inputs/test-run"
+    manifest = freeze_run_inputs(root, profile["id"], run_root, profile_file=profile_path)
+    entries = {entry["path"]: entry for entry in manifest["files"]}
+    batch = profile["inference_batches"][0]
+    for field in ("tools_params", "run_metadata"):
+        assert entries[batch[field]]["kind"] == "runtime-derived"
+    assert entries["experiments/v1/simulations/fixture/scenario.json"]["kind"] == "versioned"
+    assert _git(root, "status", "--porcelain") == ""
+    assert frozen_profile(run_root, profile["id"])["inference_batches"] == [batch]
+
+    member = run_root / "input_snapshot/repository" / batch["run_metadata"]
+    member.write_text(
+        member.read_text(encoding="utf-8").replace('"runs"', '"rUns"'), encoding="utf-8"
+    )
+    with pytest.raises(BenchmarkConfigError, match="Frozen input differs from its manifest"):
+        validate_run_inputs(root, profile["id"], run_root)
+
+
+@pytest.mark.parametrize("field", ["tools_params", "run_metadata"])
+def test_catalog_runtime_inputs_reject_symlinks(tmp_path: Path, field: str) -> None:
+    root, _ = _repository(tmp_path)
+    profile, profile_path = _catalog_profile(root)
+    member = root / profile["inference_batches"][0][field]
+    target = member.with_name("actual-input.json")
+    member.rename(target)
+    member.symlink_to(target.name)
+
+    with pytest.raises(BenchmarkConfigError, match="symlink"):
+        freeze_run_inputs(
+            root,
+            profile["id"],
+            root / "work/v1/performance-inputs/test-run",
+            profile_file=profile_path,
+        )
+
+
+@pytest.mark.parametrize("field", ["tools_params", "run_metadata"])
+def test_untracked_catalog_input_outside_work_is_not_runtime_derived(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    root, _ = _repository(tmp_path)
+    profile, _ = _catalog_profile(root)
+    # The existing ignored path is deliberately outside the runtime work boundary.
+    profile["inference_batches"][0][field] = "runtime-profile.json"
+    _write_json(root, "runtime-profile.json", {"runs": []})
+    profile_path = _write_json(root, "work/materialized/profile.json", profile)
+
+    with pytest.raises(BenchmarkConfigError, match="not tracked canonically: runtime-profile.json"):
+        freeze_run_inputs(
+            root,
+            profile["id"],
+            root / "work/v1/performance-inputs/test-run",
+            profile_file=profile_path,
+        )
+
+
 def test_runtime_profile_must_be_below_work(tmp_path: Path) -> None:
     root, profile_path = _repository(tmp_path)
     outside = root / "runtime-profile.json"
@@ -239,10 +325,16 @@ def test_runtime_profile_symlink_is_rejected(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("batch_kind", ["baseline", "spathi"])
 def test_untracked_scientific_input_is_not_promoted_to_runtime_derived(
     tmp_path: Path,
+    batch_kind: str,
 ) -> None:
     root, profile_path = _repository(tmp_path, scientific_runtime_input=True)
+    profile_id = PROFILE_ID
+    if batch_kind == "baseline":
+        profile, profile_path = _catalog_profile(root)
+        profile_id = profile["id"]
 
     with pytest.raises(
         BenchmarkConfigError,
@@ -250,7 +342,7 @@ def test_untracked_scientific_input_is_not_promoted_to_runtime_derived(
     ):
         freeze_run_inputs(
             root,
-            PROFILE_ID,
+            profile_id,
             root / "work/v1/calibration-runtime/scientific-input",
             profile_file=profile_path,
         )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import tempfile
+import subprocess
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +24,12 @@ from spathi_bench.performance_workflow import (
     _measurement_record,
     _validate_performance_host_identity,
     summarize_performance_measurements,
+)
+from spathi_bench.provenance import (
+    freeze_run_inputs,
+    frozen_profile,
+    frozen_repository_root,
+    validate_run_inputs,
 )
 from spathi_bench.reporting.performance import render_performance_report
 from spathi_bench.resource_plan import resolve_runtime_plan
@@ -149,31 +155,95 @@ def test_primary_catalog_tools_must_support_every_thread_endpoint(
         validate_performance_catalog_threading(tmp_path, design)
 
 
-def test_materialization_freezes_runnable_requests_resources_and_schedule() -> None:
-    (REPO_ROOT / "work").mkdir(exist_ok=True)
+@pytest.mark.parametrize("budget", ["reduced", "full"])
+def test_materialization_freezes_runnable_requests_resources_and_schedule(
+    tmp_path: Path,
+    budget: str,
+) -> None:
+    # Copy only tracked public configuration/build inputs, never workspace data.
+    repo = tmp_path / "repo"
+    tracked = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "ls-files",
+            "-z",
+            "--",
+            "experiments",
+            "schemas",
+            "containers/spathi",
+            "repos.lock.json",
+            "images.lock.json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\0")
+    for relative in filter(None, tracked):
+        destination = repo / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO_ROOT / relative, destination)
+    (repo / ".gitignore").write_text("work/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/performance-test.git",
+        ],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Performance Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "Freeze public test inputs",
+        ],
+        check=True,
+    )
     group_policy = {"shared": {"n_estimators": 250}}
+    test_root = repo / "work/performance-test"
+    test_root.mkdir(parents=True)
+    provenance = {}
+    for name in (
+        "calibration_selection",
+        "efficiency_plan",
+        "efficiency_evidence",
+        "efficiency_results",
+    ):
+        evidence = test_root / f"{name}.json"
+        evidence.write_text("{}\n", encoding="utf-8")
+        provenance[name] = {
+            "path": evidence.relative_to(repo).as_posix(),
+            "sha256": sha256_file(evidence),
+        }
     production = {
         "schema_version": "1.0",
         "artifact_type": "spathi_production_policy",
-        "budget": "reduced",
-        "evidence_role": "descriptive",
-        "status": "descriptive",
-        "decision": "descriptive_only",
+        "budget": budget,
+        "evidence_role": "descriptive" if budget == "reduced" else "confirmatory",
+        "status": "descriptive" if budget == "reduced" else "confirmed",
+        "decision": "descriptive_only" if budget == "reduced" else "reference_retained",
         "policy": {
             "policy_id": "test_policy",
             "policy_sha256": canonical_json_sha256(group_policy),
             "group_policy": group_policy,
             "spathi_commit": "1" * 40,
         },
-        "provenance": {
-            name: {"path": "test.json", "sha256": "2" * 64}
-            for name in (
-                "calibration_selection",
-                "efficiency_plan",
-                "efficiency_evidence",
-                "efficiency_results",
-            )
-        },
+        "provenance": provenance,
     }
     detected = {
         "effective_cpu_threads": 8,
@@ -182,52 +252,86 @@ def test_materialization_freezes_runnable_requests_resources_and_schedule() -> N
         "cpu_allocation_order": list(range(8)),
     }
     runtime_plan = resolve_runtime_plan(detected)
-    template_path = REPO_ROOT / "experiments/v1/profiles/performance-reduced.json"
-    template = load_profile(REPO_ROOT, "performance-reduced", require_runnable=True)
+    template_path = repo / f"experiments/v1/profiles/performance-{budget}.json"
+    template = load_profile(repo, f"performance-{budget}", require_runnable=True)
+    production_path = test_root / "production.json"
+    runtime_plan_path = test_root / "runtime-plan.json"
+    production_path.write_text(json.dumps(production), encoding="utf-8")
+    runtime_plan_path.write_text(json.dumps(runtime_plan), encoding="utf-8")
+    materialized = materialize_performance_protocol(
+        repo_root=repo,
+        budget=budget,
+        template_path=template_path,
+        template_profile=template,
+        production_path=production_path,
+        production=production,
+        runtime_plan_path=runtime_plan_path,
+        runtime_plan=runtime_plan,
+        output_dir=test_root / "materialized",
+    )
 
-    with tempfile.TemporaryDirectory(
-        dir=REPO_ROOT / "work", prefix="performance-materialization-test-"
-    ) as directory:
-        test_root = Path(directory)
-        production_path = test_root / "production.json"
-        runtime_plan_path = test_root / "runtime-plan.json"
-        production_path.write_text(json.dumps(production), encoding="utf-8")
-        runtime_plan_path.write_text(json.dumps(runtime_plan), encoding="utf-8")
-        materialized = materialize_performance_protocol(
-            repo_root=REPO_ROOT,
-            budget="reduced",
-            template_path=template_path,
-            template_profile=template,
-            production_path=production_path,
-            production=production,
-            runtime_plan_path=runtime_plan_path,
-            runtime_plan=runtime_plan,
-            output_dir=test_root / "materialized",
-        )
+    manifest = materialized["manifest"]
+    validate_json(
+        manifest,
+        repo / "schemas/performance-materialization.schema.json",
+        "test performance materialization",
+    )
+    assert len(manifest["tasks"]) == (16 if budget == "reduced" else 192)
+    assert manifest["execution"]["inference_cache"] == "disabled"
+    assert manifest["execution"]["output_profile"] == "full"
+    assert manifest["runtime_plan"]["detected"] == detected
+    assert all(task["cpuset_cpus"] == list(range(task["threads"])) for task in manifest["tasks"])
+    assert {task["ram_gb"] for task in manifest["tasks"]} == {64.0}
+    spathi = materialized["scientific_requests"]["spathi_production"]
+    assert spathi["custom_tool"]["runtime_resources"] == {
+        "threading": {
+            "supported": True,
+            "default_threads": 1,
+            "max_threads": None,
+            "upstream_mapping": "cli:--threads",
+        },
+    }
 
-        manifest = materialized["manifest"]
-        validate_json(
-            manifest,
-            REPO_ROOT / "schemas/performance-materialization.schema.json",
-            "test performance materialization",
-        )
-        assert len(manifest["tasks"]) == 16
-        assert manifest["execution"]["inference_cache"] == "disabled"
-        assert manifest["execution"]["output_profile"] == "full"
-        assert manifest["runtime_plan"]["detected"] == detected
-        assert all(
-            task["cpuset_cpus"] == list(range(task["threads"])) for task in manifest["tasks"]
-        )
-        assert {task["ram_gb"] for task in manifest["tasks"]} == {64.0}
-        spathi = materialized["scientific_requests"]["spathi_production"]
-        assert spathi["custom_tool"]["runtime_resources"] == {
-            "threading": {
-                "supported": True,
-                "default_threads": 1,
-                "max_threads": None,
-                "upstream_mapping": "cli:--threads",
-            }
-        }
+    run_root = test_root / "run"
+    profile_id = materialized["profile_id"]
+    snapshot = freeze_run_inputs(
+        repo, profile_id, run_root, profile_file=materialized["profile_path"]
+    )
+    frozen = frozen_repository_root(run_root)
+    entries = {entry["path"]: entry for entry in snapshot["files"]}
+    runtime_profile = materialized["runtime_profile"]
+    original_bytes = {}
+    for batch in runtime_profile["inference_batches"]:
+        for field in ("tools_params", "run_metadata", "custom_tools"):
+            relative = batch.get(field)
+            if relative is None:
+                continue
+            original_bytes[relative] = (repo / relative).read_bytes()
+            assert entries[relative]["kind"] == "runtime-derived"
+            assert entries[relative]["sha256"] == sha256_file(repo / relative)
+            assert (frozen / relative).read_bytes() == original_bytes[relative]
+        metadata = json.loads((frozen / batch["run_metadata"]).read_text())
+        assert {row["algorithm_seed"] for row in metadata["runs"]} == {spathi["algorithm_seed"]}
+    assert frozen_profile(run_root, profile_id) == runtime_profile
+    schedule_before = sha256_file(materialized["manifest_path"])
+    assert manifest["schedule_sha256"] == canonical_json_sha256(manifest["tasks"])
+
+    # A resumed run must read its frozen files, not mutable source materializations.
+    catalog = next(
+        batch for batch in runtime_profile["inference_batches"] if batch["kind"] == "baseline"
+    )
+    (repo / catalog["tools_params"]).write_text("{}\n", encoding="utf-8")
+    (repo / catalog["run_metadata"]).unlink()
+    assert validate_run_inputs(repo, profile_id, run_root) == snapshot
+    assert (
+        freeze_run_inputs(repo, profile_id, run_root, profile_file=materialized["profile_path"])
+        == snapshot
+    )
+    assert frozen_profile(run_root, profile_id) == runtime_profile
+    assert sha256_file(materialized["manifest_path"]) == schedule_before
+    assert {
+        relative: (frozen / relative).read_bytes() for relative in original_bytes
+    } == original_bytes
 
 
 @pytest.mark.parametrize(
