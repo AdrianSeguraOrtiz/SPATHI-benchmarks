@@ -3,7 +3,7 @@
     {
       "run_id": "spathi_smoke",
       "name": "SPATHI smoke",
-      "docker_image": "spathi-benchmarks/spathi:c4e91f4a",
+      "docker_image": "spathi-benchmarks/spathi:17de1752",
       "execution_mode": "group_native",
       "extra_inputs": ["groups", "tf_list"],
       "outputs": {
