@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
@@ -10,16 +11,20 @@ from typing import Any
 import pytest
 
 from spathi_bench.artifacts import Artifact, ArtifactStore, canonical_json_sha256, sha256_file
+from spathi_bench.calibration import build_stage_profile, load_search_space
 from spathi_bench.calibration_contexts import load_dataset_group_contract
 from spathi_bench.config import BenchmarkConfigError
+from spathi_bench.pipeline import _batch_selects_dataset
 from spathi_bench.state import load_state, write_state
 from spathi_bench.summarize import (
     _calibration_context_aupr,
+    _calibration_panel_contract,
     _invariant_edge_stability,
     summarize,
 )
 
 _DEFAULT_METRICS = object()
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _scheduler_fixture(run_root: Path) -> dict[str, Any]:
@@ -518,16 +523,55 @@ def _attach_calibration_handoff(
     *,
     run_root: Path,
     state: dict[str, Any],
+    profile: dict[str, Any] | None = None,
 ) -> None:
-    dataset = state["datasets"][0]
-    contract = load_dataset_group_contract(
-        Path(dataset["dataset_manifest"]),
-        Path(dataset["ground_truth_manifest"]),
-        expected_dataset_id=dataset["dataset_id"],
-    )
+    contracts = {
+        dataset["dataset_id"]: load_dataset_group_contract(
+            Path(dataset["dataset_manifest"]),
+            Path(dataset["ground_truth_manifest"]),
+            expected_dataset_id=dataset["dataset_id"],
+        )
+        for dataset in state["datasets"]
+    }
+    # Freeze requests before tests mutate observed execution inventories.
+    if profile is None:
+        profile = json.loads((REPO_ROOT / "experiments/v1/profiles/smoke.json").read_text())
+        role = "validation" if state["purpose"] == "selection" else "development"
+        profile.update(
+            purpose=state["purpose"], calibration_budget="reduced",
+            calibration_stage="validation" if role == "validation" else "geometry",
+            calibration_fidelity="final" if role == "validation" else "scout",
+        )
+        for job in profile["generation_jobs"]:
+            job["dataset_role"] = role
+        profile["inference_batches"] = [{
+            "id": "group_only", "kind": "spathi", "regime": "group_only",
+            "dataset_role": role, "tools_params": "requests.json",
+            "custom_tools": "custom.json", "run_metadata": "metadata.json",
+        }]
+        profile["statistics"] = {"status": "not_applicable", "comparisons": []}
+    profile = deepcopy(profile)
+    profile["id"] = state["profile_id"]
+    snapshot = run_root / "input_snapshot"
+    frozen = snapshot / "repository"
+    shutil.copytree(REPO_ROOT / "schemas", frozen / "schemas")
+    (snapshot / "manifest.json").write_text(json.dumps({
+        "profile_source": {"path": "profile.json"},
+    }))
+    (frozen / "profile.json").write_text(json.dumps(profile))
+    for batch in profile["inference_batches"]:
+        params = frozen / batch["tools_params"]
+        params.parent.mkdir(parents=True, exist_ok=True)
+        params.write_text(json.dumps({"runs": [
+            {"run_id": run_id}
+            for run_id in sorted({
+                row["run_id"] for row in state["evaluations"] if row["batch_id"] == batch["id"]
+            })
+        ]}))
     inference_runs = []
     results = []
     for evaluation in state["evaluations"]:
+        contract = contracts[evaluation["dataset_id"]]
         inference_runs.append(
             {
                 **{
@@ -573,6 +617,130 @@ def _attach_calibration_handoff(
     )
     state["inference_runs"] = inference_runs
     state["handoff_validation"] = str(handoff_path.resolve())
+
+
+def _calibration_replicate_run(
+    tmp_path: Path, budget: str, stage: str, fidelity: str,
+) -> tuple[Path, Path, dict[str, Any]]:
+    repo_root, run_root = _evaluated_run(tmp_path)
+    state = load_state(run_root, "smoke")
+    store = ArtifactStore(Path(state["artifact_store"]))
+    purpose = "selection" if stage == "validation" else "calibration"
+    template = json.loads(
+        (REPO_ROOT / f"experiments/v1/profiles/{purpose}-{budget}.json").read_text()
+    )
+    profile = build_stage_profile(
+        template, stage, budget, fidelity,
+        bundle_path="requests", search_space=load_search_space(REPO_ROOT),
+    )
+    batch = profile["inference_batches"][0]
+    state.update(purpose=purpose, datasets=[], evaluations=[])
+    for job in profile["generation_jobs"]:
+        request = json.loads((REPO_ROOT / job["simulator_runs"]).read_text())
+        count = sum(run["replicates"] for run in request["runs"])
+        for replicate in range(1, count + 1):
+            dataset = _dataset(store, f"{job['id']}-{replicate}", replicate)
+            dataset.update(
+                generation_job=job["id"], dataset_role=job["dataset_role"],
+                replicate_index=replicate, split_id=job["split_id"],
+                condition_id=job["condition_id"],
+            )
+            state["datasets"].append(dataset)
+            if not _batch_selects_dataset(batch, dataset):
+                continue
+            for candidate in (1, 2):
+                run_id = f"candidate_{candidate}_seed_1729"
+                evaluation = _evaluation(
+                    store, dataset=dataset, run_id=run_id,
+                    tool_id=f"custom_{run_id}", tool_origin="custom",
+                    configuration_id=f"candidate_{candidate}",
+                    family="spathi", selection_role="candidate",
+                    metrics=[{
+                        "tool_id": run_id, "level": "directed", "context": context,
+                        "truth_context": context, "status": "ok", "auroc": 0.8,
+                        "aupr": (replicate + candidate) / 10,
+                    } for context in ("group:a", "group:b")],
+                )
+                evaluation["batch_id"] = batch["id"]
+                state["evaluations"].append(evaluation)
+    _attach_calibration_handoff(run_root=run_root, state=state, profile=profile)
+    write_state(run_root, state)
+    return repo_root, run_root, state
+
+
+@pytest.mark.parametrize(
+    ("budget", "stage", "fidelity", "generated", "selected"),
+    [
+        ("full", "geometry", "scout", 21, 7),
+        ("full", "geometry", "confirmation", 21, 14),
+        ("reduced", "geometry", "scout", 4, 4),
+        ("reduced", "geometry", "confirmation", 3, 3),
+        ("full", "validation", "final", 24, 24),
+    ],
+)
+def test_calibration_summary_uses_the_frozen_phase_replica_selection(
+    tmp_path: Path, budget: str, stage: str, fidelity: str, generated: int, selected: int,
+) -> None:
+    repo_root, run_root, state = _calibration_replicate_run(tmp_path, budget, stage, fidelity)
+    assert len(state["datasets"]) == generated
+    reports = summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root)
+    summary = json.loads(reports[1].read_text())
+    panel = summary["calibration_panel"]
+    selected_ids = {row["dataset_id"] for row in state["inference_runs"]}
+    assert len(selected_ids) == selected
+    assert set(panel["dataset_ids"]) == selected_ids
+    assert {row["dataset_id"] for row in panel["datasets"]} == selected_ids
+    assert panel["n_expected_executions"] == selected * 2
+    assert len(summary["calibration_rows"]) == selected * 2
+    assert {row["dataset_id"] for row in summary["calibration_rows"]} == selected_ids
+    # A completed summary is reusable without recreating or altering the reports.
+    digests = [sha256_file(path) for path in reports]
+    assert summarize(repo_root=repo_root, profile_id="smoke", run_root=run_root) == reports
+    assert [sha256_file(path) for path in reports] == digests
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_dataset", "omits planned executions"),
+        ("missing_configuration", "omits planned executions"),
+        ("missing_execution", "omits planned executions"),
+        ("unexpected_run", "Unplanned calibration inference"),
+        ("reserved_replica", "unknown execution"),
+        ("wrong_batch", "Unplanned calibration inference"),
+        ("duplicate", "Duplicate calibration inference"),
+    ],
+)
+def test_calibration_panel_rejects_execution_inventory_changes(
+    tmp_path: Path, mutation: str, message: str,
+) -> None:
+    _, run_root, state = _calibration_replicate_run(tmp_path, "full", "geometry", "scout")
+    runs = state["inference_runs"]
+    first = deepcopy(runs[0])
+    if mutation == "missing_dataset":
+        runs[:] = [run for run in runs if run["dataset_id"] != first["dataset_id"]]
+    elif mutation == "missing_configuration":
+        runs[:] = [run for run in runs if run["run_id"] != first["run_id"]]
+    elif mutation == "missing_execution":
+        runs.pop()
+    elif mutation == "unexpected_run":
+        first["run_id"] = "unexpected"
+        runs.append(first)
+    elif mutation == "reserved_replica":
+        selected_ids = {run["dataset_id"] for run in runs}
+        first["dataset_id"] = next(
+            dataset["dataset_id"] for dataset in state["datasets"]
+            if dataset["dataset_id"] not in selected_ids
+        )
+        runs.append(first)
+    elif mutation == "wrong_batch":
+        runs[0]["batch_id"] = "other_batch"
+    else:
+        runs.append(first)
+    with pytest.raises(BenchmarkConfigError, match=message):
+        _calibration_panel_contract(
+            state=state, store=ArtifactStore(Path(state["artifact_store"])), run_root=run_root,
+        )
 
 
 def test_summarize_preserves_rows_and_computes_descriptive_means(tmp_path: Path) -> None:

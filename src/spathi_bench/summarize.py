@@ -20,8 +20,8 @@ from .calibration_contexts import DatasetGroupContract, load_dataset_group_contr
 from .config import BenchmarkConfigError, load_json_object
 from .evaluation_identity import EvaluationSpaceIdentity, load_evaluation_space_identity
 from .execution_records import unique_execution_records
-from .pipeline import validate_inference_attribution_contract
-from .provenance import validate_run_inputs
+from .pipeline import _batch_selects_dataset, validate_inference_attribution_contract
+from .provenance import frozen_path, frozen_profile, validate_run_inputs
 from .safe_io import path_below_no_symlinks
 from .state import load_state, require_status, status_at_least, write_state
 
@@ -378,11 +378,45 @@ def _calibration_panel_contract(
             expected_dataset_id=dataset_id,
         )
 
+    # Generation may publish replicas reserved for another calibration fidelity.
+    # Derive this panel from the frozen requests, never from completed runs alone.
+    profile = frozen_profile(run_root, state["profile_id"])
+    planned: dict[tuple[str, str], str] = {}
+    run_ids_by_dataset: dict[str, set[str]] = defaultdict(set)
+    for batch in profile["inference_batches"]:
+        if batch["kind"] != "spathi" or batch["regime"] != "group_only":
+            raise BenchmarkConfigError("Calibration plan must contain only SPATHI group_only runs")
+        request = load_json_object(
+            frozen_path(run_root, batch["tools_params"], "calibration tools params"),
+            "calibration tools params",
+        )
+        for dataset in datasets:
+            if not _batch_selects_dataset(batch, dataset):
+                continue
+            dataset_id = dataset["dataset_id"]
+            for run in request["runs"]:
+                run_id = run["run_id"]
+                key = (dataset_id, run_id)
+                if key in planned:
+                    raise BenchmarkConfigError(f"Duplicate planned calibration execution: {key!r}")
+                planned[key] = batch["id"]
+                run_ids_by_dataset[dataset_id].add(run_id)
+    run_id_sets = {frozenset(run_ids) for run_ids in run_ids_by_dataset.values()}
+    if not planned or len(run_id_sets) != 1:
+        raise BenchmarkConfigError(
+            "Every selected calibration dataset must request exactly the same frozen runs"
+        )
+    run_ids = sorted(next(iter(run_id_sets)))
+    dataset_contracts = {
+        dataset_id: contract
+        for dataset_id, contract in dataset_contracts.items()
+        if dataset_id in run_ids_by_dataset
+    }
+
     inference_runs = state.get("inference_runs")
     if not isinstance(inference_runs, list) or not inference_runs:
         raise BenchmarkConfigError("Calibration has no inference runs")
     executions: dict[tuple[str, str], dict[str, Any]] = {}
-    run_ids_by_dataset: dict[str, set[str]] = defaultdict(set)
     for inference in inference_runs:
         if not isinstance(inference, dict):
             raise BenchmarkConfigError("Calibration inference metadata must be objects")
@@ -399,14 +433,13 @@ def _calibration_panel_contract(
             raise BenchmarkConfigError(
                 f"Duplicate calibration inference for {dataset_id!r}/{run_id!r}"
             )
+        if key not in planned or inference.get("batch_id") != planned[key]:
+            raise BenchmarkConfigError(f"Unplanned calibration inference: {key!r}")
         executions[key] = inference
-        run_ids_by_dataset[dataset_id].add(run_id)
-    run_id_sets = {frozenset(run_ids) for run_ids in run_ids_by_dataset.values()}
-    if set(run_ids_by_dataset) != set(dataset_contracts) or len(run_id_sets) != 1:
+    if set(executions) != set(planned):
         raise BenchmarkConfigError(
-            "Every calibration dataset must execute exactly the same frozen runs"
+            f"Calibration inference omits planned executions: {sorted(set(planned) - set(executions))}"
         )
-    run_ids = sorted(next(iter(run_id_sets)))
 
     handoff_path = Path(str(state.get("handoff_validation", ""))).resolve()
     if handoff_path != (run_root / "handoff-validation.json").resolve():
