@@ -326,6 +326,7 @@ def _calibration_fixture(
                 "status": "completed",
                 "profile_id": ranking["profile_id"],
                 "artifact_store": str((version_root / "artifacts").resolve()),
+                "inference_runs": [{"dataset_id": "dataset-a"}],
                 "datasets": [
                     {
                         **(validation_dataset if stage_id == "validation" else development_dataset),
@@ -1056,6 +1057,52 @@ def test_calibration_report_reconciles_cache_access_without_changing_phase_prove
     )
     assert captured["payload"]["datasets"]["summary"]["dataset_count"] == 2
     assert {path: path.read_bytes() for path in recorded_states} == recorded_states
+
+
+def test_full_calibration_report_accepts_only_executed_replica_subset() -> None:
+    state = {
+        "datasets": [
+            {"dataset_role": "development", "dataset_id": f"replica-{index}"}
+            for index in range(1, 22)
+        ],
+        "inference_runs": [
+            {"dataset_id": f"replica-{index}"} for index in range(1, 8)
+        ],
+    }
+    observed = {("development", f"replica-{index}") for index in range(1, 8)}
+    calibration_reporting._validate_ranked_datasets(
+        stage_id="geometry", stage_state=state, observed=observed
+    )
+    with pytest.raises(BenchmarkConfigError, match="ranking datasets differ"):
+        calibration_reporting._validate_ranked_datasets(
+            stage_id="geometry", stage_state=state, observed=observed - {("development", "replica-7")}
+        )
+
+
+def test_calibration_report_describes_executed_not_reserved_replicates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, workflow_root, _selected = _calibration_fixture(tmp_path)
+    version_root = workflow_root.parents[3]
+    for stage_id, fidelity in calibration_reporting.CALIBRATION_PHASE_ORDER:
+        state_path = version_root / f"calibration-{stage_id}__{fidelity}/state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        template = state["datasets"][0]
+        state["datasets"].extend(
+            {**template, "dataset_id": f"reserved-{index}"} for index in range(1, 21)
+        )
+        _write_json(state_path, state)
+    captured: dict[str, Any] = {}
+
+    def capture_bundle(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"captured": True}
+
+    monkeypatch.setattr(calibration_reporting, "write_report_bundle", capture_bundle)
+    calibration_reporting.render_calibration_report(
+        repo_root=repo_root, version_root=version_root, workflow_root=workflow_root,
+    )
+    assert captured["payload"]["datasets"]["summary"]["dataset_count"] == 2
 
 
 @pytest.mark.parametrize(

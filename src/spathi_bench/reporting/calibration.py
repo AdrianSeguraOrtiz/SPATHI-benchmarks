@@ -265,6 +265,30 @@ def _record_group_counts(
     return observed
 
 
+def _validate_ranked_datasets(
+    *, stage_id: str, stage_state: dict[str, Any], observed: set[tuple[str, str]]
+) -> None:
+    generated = {
+        (str(item.get("dataset_role")), str(item.get("dataset_id")))
+        for item in require_array(stage_state.get("datasets"), "benchmark datasets")
+        if isinstance(item, dict)
+    }
+    generated_by_id = {dataset_id: role for role, dataset_id in generated}
+    executed = {
+        (generated_by_id.get(str(item.get("dataset_id"))), str(item.get("dataset_id")))
+        for item in require_array(stage_state.get("inference_runs"), "benchmark inference runs")
+        if isinstance(item, dict)
+    }
+    if not executed or not executed.issubset(generated):
+        raise BenchmarkConfigError(
+            f"{stage_id} executed datasets differ from its completed benchmark state"
+        )
+    if executed != observed:
+        raise BenchmarkConfigError(
+            f"{stage_id} ranking datasets differ from its executed benchmark datasets"
+        )
+
+
 def render_calibration_report(
     *, repo_root: Path, version_root: Path, workflow_root: Path
 ) -> dict[str, Any]:
@@ -318,6 +342,7 @@ def render_calibration_report(
     previous_ranking_sha256: str | None = None
     ranking_paths: dict[str, Path] = {}
     dataset_records: dict[tuple[str, str], dict[str, Any]] = {}
+    ranked_dataset_keys: set[tuple[str, str]] = set()
     artifact_store: str | None = None
     dataset_state_paths: list[Path] = []
     group_counts: dict[tuple[str, str], int] = {}
@@ -394,15 +419,10 @@ def render_calibration_report(
             profile_id=record.get("profile_id"),
             stage_id=phase_id,
         )
-        state_datasets = {
-            (str(item.get("dataset_role")), str(item.get("dataset_id")))
-            for item in require_array(stage_state.get("datasets"), "benchmark datasets")
-            if isinstance(item, dict)
-        }
-        if state_datasets != observed_datasets:
-            raise BenchmarkConfigError(
-                f"{stage_id} ranking datasets differ from its completed benchmark state"
-            )
+        _validate_ranked_datasets(
+            stage_id=stage_id, stage_state=stage_state, observed=observed_datasets
+        )
+        ranked_dataset_keys.update(observed_datasets)
         specification = specifications.get(phase_id, {})
         raw_artifact_store = stage_state.get("artifact_store")
         if not isinstance(raw_artifact_store, str) or not raw_artifact_store:
@@ -485,7 +505,7 @@ def render_calibration_report(
         version_root=version,
         benchmark_state={
             "artifact_store": artifact_store,
-            "datasets": [dataset_records[key] for key in sorted(dataset_records)],
+            "datasets": [dataset_records[key] for key in sorted(ranked_dataset_keys)],
         },
         group_counts=group_counts,
     )
