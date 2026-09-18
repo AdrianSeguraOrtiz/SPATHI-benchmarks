@@ -81,6 +81,7 @@
       { label: "System repetitions", value: data.protocol.system_repetitions },
       { label: "Warm-ups", value: `${data.warmups.count} (${data.warmups.completed} completed; excluded)` },
       { label: "Algorithm seed policy", value: humanize(data.protocol.repetition_semantics) },
+      { label: "Physical-task time limit", value: `${formatInteger(data.execution_limits.physical_task_timeout_seconds / 3600)} h`, detail: "Applied equally to every method and thread endpoint" },
       { label: "Memory source", value: data.protocol.memory_measurement_source },
       { label: "Memory semantics", value: "Overlap upper bound from physical-container cgroup peaks; ANDREA host excluded" },
     ]);

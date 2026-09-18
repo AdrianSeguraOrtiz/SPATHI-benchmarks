@@ -103,6 +103,7 @@ def test_portable_class_clamps_preferences_to_small_host() -> None:
         "memory_gib": 10.0,
         "planner": "auto",
         "planner_time_limit_seconds": 300,
+        "timeout_seconds": 14400,
     }
     assert resolved["operations"]["generate_data"]["max_parallel_tasks"] == 2
     assert resolved["output_profile"] == "canonical"
@@ -158,6 +159,7 @@ def test_bulk_run_receives_explicit_threads_without_changing_params() -> None:
         "threads": 2,
         "ram_gb": 16.0,
         "cpuset_cpus": list(range(8)),
+        "timeout_seconds": 14400.0,
     }
     assert resolved["params"] == {"seed": 7}
     assert "resources" not in run
@@ -180,7 +182,28 @@ def test_tool_without_intrinsic_thread_limit_uses_portable_class_budget() -> Non
         "threads": 4,
         "ram_gb": 16.0,
         "cpuset_cpus": list(range(8)),
+        "timeout_seconds": 14400.0,
     }
+
+
+def test_inference_timeout_is_bounded_by_the_frozen_policy() -> None:
+    execution = resolve_execution_class(
+        repo_root=REPO_ROOT,
+        class_id="scale_full",
+        runtime_plan=_runtime_plan(8, 64),
+    )
+    shorter = materialize_inference_run_resources(
+        {"run_id": "scale", "resources": {"timeout_seconds": 43200}},
+        toolspec=_toolspec(maximum=None),
+        execution_plan=execution,
+    )
+    assert shorter["resources"]["timeout_seconds"] == 43200.0
+    with pytest.raises(BenchmarkConfigError, match="exceeds the frozen execution policy"):
+        materialize_inference_run_resources(
+            {"run_id": "scale", "resources": {"timeout_seconds": 86401}},
+            toolspec=_toolspec(maximum=None),
+            execution_plan=execution,
+        )
 
 
 def test_performance_run_keeps_exact_threads_and_pins_runtime_cpuset() -> None:
@@ -199,6 +222,7 @@ def test_performance_run_keeps_exact_threads_and_pins_runtime_cpuset() -> None:
         "threads": 4,
         "ram_gb": 64.0,
         "cpuset_cpus": [0, 1, 2, 3],
+        "timeout_seconds": 14400.0,
     }
 
 

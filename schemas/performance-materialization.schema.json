@@ -77,7 +77,8 @@
         "order_salt",
         "max_ram_gb",
         "planner",
-        "planner_time_limit_seconds"
+        "planner_time_limit_seconds",
+        "timeout_seconds"
       ],
       "properties": {
         "output_profile": {"const": "full"},
@@ -87,7 +88,8 @@
         "order_salt": {"const": "spathi-performance-counterbalance-v1"},
         "max_ram_gb": {"type": "number", "minimum": 1},
         "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
-        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0}
+        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
       }
     },
     "datasets": {

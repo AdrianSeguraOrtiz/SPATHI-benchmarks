@@ -111,6 +111,17 @@ remain per-run quotas. Every result records detected capacity, requested ceiling
 resources and scheduler utilization; formal timing comparisons are stratified by their frozen
 resource endpoint and never silently pooled across different runtime plans.
 
+The committed execution policy limits every physical inference task: 30 minutes in
+smoke, four hours in calibration, external comparison and formal performance, and
+24 hours in dimensional transfer and full scalability. Reduced scalability retains
+its stricter 12-hour boundary. These are tool-execution limits, not the separate
+30/300-second planning limits. The same limit applies to all methods in a given
+execution class. `group_emulated` methods have one physical task per group, so their
+logical run can exceed one task limit. Formal performance records attributable
+timeouts as failures and withholds speedup for incomplete conditions. Calibration
+and primary accuracy comparison fail closed on a timeout; incomplete paired data
+must not be promoted to a method ranking.
+
 The number of algorithmic seeds does not increase the biological sample size. Repetitions estimate
 and average algorithmic variation within an independent dataset.
 

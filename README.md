@@ -143,6 +143,14 @@ Optional ceilings are useful on shared hosts:
 These ceilings are total study capacity, not a promise that every individual tool will use that
 many threads. The resource plan gives each task its quota and records actual usage. Calibration
 and accuracy-only repetitions can share the machine; designated timing measurements run alone.
+The frozen execution policy also caps each physical inference task: 30 minutes for smoke,
+four hours for calibration, comparison and formal performance, and 24 hours for
+dimensional-transfer and scalability (the reduced scalability boundary is 12 hours).
+This is separate from the five-minute planner limit. In `group_emulated` delivery, each
+group is a separate physical task, so the cap is **per group**, not a cap on the
+whole logical method/dataset combination. Formal performance retains attributable
+timeouts as failed measurements. Calibration and the primary accuracy comparison
+stop on a timeout instead of silently removing a method from a paired comparison.
 `--project PATH`, `--andrea PATH` and `--spathi PATH` are optional overrides for unusual layouts.
 Output stays in the project's ignored `work/` tree.
 

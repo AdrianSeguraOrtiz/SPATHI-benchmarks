@@ -364,6 +364,7 @@ def _execute_task(
             "threads": int(task["threads"]),
             "ram_gb": float(task["ram_gb"]),
             "cpuset_cpus": list(task["cpuset_cpus"]),
+            "timeout_seconds": float(materialization["execution"]["timeout_seconds"]),
         }
         tools_path = write_idempotent_json(
             request_dir / "tools-params.json",

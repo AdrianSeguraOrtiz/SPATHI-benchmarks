@@ -40,6 +40,7 @@ INFERENCE_RESOURCES = {
     "memory_gib": 4.0,
     "planner": "heuristic",
     "planner_time_limit_seconds": 30,
+    "timeout_seconds": 1800,
 }
 EXECUTION_PLAN = {
     "fingerprint": "x" * 64,
@@ -503,7 +504,7 @@ def _inference_attribution_case(
         "tool_id": "genie3",
         "params": {"random_seed": 17},
         "execution": {"mode": "group_emulated"},
-        "resources": {"threads": 1, "ram_gb": 4.0, "cpuset_cpus": [0]},
+        "resources": {"threads": 1, "ram_gb": 4.0, "cpuset_cpus": [0], "timeout_seconds": 1800.0},
     }
     params_path.write_text(json.dumps({"runs": [run]}), encoding="utf-8")
     metadata = {

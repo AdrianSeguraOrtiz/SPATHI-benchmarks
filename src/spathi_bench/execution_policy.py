@@ -85,6 +85,7 @@ def resolve_execution_class(
         {
             "planner": selected["inference"]["planner"],
             "planner_time_limit_seconds": selected["inference"]["planner_time_limit_seconds"],
+            "timeout_seconds": selected["inference"]["timeout_seconds"],
         }
     )
     body: dict[str, Any] = {
@@ -266,18 +267,26 @@ def materialize_inference_run_resources(
         )
     resources["cpuset_cpus"] = list(raw_cpuset)
 
-    if "timeout_seconds" in resources_input:
-        timeout_seconds = resources_input["timeout_seconds"]
-        if (
-            not isinstance(timeout_seconds, (int, float))
-            or isinstance(timeout_seconds, bool)
-            or not math.isfinite(float(timeout_seconds))
-            or float(timeout_seconds) <= 0
-        ):
-            raise BenchmarkConfigError(
-                f"Inference run {run.get('run_id')!r} timeout_seconds must be finite and positive"
-            )
-        resources["timeout_seconds"] = float(timeout_seconds)
+    timeout_seconds = allocation.get("timeout_seconds")
+    if (
+        not isinstance(timeout_seconds, (int, float))
+        or isinstance(timeout_seconds, bool)
+        or not math.isfinite(float(timeout_seconds))
+        or float(timeout_seconds) <= 0
+    ):
+        raise BenchmarkConfigError("Resolved inference timeout is invalid")
+    requested_timeout = resources_input.get("timeout_seconds", timeout_seconds)
+    if (
+        not isinstance(requested_timeout, (int, float))
+        or isinstance(requested_timeout, bool)
+        or not math.isfinite(float(requested_timeout))
+        or float(requested_timeout) <= 0
+        or float(requested_timeout) > float(timeout_seconds)
+    ):
+        raise BenchmarkConfigError(
+            f"Inference run {run.get('run_id')!r} timeout exceeds the frozen execution policy"
+        )
+    resources["timeout_seconds"] = float(requested_timeout)
 
     resolved = copy.deepcopy(dict(run))
     resolved["resources"] = resources

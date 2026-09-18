@@ -798,6 +798,7 @@ def test_interactive_report_renders_complete_reduced_evidence(tmp_path: Path) ->
             "max_ram_gb": 64,
             "planner": "heuristic",
             "planner_time_limit_seconds": 300,
+            "timeout_seconds": 14400,
         },
         "datasets": [
             {

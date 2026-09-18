@@ -220,6 +220,9 @@ def render_performance_report(
         },
         "summary": results["summary"],
         "protocol": results["protocol"],
+        "execution_limits": {
+            "physical_task_timeout_seconds": materialization["execution"]["timeout_seconds"]
+        },
         "datasets": list(datasets.values()),
         "aggregates": results["aggregates"],
         "measurements": results["measurements"],

@@ -51,7 +51,8 @@
         "minimum_memory_gib",
         "preferred_memory_gib",
         "planner",
-        "planner_time_limit_seconds"
+        "planner_time_limit_seconds",
+        "timeout_seconds"
       ],
       "properties": {
         "minimum_cpu_threads": {"type": "integer", "minimum": 1},
@@ -59,7 +60,8 @@
         "minimum_memory_gib": {"type": "number", "minimum": 1},
         "preferred_memory_gib": {"type": "number", "minimum": 1},
         "planner": {"enum": ["auto", "cp_sat", "heuristic"]},
-        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0}
+        "planner_time_limit_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0}
       }
     },
     "execution_class": {

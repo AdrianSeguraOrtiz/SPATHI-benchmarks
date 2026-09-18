@@ -618,6 +618,7 @@ def materialize_performance_protocol(
             "max_ram_gb": float(inference_resources["memory_gib"]),
             "planner": inference_resources["planner"],
             "planner_time_limit_seconds": float(inference_resources["planner_time_limit_seconds"]),
+            "timeout_seconds": float(inference_resources["timeout_seconds"]),
         },
         "datasets": copy.deepcopy(budget_design["datasets"]),
         "scientific_requests": [
