@@ -13,7 +13,7 @@
       title: "Held-out accuracy comparison",
       kicker: "Phase 2",
       lead: "The frozen SPATHI policy is compared within predeclared information and output-contract families.",
-      scope: "Rankings are only meaningful inside one competitor family and on complete paired blocks."
+      scope: "This phase is held-out accuracy evidence only. Rankings are meaningful only inside one competitor family and on complete paired blocks. Runtime and memory comparisons are reported only in Scalability because joint comparison telemetry can include scheduler waiting."
     },
     scalability: {
       title: "Computational scalability",
@@ -872,8 +872,13 @@
     if (name === "scalability") scalabilityPlots(wrapper, phase);
     renderEvidenceTables(wrapper, phase);
     const rows = el("section", { className: "section table-card" });
-    append(rows, sectionHeading("Audit table", "Canonical phase rows", "The table is capped for browser responsiveness; the matching CSV export contains every row."));
-    renderTable(rows, phase.rows, ["dataset_id", "family", "configuration_id", "method_id", "scale_id", "metric", "value", "status", "measurement", "requested_threads", "effective_threads", "duration_seconds", "peak_memory_bytes"]); wrapper.appendChild(rows);
+    const auditDescription = name === "comparison"
+      ? "The table is capped for browser responsiveness. Runtime telemetry remains in the matching CSV for audit, but is not comparative evidence in this jointly scheduled phase."
+      : "The table is capped for browser responsiveness; the matching CSV export contains every row.";
+    const auditColumns = ["dataset_id", "family", "configuration_id", "method_id", "scale_id", "metric", "value", "status", "measurement", "requested_threads", "effective_threads"];
+    if (name !== "comparison") auditColumns.push("duration_seconds", "peak_memory_bytes");
+    append(rows, sectionHeading("Audit table", "Canonical phase rows", auditDescription));
+    renderTable(rows, phase.rows, auditColumns); wrapper.appendChild(rows);
     root.appendChild(wrapper);
   }
 

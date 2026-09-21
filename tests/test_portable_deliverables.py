@@ -559,6 +559,18 @@ def test_comparison_accuracy_views_separate_descriptive_available_cases_from_inf
     assert "function completeBlockRows(family, metric, rows)" in html
 
 
+def test_comparison_report_reserves_resource_comparisons_for_scalability(
+    tmp_path: Path,
+) -> None:
+    build_study_deliverables(_snapshot(), tmp_path)
+    html = (tmp_path / "article-full-1/comparison.html").read_text(encoding="utf-8")
+
+    assert "Runtime and memory comparisons are reported only in Scalability" in html
+    assert "joint comparison telemetry can include scheduler waiting" in html
+    assert "Runtime telemetry remains in the matching CSV for audit" in html
+    assert 'if (name !== "comparison") auditColumns.push("duration_seconds", "peak_memory_bytes")' in html
+
+
 def test_each_phase_places_dataset_context_before_result_plots(tmp_path: Path) -> None:
     build_study_deliverables(_snapshot(), tmp_path)
     html = (tmp_path / "article-full-1/article-report.html").read_text(encoding="utf-8")
