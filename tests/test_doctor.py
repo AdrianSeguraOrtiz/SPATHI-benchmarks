@@ -1,313 +1,309 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+from collections import namedtuple
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from spathi_bench.doctor import run_doctor, write_doctor_report
 
-
-def _config_partitions() -> dict[str, list[str]]:
-    return {
-        "paths": ["expression", "groups", "output_dir", "tf_list"],
-        "scientific_inputs": ["centroid_weights", "target_list"],
-        "scientific_parameters": ["weight_mode"],
-        "operational_options": ["report", "threads"],
-    }
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DiskUsage = namedtuple("DiskUsage", "total used free")
 
 
-def _repositories(tmp_path: Path) -> tuple[Path, Path]:
+def _checkout(tmp_path: Path) -> tuple[Path, Path, Path]:
+    benchmark = tmp_path / "SPATHI-benchmarks"
     andrea = tmp_path / "ANDREA"
     spathi = tmp_path / "SPATHI"
-    for repository in (andrea, spathi):
-        repository.mkdir()
-        (repository / ".git").mkdir()
-    (andrea / "andrea").mkdir()
+    (benchmark / "experiments").mkdir(parents=True)
+    shutil.copy2(
+        REPO_ROOT / "experiments" / "article-study.json",
+        benchmark / "experiments" / "article-study.json",
+    )
+    (andrea / "andrea").mkdir(parents=True)
     (andrea / "andrea" / "__init__.py").write_text("", encoding="utf-8")
-    return andrea, spathi
+    design = json.loads(
+        (benchmark / "experiments" / "article-study.json").read_text(encoding="utf-8")
+    )
+    external_routes = [
+        route for route in design["comparison"]["routes"] if route["tool_id"] != "spathi"
+    ]
+    for tool_id in sorted({route["tool_id"] for route in external_routes}):
+        tool_routes = [route for route in external_routes if route["tool_id"] == tool_id]
+        inputs = sorted(
+            {
+                input_id
+                for route in tool_routes
+                for input_id in route["inputs"]
+                if input_id != "expression"
+            }
+        )
+        parameter_ids = {
+            parameter_id for route in tool_routes for parameter_id in route["parameters"]
+        }
+        parameter_ids.update(
+            route["seed_parameter"] for route in tool_routes if route["seed_parameter"] is not None
+        )
+        directed = tool_routes[0]["output_semantics"] != "undirected_topology"
+        toolspec = {
+            "id": tool_id,
+            "execution_capabilities": sorted({route["delivery"] for route in tool_routes}),
+            "params": {parameter_id: {} for parameter_id in sorted(parameter_ids)},
+            "extra_inputs": {
+                "required": [],
+                "optional": [
+                    {"input": input_id, "usage": "test fixture", "delivery": "runtime"}
+                    for input_id in inputs
+                ],
+                "conditional_required": [],
+            },
+            "outputs": {"directed": directed, "sign": "none"},
+            "runtime_resources": {"threading": {"max_threads": tool_routes[0]["max_threads"]}},
+        }
+        path = andrea / "andrea" / "catalog_inference_tools" / "tools" / tool_id
+        path.mkdir(parents=True)
+        (path / "toolspec.json").write_text(
+            json.dumps(toolspec, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    (spathi / "src" / "spathi").mkdir(parents=True)
+    (spathi / "src" / "spathi" / "__init__.py").write_text("", encoding="utf-8")
+    return benchmark, andrea, spathi
 
 
-def _successful_runner(
-    andrea_repo: Path,
-    spathi_repo: Path,
+def _runner(
+    andrea: Path,
+    spathi: Path,
+    *,
+    dirty: str | None = None,
 ) -> Callable[..., subprocess.CompletedProcess[str]]:
-    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-        if command[0] == "/usr/bin/docker" and command[1:] == ["--version"]:
-            stdout = "Docker version 28.0.0\n"
-        elif command[0] == "/usr/bin/docker" and command[1:3] == ["info", "--format"]:
-            stdout = "28.0.0\n"
-        elif command[0] == "/usr/bin/docker" and command[1:] == ["buildx", "version"]:
-            stdout = "github.com/docker/buildx v0.24.0\n"
-        elif command[0] == "/venv/bin/python" and command[1:] == ["-m", "andrea", "--help"]:
-            stdout = "usage: andrea\n"
-        elif (
-            command[0] == "/venv/bin/python"
-            and command[1] == "-c"
-            and Path(command[-1]) == spathi_repo.resolve()
-        ):
-            stdout = json.dumps(
-                {
-                    "module": str(spathi_repo / "src" / "spathi" / "__init__.py"),
-                    "missing_exports": [],
-                    "config_field_partitions": _config_partitions(),
-                    "missing_config_fields": [],
-                    "unexpected_config_fields": [],
-                    "config_partition_overlap": [],
-                    "requiredness_mismatches": [],
-                    "missing_progress_members": [],
-                    "missing_result_fields": [],
-                    "infer_signature_ok": True,
-                }
+    def run(command: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if command[0] == "/usr/bin/docker":
+            return subprocess.CompletedProcess(command, 0, stdout="28.0.0\n", stderr="")
+        if command[0] == "git":
+            repository = Path(command[2])
+            if command[3:] == ["rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(command, 0, stdout="a" * 40 + "\n", stderr="")
+            if command[3:5] == ["status", "--porcelain"]:
+                output = " M source.py\n" if dirty == repository.name else ""
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+        if command[1] == "-c" and command[-1] in {"andrea", "spathi"}:
+            package = command[-1]
+            module = (
+                andrea / "andrea" / "__init__.py"
+                if package == "andrea"
+                else spathi / "src" / "spathi" / "__init__.py"
             )
-        elif command[0] == "/venv/bin/python" and command[1] == "-c":
-            stdout = f"{andrea_repo / 'andrea' / '__init__.py'}\n"
-        else:  # pragma: no cover - makes unexpected subprocesses immediately visible
-            raise AssertionError(f"Unexpected command: {command}")
-        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout=str(module) + "\n", stderr="")
+        raise AssertionError(f"Unexpected command: {command}")
 
     return run
 
 
-def _resolver(executable: str) -> str | None:
-    return {"docker": "/usr/bin/docker"}.get(executable)
+def _resolver(name: str) -> str | None:
+    return "/usr/bin/docker" if name == "docker" else None
 
 
-def _by_id(report: dict[str, object]) -> dict[str, dict[str, object]]:
-    return {check["id"]: check for check in report["checks"]}  # type: ignore[index, misc]
+def _disk(free_gib: int = 500) -> Callable[[Path], DiskUsage]:
+    def usage(_path: Path) -> DiskUsage:
+        total = 1000 * 1024**3
+        free = free_gib * 1024**3
+        return DiskUsage(total, total - free, free)
+
+    return usage
 
 
-def test_run_doctor_reports_a_complete_healthy_environment(tmp_path: Path) -> None:
-    andrea, spathi = _repositories(tmp_path)
-    output = tmp_path / "reports" / "doctor.json"
+def _by_id(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {check["id"]: check for check in report["checks"]}
+
+
+def test_doctor_reports_a_healthy_environment(tmp_path: Path) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
 
     report = run_doctor(
+        repo_root=benchmark,
         andrea_repo=andrea,
         spathi_repo=spathi,
         python_executable="/venv/bin/python",
-        python_version=(3, 11, 9),
-        report_path=output,
-        runner=_successful_runner(andrea, spathi),
+        python_version=(3, 13, 7),
+        runner=_runner(andrea, spathi),
         resolver=_resolver,
+        disk_usage=_disk(),
     )
 
     assert report["ok"] is True
-    assert report["summary"] == {"pass": 9, "fail": 0, "skip": 0}
-    assert {check["status"] for check in report["checks"]} == {"pass"}
-    assert json.loads(output.read_text(encoding="utf-8")) == report
+    assert report["summary"] == {"pass": 12, "warn": 0, "fail": 0}
     checks = _by_id(report)
-    assert checks["andrea_cli"]["details"]["python_executable"] == "/venv/bin/python"  # type: ignore[index]
-    assert checks["andrea_import"]["details"]["repository"] == str(andrea.resolve())  # type: ignore[index]
-    assert checks["spathi_api"]["details"]["repository"] == str(spathi.resolve())  # type: ignore[index]
+    assert checks["article_design"]["details"]["profiles"] == [
+        "full",
+        "reduced",
+        "smoke",
+    ]
+    assert checks["andrea_import"]["details"]["module"].startswith(str(andrea))
+    assert checks["spathi_import"]["details"]["module"].startswith(str(spathi))
+    catalog = checks["andrea_catalog_contract"]
+    assert catalog["details"]["external_routes_checked"] == 15
+    assert all(route["status"] == "pass" for route in catalog["details"]["routes"])
 
 
-def test_missing_docker_fails_cli_and_skips_dependent_checks(tmp_path: Path) -> None:
-    andrea, spathi = _repositories(tmp_path)
+def _toolspec(andrea: Path, tool_id: str) -> Path:
+    return andrea / "andrea" / "catalog_inference_tools" / "tools" / tool_id / "toolspec.json"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_issue"),
+    [
+        ("missing", "ToolSpec is missing"),
+        ("invalid_json", "ToolSpec is not valid JSON"),
+        ("delivery", "is not in execution_capabilities"),
+        ("parameter", "route parameters are not declared in params"),
+        ("seed", "seed_parameter 'seed' is not declared in params"),
+        ("input", "route inputs are absent from extra_inputs"),
+        ("threads", "but the ToolSpec declares 4"),
+        ("direction", "requires directed=true"),
+    ],
+)
+def test_doctor_rejects_andrea_catalog_drift(
+    tmp_path: Path,
+    mutation: str,
+    expected_issue: str,
+) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
+    path = _toolspec(andrea, "genie3")
+    if mutation == "missing":
+        path.unlink()
+    elif mutation == "invalid_json":
+        path.write_text("{", encoding="utf-8")
+    else:
+        toolspec = json.loads(path.read_text(encoding="utf-8"))
+        if mutation == "delivery":
+            toolspec["execution_capabilities"] = ["global"]
+        elif mutation == "parameter":
+            toolspec["params"] = {"seed": {}}
+            design_path = benchmark / "experiments" / "article-study.json"
+            design = json.loads(design_path.read_text(encoding="utf-8"))
+            genie3 = next(
+                route for route in design["comparison"]["routes"] if route["id"] == "genie3"
+            )
+            genie3["parameters"] = {"regressor_type": "RF"}
+            design_path.write_text(json.dumps(design, indent=2) + "\n", encoding="utf-8")
+        elif mutation == "seed":
+            toolspec["params"] = {}
+        elif mutation == "input":
+            toolspec["extra_inputs"]["optional"] = []
+        elif mutation == "threads":
+            toolspec["runtime_resources"]["threading"]["max_threads"] = 4
+        elif mutation == "direction":
+            toolspec["outputs"]["directed"] = False
+        path.write_text(json.dumps(toolspec, indent=2) + "\n", encoding="utf-8")
 
     report = run_doctor(
+        repo_root=benchmark,
         andrea_repo=andrea,
         spathi_repo=spathi,
-        python_executable="/venv/bin/python",
-        runner=_successful_runner(andrea, spathi),
-        resolver=lambda _executable: None,
+        runner=_runner(andrea, spathi),
+        resolver=_resolver,
+        disk_usage=_disk(),
+    )
+
+    check = _by_id(report)["andrea_catalog_contract"]
+    assert report["ok"] is False
+    assert check["status"] == "fail"
+    affected = next(route for route in check["details"]["routes"] if route["route_id"] == "genie3")
+    assert any(expected_issue in issue for issue in affected["issues"])
+
+
+def test_dirty_checkout_is_warning_not_failure(tmp_path: Path) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
+
+    report = run_doctor(
+        repo_root=benchmark,
+        andrea_repo=andrea,
+        spathi_repo=spathi,
+        runner=_runner(andrea, spathi, dirty="SPATHI"),
+        resolver=_resolver,
+        disk_usage=_disk(),
+    )
+
+    check = _by_id(report)["source_provenance"]
+    assert report["ok"] is True
+    assert check["status"] == "warn"
+    assert check["details"]["repositories"]["spathi"]["dirty"] is True
+
+
+def test_doctor_reports_missing_docker_without_invoking_it(tmp_path: Path) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
+
+    report = run_doctor(
+        repo_root=benchmark,
+        andrea_repo=andrea,
+        spathi_repo=spathi,
+        runner=_runner(andrea, spathi),
+        resolver=lambda _name: None,
+        disk_usage=_disk(),
     )
 
     checks = _by_id(report)
     assert report["ok"] is False
     assert checks["docker_cli"]["status"] == "fail"
-    assert checks["docker_daemon"]["status"] == "skip"
-    assert checks["docker_buildx"]["status"] == "skip"
-    assert "Install Docker" in checks["docker_cli"]["remediation"]  # type: ignore[operator]
+    assert checks["docker_daemon"]["status"] == "fail"
+    assert checks["docker_buildx"]["status"] == "fail"
 
 
-def test_old_python_and_missing_repositories_have_clear_failures(tmp_path: Path) -> None:
-    andrea = tmp_path / "missing-ANDREA"
-    spathi = tmp_path / "not-a-repository"
-    spathi.mkdir()
-
-    def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
-        if command[0] == "/usr/bin/docker":
-            return subprocess.CompletedProcess(command, 0, stdout="available\n", stderr="")
-        if command == ["/venv/bin/python", "-m", "andrea", "--help"]:
-            return subprocess.CompletedProcess(command, 0, stdout="usage\n", stderr="")
-        raise AssertionError(f"Unexpected command: {command}")
-
-    report = run_doctor(
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        python_version=(3, 10, 14),
-        runner=runner,
-        resolver=_resolver,
-    )
-
-    checks = _by_id(report)
-    assert "Python 3.11 or newer" in checks["python_version"]["message"]  # type: ignore[operator]
-    assert "missing" in checks["andrea_repository"]["message"]  # type: ignore[operator]
-    assert "not a Git checkout" in checks["spathi_repository"]["message"]  # type: ignore[operator]
-    assert checks["andrea_import"]["status"] == "skip"
-
-
-def test_andrea_import_must_resolve_inside_expected_checkout(tmp_path: Path) -> None:
-    andrea, spathi = _repositories(tmp_path)
+def test_doctor_fails_import_outside_requested_checkout(tmp_path: Path) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
     installed = tmp_path / "site-packages" / "andrea" / "__init__.py"
     installed.parent.mkdir(parents=True)
     installed.write_text("", encoding="utf-8")
+    base = _runner(andrea, spathi)
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
-        if (
-            command[0] == "/venv/bin/python"
-            and command[1] == "-c"
-            and Path(command[-1]) == andrea.resolve()
-        ):
-            return subprocess.CompletedProcess(command, 0, stdout=f"{installed}\n", stderr="")
+    def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        outcome = base(command, **kwargs)
+        if command[0] == "/venv/bin/python" and command[-1] == "andrea":
+            return subprocess.CompletedProcess(command, 0, stdout=str(installed), stderr="")
         return outcome
 
     report = run_doctor(
+        repo_root=benchmark,
         andrea_repo=andrea,
         spathi_repo=spathi,
         python_executable="/venv/bin/python",
         runner=runner,
         resolver=_resolver,
+        disk_usage=_disk(),
     )
 
-    check = _by_id(report)["andrea_import"]
     assert report["ok"] is False
-    assert check["status"] == "fail"
-    assert check["details"]["imported_module"] == str(installed.resolve())  # type: ignore[index]
+    assert _by_id(report)["andrea_import"]["status"] == "fail"
 
 
-def test_spathi_api_check_reports_missing_public_exports(tmp_path: Path) -> None:
-    andrea, spathi = _repositories(tmp_path)
+def test_disk_budget_has_warning_and_failure_boundaries(tmp_path: Path) -> None:
+    benchmark, andrea, spathi = _checkout(tmp_path)
+    common = {
+        "repo_root": benchmark,
+        "andrea_repo": andrea,
+        "spathi_repo": spathi,
+        "runner": _runner(andrea, spathi),
+        "resolver": _resolver,
+    }
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
-        if (
-            command[0] == "/venv/bin/python"
-            and command[1] == "-c"
-            and Path(command[-1]) == spathi.resolve()
-        ):
-            payload = {
-                "module": str(spathi / "src/spathi/__init__.py"),
-                "missing_exports": ["infer"],
-                "config_field_partitions": _config_partitions(),
-                "missing_config_fields": [],
-                "unexpected_config_fields": [],
-                "config_partition_overlap": [],
-                "requiredness_mismatches": [],
-                "missing_progress_members": [],
-                "missing_result_fields": [],
-                "infer_signature_ok": True,
-            }
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                stdout=json.dumps(payload),
-                stderr="",
-            )
-        return outcome
+    warning = run_doctor(**common, disk_usage=_disk(20))
+    failure = run_doctor(**common, disk_usage=_disk(2))
 
-    report = run_doctor(
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        python_executable="/venv/bin/python",
-        runner=runner,
-        resolver=_resolver,
-    )
-
-    check = _by_id(report)["spathi_api"]
-    assert report["ok"] is False
-    assert check["status"] == "fail"
-    assert check["details"]["missing_exports"] == ["infer"]  # type: ignore[index]
+    assert warning["ok"] is True
+    assert _by_id(warning)["disk_space"]["status"] == "warn"
+    assert failure["ok"] is False
+    assert _by_id(failure)["disk_space"]["status"] == "fail"
 
 
-def test_spathi_api_check_reports_an_incompatible_adapter_contract(
-    tmp_path: Path,
-) -> None:
-    andrea, spathi = _repositories(tmp_path)
+def test_write_doctor_report_is_explicit(tmp_path: Path) -> None:
+    path = tmp_path / "report" / "doctor.json"
+    report = {"schema_version": 1, "ok": True, "checks": []}
 
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        outcome = _successful_runner(andrea, spathi)(command, **kwargs)
-        if (
-            command[0] == "/venv/bin/python"
-            and command[1] == "-c"
-            and Path(command[-1]) == spathi.resolve()
-        ):
-            payload = {
-                "module": str(spathi / "src/spathi/__init__.py"),
-                "missing_exports": [],
-                "config_field_partitions": _config_partitions(),
-                "missing_config_fields": ["report"],
-                "unexpected_config_fields": ["new_required_option"],
-                "config_partition_overlap": [],
-                "requiredness_mismatches": [],
-                "missing_progress_members": ["total_models"],
-                "missing_result_fields": ["warnings"],
-                "infer_signature_ok": False,
-            }
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                stdout=json.dumps(payload),
-                stderr="",
-            )
-        return outcome
-
-    report = run_doctor(
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        python_executable="/venv/bin/python",
-        runner=runner,
-        resolver=_resolver,
-    )
-
-    check = _by_id(report)["spathi_api"]
-    assert report["ok"] is False
-    assert check["status"] == "fail"
-    assert check["details"]["missing_config_fields"] == ["report"]  # type: ignore[index]
-    assert check["details"]["unexpected_config_fields"] == [  # type: ignore[index]
-        "new_required_option"
-    ]
-    assert check["details"]["missing_progress_members"] == [  # type: ignore[index]
-        "total_models"
-    ]
-    assert check["details"]["missing_result_fields"] == ["warnings"]  # type: ignore[index]
-    assert check["details"]["infer_signature_ok"] is False  # type: ignore[index]
-
-
-def test_command_errors_are_reported_instead_of_raised(tmp_path: Path) -> None:
-    andrea, spathi = _repositories(tmp_path)
-
-    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if command[:2] == ["/usr/bin/docker", "info"]:
-            raise subprocess.TimeoutExpired(command, timeout=kwargs["timeout"])
-        return _successful_runner(andrea, spathi)(command, **kwargs)
-
-    report = run_doctor(
-        andrea_repo=andrea,
-        spathi_repo=spathi,
-        python_executable="/venv/bin/python",
-        runner=runner,
-        resolver=_resolver,
-    )
-
-    check = _by_id(report)["docker_daemon"]
-    assert check["status"] == "fail"
-    assert "TimeoutExpired" in check["details"]["error"]  # type: ignore[operator, index]
-
-
-def test_write_doctor_report_is_valid_json_and_validates_timeout(tmp_path: Path) -> None:
-    target = tmp_path / "nested" / "report.json"
-    report = {"schema_version": "1.0", "ok": True, "checks": []}
-
-    assert write_doctor_report(report, target) == target.resolve()
-    assert json.loads(target.read_text(encoding="utf-8")) == report
-
-    with pytest.raises(ValueError, match="greater than zero"):
-        run_doctor(
-            andrea_repo=tmp_path / "ANDREA",
-            spathi_repo=tmp_path / "SPATHI",
-            timeout_seconds=0,
-        )
+    assert write_doctor_report(report, path) == path
+    assert json.loads(path.read_text(encoding="utf-8")) == report

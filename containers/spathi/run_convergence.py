@@ -8,8 +8,10 @@ that SPATHI-benchmarks subsequently evaluates as four distinct logical runs.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+from collections import Counter
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,9 +19,7 @@ from time import perf_counter
 from typing import Any
 
 from run_tool import (
-    _group_count,
     _load_json_object,
-    _resolve_group_policy,
     _validate_execution,
     _validate_files,
     _validated_scalar_params,
@@ -43,9 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validated_plan(
-    path: Path, *, group_count: int
-) -> tuple[str, dict[str, Any], tuple[dict[str, Any], ...]]:
+def _validated_plan(path: Path) -> tuple[str, dict[str, Any], tuple[dict[str, Any], ...]]:
     plan = _load_json_object(path, "convergence plan")
     required = {
         "schema_version",
@@ -69,11 +67,7 @@ def _validated_plan(
     raw_model = plan["model"]
     if not isinstance(raw_model, dict):
         raise ValueError("convergence model must be an object")
-    model = (
-        _resolve_group_policy(dict(raw_model), group_count=group_count)
-        if "group_policy" in raw_model
-        else _validated_scalar_params(dict(raw_model))
-    )
+    model = _validated_scalar_params(dict(raw_model))
     if model["random_seed"] != algorithm_seed:
         raise ValueError("convergence plan seed differs from its physical model")
     prefixes = plan["logical_prefixes"]
@@ -107,16 +101,26 @@ def _validated_plan(
         raise ValueError("logical prefix n_estimators must be strictly increasing")
     if counts[-1] != model["n_estimators"]:
         raise ValueError("the final logical prefix must equal the physical forest ceiling")
-    for field in ("run_id", "configuration_id", "configuration_sha256"):
+    for field in ("run_id", "configuration_sha256"):
         values = [item[field] for item in prefixes]
         if len(values) != len(set(values)):
             raise ValueError(f"logical prefix {field} values must be unique")
+    for item in prefixes:
+        if item["configuration_id"] != parent_configuration_id:
+            raise ValueError("logical prefix configuration_id must equal parent_configuration_id")
+        logical_model = {**model, "n_estimators": int(item["n_estimators"])}
+        canonical = json.dumps(
+            logical_model,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        if hashlib.sha256(canonical).hexdigest() != item["configuration_sha256"]:
+            raise ValueError("logical prefix configuration_sha256 does not match its model")
     return physical_run_id, model, tuple(dict(item) for item in prefixes)
 
 
 def _sha256(path: Path) -> str:
-    import hashlib
-
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -131,19 +135,23 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _fatal_status_counts(
+    model_stats: tuple[Any, ...], fatal_statuses: frozenset[str]
+) -> Counter[str]:
+    return Counter(str(stat.status) for stat in model_stats if str(stat.status) in fatal_statuses)
+
+
 def run(args: argparse.Namespace) -> None:
     tf_list, groups, execution_path = _validate_files(args)
     _validate_execution(execution_path)
     if any(args.output_dir.iterdir()):
         raise FileExistsError("convergence output directory must be empty")
-    physical_run_id, model, prefixes = _validated_plan(
-        args.params,
-        group_count=_group_count(groups),
-    )
+    physical_run_id, model, prefixes = _validated_plan(args.params)
     counts = tuple(int(item["n_estimators"]) for item in prefixes)
 
     from spathi import SpathiConfig, prepare_forest_prefixes
     from spathi.diagnostics import compute_weight_diagnostics
+    from spathi.inference import FATAL_MODEL_STATUSES
     from spathi.outputs import IncrementalRunWriter
 
     with TemporaryDirectory(prefix=".spathi-convergence-", dir=args.output_dir.parent) as name:
@@ -168,6 +176,7 @@ def run(args: argparse.Namespace) -> None:
         trained_models = {count: 0 for count in counts}
         skipped_counts = {count: 0 for count in counts}
         inference_seconds = {count: 0.0 for count in counts}
+        fatal_counts = {count: Counter[str]() for count in counts}
         with ExitStack() as stack:
             writers = {}
             diagnostics = tuple(
@@ -199,10 +208,24 @@ def run(args: argparse.Namespace) -> None:
                     edge_counts[count] += writer.write_edges(result.edges)
                     writer.write_skipped_targets(result.skipped_targets)
                     writer.write_model_diagnostics(result.model_stats)
+                    fatal_counts[count].update(
+                        _fatal_status_counts(result.model_stats, FATAL_MODEL_STATUSES)
+                    )
                     completed_models[count] += result.completed_models
                     trained_models[count] += result.trained_models
                     skipped_counts[count] += len(result.skipped_targets)
                     inference_seconds[count] += result.duration_seconds
+
+        failures = {
+            count: dict(sorted(statuses.items()))
+            for count, statuses in fatal_counts.items()
+            if statuses
+        }
+        if failures:
+            raise RuntimeError(
+                "SPATHI exact-prefix forest contains fatal model outcomes: "
+                + json.dumps(failures, sort_keys=True)
+            )
 
         logical_outputs: list[dict[str, Any]] = []
         for logical, count in zip(prefixes, counts, strict=True):
@@ -218,8 +241,10 @@ def run(args: argparse.Namespace) -> None:
                 "n_estimators": count,
                 "physical_forest_ceiling": counts[-1],
                 "prefix_schedule": list(counts),
-                "preparation_seconds": preparation_seconds,
-                "shared_inference_seconds": inference_seconds[count],
+                "shared_preparation_seconds": preparation_seconds,
+                "shared_forest_compute_seconds": inference_seconds[count],
+                "logical_runtime_seconds": None,
+                "runtime_semantics": "shared_physical_fit_not_attributable_to_prefix",
                 "total_models": completed_models[count],
                 "trained_models": trained_models[count],
                 "skipped_target_records": skipped_counts[count],

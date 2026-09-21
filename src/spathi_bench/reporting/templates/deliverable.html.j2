@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{ title }}</title>
+  <style>{{ report_css | safe }}</style>
+</head>
+<body data-report-kind="{{ report_kind }}">
+  <a class="skip-link" href="#report-main">Skip to report</a>
+  <header class="hero">
+    <div class="hero__texture" aria-hidden="true"></div>
+    <div class="shell hero__inner">
+      <div class="brand"><span class="brand__mark">S</span><div><strong>SPATHI</strong><small>Benchmark evidence</small></div></div>
+      <p class="hero__kicker" id="report-kicker">Portable scientific report</p>
+      <h1 id="report-title">{{ title }}</h1>
+      <p class="hero__lead" id="report-lead">A self-contained view of the frozen study snapshot.</p>
+      <div class="hero__meta" id="study-meta"></div>
+    </div>
+  </header>
+
+  <main class="shell" id="report-main">
+    <noscript><section class="notice notice--error"><strong>JavaScript is required.</strong> The data are embedded in this file, but interactive plots and tables require JavaScript.</section></noscript>
+    <section class="notice notice--info" id="scope-notice"></section>
+    <section class="section">
+      <div class="section__heading"><div><p class="kicker">At a glance</p><h2>Study overview</h2></div></div>
+      <div class="stat-grid" id="overview-stats"></div>
+    </section>
+
+    <div id="phase-reports"></div>
+
+    <section class="section card">
+      <div class="section__heading"><div><p class="kicker">Reproducibility</p><h2>Resources and provenance</h2></div></div>
+      <p class="muted">This report contains the exact snapshot used to render it. It does not read local CSV, JSON, databases or execution artifacts.</p>
+      <div class="split">
+        <details><summary>Resolved resources</summary><pre id="resource-json"></pre></details>
+        <details><summary>Embedded phase provenance</summary><pre id="provenance-json"></pre></details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer"><div class="shell">Self-contained SPATHI benchmark report · no network or local companion files required.</div></footer>
+  <script>{{ plotly_js | safe }}</script>
+  <script type="application/json" id="report-data">{{ report_data | safe }}</script>
+  <script>{{ report_js | safe }}</script>
+</body>
+</html>

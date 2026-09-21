@@ -135,9 +135,7 @@ def _resource_utilization(
         "cpu_thread_seconds_reserved": cpu_thread_seconds,
         "memory_byte_seconds_reserved": memory_byte_seconds,
         "cpu_capacity_utilization": (
-            cpu_thread_seconds / (wall_seconds * capacity.cpu_threads)
-            if wall_seconds > 0
-            else 0.0
+            cpu_thread_seconds / (wall_seconds * capacity.cpu_threads) if wall_seconds > 0 else 0.0
         ),
         "memory_capacity_utilization": (
             memory_byte_seconds / (wall_seconds * capacity.memory_bytes)
@@ -200,11 +198,7 @@ def host_execution_lease(
     if not workload or any(character in workload for character in "\r\n"):
         raise BenchmarkConfigError("Workload lease label must be a non-empty single line")
     uid = os.getuid() if hasattr(os, "getuid") else 0
-    directory = (
-        lock_root
-        if lock_root is not None
-        else _canonical_lock_root(uid)
-    ).absolute()
+    directory = (lock_root if lock_root is not None else _canonical_lock_root(uid)).absolute()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if directory.is_symlink() or not directory.is_dir():
         raise BenchmarkConfigError(f"Host execution lock root is unsafe: {directory}")

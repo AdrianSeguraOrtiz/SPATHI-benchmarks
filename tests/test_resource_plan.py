@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from spathi_bench.artifacts import canonical_json_sha256
 from spathi_bench.config import BenchmarkConfigError
 from spathi_bench.resource_plan import (
     detect_host_capacity,
-    load_or_create_runtime_plan,
     resolve_runtime_plan,
-    validate_runtime_plan,
 )
 
 GIB = 1024**3
@@ -224,138 +220,3 @@ def test_resolution_rejects_boolean_resource_options(
             {"effective_cpu_threads": 8, "effective_memory_bytes": 32 * GIB},
             **kwargs,
         )
-
-
-def test_runtime_plan_rejects_rehashed_capacity_drift() -> None:
-    plan = resolve_runtime_plan({"effective_cpu_threads": 8, "effective_memory_bytes": 32 * GIB})
-    plan["capacity"]["cpu_threads"] = 7
-    plan["fingerprint"] = canonical_json_sha256(
-        {key: value for key, value in plan.items() if key != "fingerprint"}
-    )
-    with pytest.raises(BenchmarkConfigError, match="capacity differs"):
-        validate_runtime_plan(plan)
-
-
-def test_runtime_plan_is_reused_when_current_capacity_still_covers_it(tmp_path: Path) -> None:
-    first_detected = {
-        "effective_cpu_threads": 8,
-        "effective_memory_bytes": 32 * GIB,
-    }
-    path = tmp_path / "run/runtime-plan.json"
-    first = load_or_create_runtime_plan(
-        path,
-        boundary=tmp_path,
-        max_cores=8,
-        detected=first_detected,
-    )
-    second = load_or_create_runtime_plan(
-        path,
-        boundary=tmp_path,
-        max_cores=8,
-        detected={"effective_cpu_threads": 12, "effective_memory_bytes": 64 * GIB},
-    )
-
-    assert second == first
-    assert json.loads(path.read_text(encoding="utf-8")) == first
-    with pytest.raises(BenchmarkConfigError, match="different resource options"):
-        load_or_create_runtime_plan(
-            path,
-            boundary=tmp_path,
-            max_cores=4,
-            detected=first_detected,
-        )
-
-
-@pytest.mark.parametrize(
-    ("current", "message"),
-    [
-        (
-            {"effective_cpu_threads": 7, "effective_memory_bytes": 32 * GIB},
-            "CPU capacity no longer covers",
-        ),
-        (
-            {"effective_cpu_threads": 8, "effective_memory_bytes": 31 * GIB},
-            "RAM capacity no longer covers",
-        ),
-    ],
-)
-def test_runtime_plan_reuse_rejects_reduced_current_capacity(
-    tmp_path: Path, current: dict[str, int], message: str
-) -> None:
-    path = tmp_path / "run/runtime-plan.json"
-    load_or_create_runtime_plan(
-        path,
-        boundary=tmp_path,
-        detected={"effective_cpu_threads": 8, "effective_memory_bytes": 32 * GIB},
-    )
-
-    with pytest.raises(BenchmarkConfigError, match=message):
-        load_or_create_runtime_plan(path, boundary=tmp_path, detected=current)
-
-
-def test_runtime_plan_reuse_rejects_changed_cpu_affinity(tmp_path: Path) -> None:
-    path = tmp_path / "run/runtime-plan.json"
-    frozen = {
-        "effective_cpu_threads": 4,
-        "effective_memory_bytes": 16 * GIB,
-        "allowed_cpus": [0, 1, 2, 3],
-        "cpu_allocation_order": [0, 2, 1, 3],
-    }
-    load_or_create_runtime_plan(path, boundary=tmp_path, detected=frozen)
-
-    current = {
-        **frozen,
-        "allowed_cpus": [1, 2, 3, 4],
-        "cpu_allocation_order": [1, 3, 2, 4],
-    }
-    with pytest.raises(BenchmarkConfigError, match="CPU affinity/cgroup CPU set"):
-        load_or_create_runtime_plan(path, boundary=tmp_path, detected=current)
-
-
-def test_runtime_plan_reuse_checks_memory_ceiling_not_transient_usage(tmp_path: Path) -> None:
-    path = tmp_path / "run/runtime-plan.json"
-    frozen = {
-        "effective_cpu_threads": 4,
-        "effective_memory_bytes": 8 * GIB,
-        "host_memory_total_bytes": 32 * GIB,
-        "cgroup_memory_limit_bytes": 12 * GIB,
-    }
-    plan = load_or_create_runtime_plan(path, boundary=tmp_path, detected=frozen)
-
-    current = {
-        **frozen,
-        "effective_memory_bytes": 7 * GIB,
-    }
-    assert load_or_create_runtime_plan(path, boundary=tmp_path, detected=current) == plan
-
-    current["cgroup_memory_limit_bytes"] = 7 * GIB
-    with pytest.raises(BenchmarkConfigError, match="RAM capacity no longer covers"):
-        load_or_create_runtime_plan(path, boundary=tmp_path, detected=current)
-
-
-def test_runtime_plan_rejects_tampered_fingerprint(tmp_path: Path) -> None:
-    path = tmp_path / "runtime-plan.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0",
-                "request": {
-                    "max_cores": None,
-                    "max_ram_gb": None,
-                    "reserve_cores": 0,
-                    "reserve_ram_gb": 0.0,
-                },
-                "capacity": {
-                    "cpu_threads": 1,
-                    "memory_bytes": GIB,
-                    "memory_gib": 1.0,
-                },
-                "detected": {},
-                "fingerprint": "0" * 64,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(BenchmarkConfigError, match="fingerprint is invalid"):
-        load_or_create_runtime_plan(path, boundary=tmp_path)

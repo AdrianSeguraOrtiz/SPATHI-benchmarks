@@ -9,7 +9,6 @@ identity.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import shutil
@@ -19,7 +18,6 @@ from typing import Any
 
 from .artifacts import canonical_json_sha256
 from .config import BenchmarkConfigError
-from .safe_io import path_below_no_symlinks, write_idempotent_json
 
 _GIB = 1024**3
 
@@ -250,9 +248,7 @@ def _cgroup_v1_limits(
                 )
             memory_states.append((limit, current, max(0, limit - current)))
     if memory_states:
-        memory_limit, memory_current, _remaining = min(
-            memory_states, key=lambda state: state[2]
-        )
+        memory_limit, memory_current, _remaining = min(memory_states, key=lambda state: state[2])
     else:
         memory_limit = None
         memory_current = first_memory_current
@@ -479,219 +475,4 @@ def resolve_runtime_plan(
     return body
 
 
-def validate_runtime_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate the exact persisted runtime-plan contract and its digest."""
-
-    if set(plan) != {"schema_version", "detected", "request", "capacity", "fingerprint"}:
-        raise BenchmarkConfigError("Runtime plan has unsupported or missing fields")
-    if plan.get("schema_version") != "1.0":
-        raise BenchmarkConfigError("Runtime plan schema_version must be '1.0'")
-    detected = plan.get("detected")
-    request = plan.get("request")
-    capacity = plan.get("capacity")
-    if not isinstance(detected, Mapping):
-        raise BenchmarkConfigError("Runtime plan detected resources must be an object")
-    if not isinstance(request, Mapping) or set(request) != {
-        "max_cores",
-        "max_ram_gb",
-        "reserve_cores",
-        "reserve_ram_gb",
-    }:
-        raise BenchmarkConfigError("Runtime plan resource request is invalid")
-    if not isinstance(capacity, Mapping) or set(capacity) != {
-        "cpu_threads",
-        "memory_bytes",
-        "memory_gib",
-    }:
-        raise BenchmarkConfigError("Runtime plan capacity is invalid")
-    cpu_threads = capacity.get("cpu_threads")
-    memory_bytes = capacity.get("memory_bytes")
-    memory_gib = capacity.get("memory_gib")
-    if not isinstance(cpu_threads, int) or isinstance(cpu_threads, bool) or cpu_threads < 1:
-        raise BenchmarkConfigError("Runtime plan CPU capacity must be a positive integer")
-    if not isinstance(memory_bytes, int) or isinstance(memory_bytes, bool) or memory_bytes < _GIB:
-        raise BenchmarkConfigError("Runtime plan RAM capacity must be at least 1 GiB")
-    if (
-        not isinstance(memory_gib, (int, float))
-        or isinstance(memory_gib, bool)
-        or not math.isclose(float(memory_gib), memory_bytes / _GIB, rel_tol=0, abs_tol=1e-12)
-    ):
-        raise BenchmarkConfigError("Runtime plan RAM representations are inconsistent")
-    fingerprint = plan.get("fingerprint")
-    unsigned = {key: value for key, value in plan.items() if key != "fingerprint"}
-    if fingerprint != canonical_json_sha256(unsigned):
-        raise BenchmarkConfigError("Runtime plan fingerprint is invalid")
-    try:
-        expected = resolve_runtime_plan(
-            detected,
-            max_cores=request["max_cores"],
-            max_ram_gb=request["max_ram_gb"],
-            reserve_cores=request["reserve_cores"],
-            reserve_ram_gb=request["reserve_ram_gb"],
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise BenchmarkConfigError("Runtime plan inputs cannot reproduce its capacity") from exc
-    if capacity != expected["capacity"]:
-        raise BenchmarkConfigError("Runtime plan capacity differs from its detected resources")
-    return dict(plan)
-
-
-def _cpu_identifiers(value: Any, label: str) -> tuple[int, ...]:
-    if (
-        not isinstance(value, Sequence)
-        or isinstance(value, (str, bytes))
-        or any(not isinstance(cpu, int) or isinstance(cpu, bool) or cpu < 0 for cpu in value)
-    ):
-        raise BenchmarkConfigError(f"{label} must be a list of non-negative CPU identifiers")
-    identifiers = tuple(value)
-    if len(set(identifiers)) != len(identifiers):
-        raise BenchmarkConfigError(f"{label} must not contain duplicate CPU identifiers")
-    return identifiers
-
-
-def _validate_runtime_plan_coverage(
-    plan: Mapping[str, Any], current_detected: Mapping[str, Any]
-) -> None:
-    """Prove that current CPU/RAM constraints still cover a frozen plan."""
-
-    request = plan["request"]
-    try:
-        current_plan = resolve_runtime_plan(
-            current_detected,
-            max_cores=request["max_cores"],
-            max_ram_gb=request["max_ram_gb"],
-            reserve_cores=request["reserve_cores"],
-            reserve_ram_gb=request["reserve_ram_gb"],
-        )
-    except (KeyError, TypeError, ValueError, BenchmarkConfigError) as exc:
-        raise BenchmarkConfigError(
-            "Current host/cgroup capacity cannot satisfy the frozen runtime-plan request"
-        ) from exc
-
-    frozen_capacity = plan["capacity"]
-    current_capacity = current_plan["capacity"]
-    if current_capacity["cpu_threads"] < frozen_capacity["cpu_threads"]:
-        raise BenchmarkConfigError(
-            "Current CPU capacity no longer covers the frozen runtime plan: "
-            f"{current_capacity['cpu_threads']} available after reserves, "
-            f"{frozen_capacity['cpu_threads']} required"
-        )
-    # Available RAM and cgroup usage fluctuate as this very process resumes the
-    # workflow.  They are appropriate when initially sizing the plan, but not
-    # for deciding whether its allocation boundary was reduced.  On real host
-    # observations compare the stable host/cgroup ceilings; minimal injected
-    # observations used by callers/tests fall back to effective capacity.
-    stable_memory_limits = [
-        value
-        for value in (
-            current_detected.get("host_memory_total_bytes"),
-            current_detected.get("cgroup_memory_limit_bytes"),
-        )
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0
-    ]
-    if stable_memory_limits:
-        current_memory = min(stable_memory_limits)
-        if request["max_ram_gb"] is not None:
-            current_memory = min(current_memory, int(request["max_ram_gb"] * _GIB))
-        current_memory -= int(request["reserve_ram_gb"] * _GIB)
-    else:
-        current_memory = current_capacity["memory_bytes"]
-    if current_memory < frozen_capacity["memory_bytes"]:
-        raise BenchmarkConfigError(
-            "Current RAM capacity no longer covers the frozen runtime plan: "
-            f"{current_memory} bytes available after reserves, "
-            f"{frozen_capacity['memory_bytes']} required"
-        )
-
-    frozen_detected = plan["detected"]
-    frozen_order_raw = frozen_detected.get("cpu_allocation_order")
-    current_allowed_raw = current_detected.get("allowed_cpus")
-    if frozen_order_raw is None and current_allowed_raw is None:
-        return
-    if frozen_order_raw is None or current_allowed_raw is None:
-        raise BenchmarkConfigError(
-            "Current CPU affinity/cgroup CPU set cannot be compared with the frozen runtime plan"
-        )
-    frozen_order = _cpu_identifiers(
-        frozen_order_raw, "Frozen runtime-plan CPU allocation order"
-    )
-    current_allowed = set(
-        _cpu_identifiers(current_allowed_raw, "Current allowed CPU identifiers")
-    )
-    required_count = int(frozen_capacity["cpu_threads"])
-    if len(frozen_order) < required_count:
-        raise BenchmarkConfigError(
-            "Frozen runtime plan has too few CPU identifiers for its declared capacity"
-        )
-    missing = sorted(set(frozen_order[:required_count]).difference(current_allowed))
-    if missing:
-        raise BenchmarkConfigError(
-            "Current CPU affinity/cgroup CPU set no longer covers the frozen runtime plan; "
-            f"unavailable CPU identifiers: {missing}"
-        )
-
-
-def load_or_create_runtime_plan(
-    path: Path,
-    *,
-    boundary: Path,
-    max_cores: int | None = None,
-    max_ram_gb: float | None = None,
-    reserve_cores: int = 0,
-    reserve_ram_gb: float = 0.0,
-    detected: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Create one immutable plan, or reuse it only for the identical request."""
-
-    safe_path = path_below_no_symlinks(path, boundary, "Runtime plan")
-    request = {
-        "max_cores": max_cores,
-        "max_ram_gb": max_ram_gb,
-        "reserve_cores": reserve_cores,
-        "reserve_ram_gb": reserve_ram_gb,
-    }
-    if safe_path.exists():
-        try:
-            payload = json.loads(safe_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise BenchmarkConfigError(f"Cannot read runtime plan {safe_path}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise BenchmarkConfigError(f"Invalid runtime plan: {safe_path}")
-        try:
-            validated = validate_runtime_plan(payload)
-        except BenchmarkConfigError as exc:
-            raise BenchmarkConfigError(f"Invalid runtime plan {safe_path}: {exc}") from exc
-        if validated["request"] != request:
-            raise BenchmarkConfigError(
-                "Existing runtime plan was created with different resource options"
-            )
-        current_detected = (
-            detected
-            if detected is not None
-            else detect_host_capacity(workspace_path=boundary)
-        )
-        _validate_runtime_plan_coverage(validated, current_detected)
-        return validated
-
-    plan = resolve_runtime_plan(
-        detected if detected is not None else detect_host_capacity(workspace_path=boundary),
-        max_cores=max_cores,
-        max_ram_gb=max_ram_gb,
-        reserve_cores=reserve_cores,
-        reserve_ram_gb=reserve_ram_gb,
-    )
-    write_idempotent_json(
-        safe_path,
-        plan,
-        "Runtime plan",
-        boundary=boundary,
-    )
-    return plan
-
-
-__all__ = [
-    "detect_host_capacity",
-    "load_or_create_runtime_plan",
-    "resolve_runtime_plan",
-    "validate_runtime_plan",
-]
+__all__ = ["detect_host_capacity", "resolve_runtime_plan"]

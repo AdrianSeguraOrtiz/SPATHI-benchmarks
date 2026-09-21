@@ -1,0 +1,459 @@
+{
+  "schema_version": 1,
+  "study_id": "spathi-article-study",
+  "seed": {
+    "master": 734921,
+    "derivation": "sha256-semantic-coordinates-v1"
+  },
+  "profiles": {
+    "smoke": {
+      "calibration": {
+        "condition_ids": ["c1-linear-clean"],
+        "development_replicates": 1,
+        "validation_replicates": 1,
+        "screening_algorithm_seeds": 1,
+        "validation_algorithm_seeds": 1
+      },
+      "comparison": {
+        "replicates": {"t1-linear-clean": 1},
+        "task_timeout_seconds": 1800
+      },
+      "scalability": {
+        "scale_ids": ["p-small"],
+        "ladder_replicates": 1,
+        "scaling_scale_id": "p-small",
+        "scaling_replicates": 1,
+        "thread_points": ["one", "standard"],
+        "task_timeout_seconds": 1800
+      }
+    },
+    "reduced": {
+      "calibration": {
+        "condition_ids": [
+          "c1-linear-clean",
+          "c2-branching-noisy",
+          "c3-dynamic-balanced",
+          "c4-dynamic-imbalanced",
+          "c5-high-regulator"
+        ],
+        "development_replicates": 1,
+        "validation_replicates": 1,
+        "screening_algorithm_seeds": 1,
+        "validation_algorithm_seeds": 1
+      },
+      "comparison": {
+        "replicates": {
+          "t1-linear-clean": 1,
+          "t2-linear-noisy": 1,
+          "t3-branching-clean": 1,
+          "t4-branching-noisy": 1,
+          "t5-dynamic-balanced": 1,
+          "t6-dynamic-large": 1,
+          "i1-invariant-sergio": 1,
+          "i2-invariant-boolode": 1
+        },
+      "task_timeout_seconds": 3600
+      },
+      "scalability": {
+        "scale_ids": ["p-small", "p-medium", "p-large", "p-xlarge"],
+        "ladder_replicates": 1,
+        "scaling_scale_id": "p-medium",
+        "scaling_replicates": 1,
+        "thread_points": ["one", "standard", "all"],
+      "task_timeout_seconds": 3600
+      }
+    },
+    "full": {
+      "calibration": {
+        "condition_ids": [
+          "c1-linear-clean",
+          "c2-branching-noisy",
+          "c3-dynamic-balanced",
+          "c4-dynamic-imbalanced",
+          "c5-high-regulator"
+        ],
+        "development_replicates": 2,
+        "validation_replicates": 2,
+        "screening_algorithm_seeds": 1,
+        "validation_algorithm_seeds": 3
+      },
+      "comparison": {
+        "replicates": {
+          "t1-linear-clean": 3,
+          "t2-linear-noisy": 3,
+          "t3-branching-clean": 3,
+          "t4-branching-noisy": 3,
+          "t5-dynamic-balanced": 3,
+          "t6-dynamic-large": 3,
+          "i1-invariant-sergio": 3,
+          "i2-invariant-boolode": 3
+        },
+      "task_timeout_seconds": 7200
+      },
+      "scalability": {
+        "scale_ids": ["p-small", "p-medium", "p-large", "p-xlarge"],
+        "ladder_replicates": 3,
+        "scaling_scale_id": "p-medium",
+        "scaling_replicates": 3,
+        "thread_points": ["one", "standard", "all"],
+      "task_timeout_seconds": 14400
+      }
+    }
+  },
+  "calibration": {
+    "conditions": [
+      {
+        "id": "c1-linear-clean",
+        "label": "C1 · dyngen linear, clean",
+        "simulator": "dyngen",
+        "scenario": "linear-clean",
+        "dimensions": {"cells": 300, "genes": 100, "transcription_factors": 10, "groups": 4},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"topology": "linear", "noise": "low", "balance": "balanced"}
+      },
+      {
+        "id": "c2-branching-noisy",
+        "label": "C2 · dyngen branching, elevated kinetic noise",
+        "simulator": "dyngen",
+        "scenario": "bifurcating-elevated-noise",
+        "dimensions": {"cells": 600, "genes": 400, "transcription_factors": 40, "groups": 7},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"topology": "branching", "noise": "high"}
+      },
+      {
+        "id": "c3-dynamic-balanced",
+        "label": "C3 · scMultiSim dynamic, balanced",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-balanced",
+        "dimensions": {"cells": 300, "genes": 100, "transcription_factors": 10, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"regulation": "dynamic", "balance": "balanced", "noise": "moderate"}
+      },
+      {
+        "id": "c4-dynamic-imbalanced",
+        "label": "C4 · scMultiSim dynamic, imbalanced",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-imbalanced",
+        "dimensions": {"cells": 800, "genes": 400, "transcription_factors": 40, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"regulation": "dynamic", "balance": "imbalanced", "noise": "moderate"}
+      },
+      {
+        "id": "c5-high-regulator",
+        "label": "C5 · scMultiSim high regulator fraction",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-high-regulator",
+        "dimensions": {"cells": 600, "genes": 600, "transcription_factors": 300, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"regulation": "dynamic", "tf_fraction": "high", "noise": "moderate"}
+      }
+    ],
+    "parameter_domains": {
+      "weight_mode": ["cell-distance-group-anchored", "cell-distance", "group-distance"],
+      "distance_space": ["pca", "expression"],
+      "n_components": [20, 50, 100],
+      "distance_standardization": ["none", "standard"],
+      "distance_metric": ["cosine", "euclidean"],
+      "kernel": ["gaussian", "exponential"],
+      "bandwidth_scale": [0.5, 1.0, 2.0],
+      "group_size_correction": ["none", "cap-to-target"],
+      "tree_method": ["extra-trees", "random-forest"],
+      "max_features": ["sqrt", 0.25, 0.5, 1.0],
+      "min_samples_leaf": [1, 2, 5],
+      "max_depth": [2, 4, 8, null],
+      "min_weight_fraction_leaf": [0.0, 0.05, 0.1, 0.2]
+    },
+    "parameter_policy": {
+      "calibrated": [
+        "weight_mode",
+        "distance_space",
+        "n_components",
+        "distance_standardization",
+        "distance_metric",
+        "kernel",
+        "bandwidth_scale",
+        "group_size_correction",
+        "tree_method",
+        "max_features",
+        "min_samples_leaf",
+        "max_depth",
+        "min_weight_fraction_leaf"
+      ],
+      "calibrated_by_tree_prefix": "n_estimators",
+      "search_design": {
+        "method": "deterministic-balanced-pairwise-covering-array",
+        "seed": 734921,
+        "runs": 27,
+        "guarantees": [
+          "every_declared_value_present",
+          "marginal_level_counts_differ_by_at_most_one",
+          "every_pair_of_declared_values_present"
+        ],
+        "scope": "main_effects_and_two_factor_screening_not_full_factorial"
+      },
+      "fixed_scientific": {"bandwidth": "auto", "pca_svd_solver": "auto", "bootstrap": null},
+      "operational_not_tuned": ["threads", "parallel_backend", "random_seed", "report"],
+      "unavailable_in_synthetic_study": ["target_list", "centroid_weights"]
+    },
+    "candidates": [
+      {"id":"candidate-01","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"expression","n_components":100,"distance_standardization":"standard","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":0.5,"group_size_correction":"none","tree_method":"extra-trees","max_features":0.25,"min_samples_leaf":5,"max_depth":8,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-02","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"expression","n_components":20,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":0.5,"group_size_correction":"none","tree_method":"random-forest","max_features":0.5,"min_samples_leaf":2,"max_depth":8,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-03","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"pca","n_components":100,"distance_standardization":"none","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":2.0,"group_size_correction":"none","tree_method":"random-forest","max_features":1.0,"min_samples_leaf":5,"max_depth":2,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-04","parameters":{"weight_mode":"group-distance","distance_space":"pca","n_components":50,"distance_standardization":"standard","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":2.0,"group_size_correction":"none","tree_method":"extra-trees","max_features":"sqrt","min_samples_leaf":2,"max_depth":8,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-05","parameters":{"weight_mode":"cell-distance","distance_space":"expression","n_components":100,"distance_standardization":"none","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":1.0,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":0.25,"min_samples_leaf":2,"max_depth":8,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-06","parameters":{"weight_mode":"cell-distance","distance_space":"pca","n_components":50,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":2.0,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":0.5,"min_samples_leaf":5,"max_depth":8,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-07","parameters":{"weight_mode":"group-distance","distance_space":"expression","n_components":50,"distance_standardization":"none","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":2.0,"group_size_correction":"none","tree_method":"extra-trees","max_features":0.25,"min_samples_leaf":5,"max_depth":null,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-08","parameters":{"weight_mode":"group-distance","distance_space":"pca","n_components":20,"distance_standardization":"standard","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":0.5,"group_size_correction":"none","tree_method":"random-forest","max_features":0.5,"min_samples_leaf":1,"max_depth":null,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-09","parameters":{"weight_mode":"cell-distance","distance_space":"expression","n_components":50,"distance_standardization":"none","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":0.5,"group_size_correction":"none","tree_method":"random-forest","max_features":"sqrt","min_samples_leaf":2,"max_depth":4,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-10","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"pca","n_components":50,"distance_standardization":"none","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":1.0,"group_size_correction":"none","tree_method":"extra-trees","max_features":0.5,"min_samples_leaf":2,"max_depth":null,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-11","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"pca","n_components":100,"distance_standardization":"none","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":1.0,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":0.5,"min_samples_leaf":2,"max_depth":2,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-12","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"pca","n_components":50,"distance_standardization":"standard","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":0.5,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":"sqrt","min_samples_leaf":1,"max_depth":4,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-13","parameters":{"weight_mode":"cell-distance","distance_space":"pca","n_components":20,"distance_standardization":"none","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":2.0,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":1.0,"min_samples_leaf":2,"max_depth":2,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-14","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"expression","n_components":20,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":1.0,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":1.0,"min_samples_leaf":5,"max_depth":null,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-15","parameters":{"weight_mode":"cell-distance","distance_space":"expression","n_components":20,"distance_standardization":"none","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":2.0,"group_size_correction":"none","tree_method":"extra-trees","max_features":0.5,"min_samples_leaf":1,"max_depth":4,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-16","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"pca","n_components":50,"distance_standardization":"none","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":1.0,"group_size_correction":"none","tree_method":"random-forest","max_features":0.25,"min_samples_leaf":1,"max_depth":4,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-17","parameters":{"weight_mode":"cell-distance-group-anchored","distance_space":"expression","n_components":20,"distance_standardization":"none","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":2.0,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":"sqrt","min_samples_leaf":1,"max_depth":2,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-18","parameters":{"weight_mode":"group-distance","distance_space":"pca","n_components":20,"distance_standardization":"none","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":1.0,"group_size_correction":"none","tree_method":"random-forest","max_features":"sqrt","min_samples_leaf":5,"max_depth":8,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-19","parameters":{"weight_mode":"cell-distance","distance_space":"expression","n_components":100,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":2.0,"group_size_correction":"none","tree_method":"random-forest","max_features":"sqrt","min_samples_leaf":2,"max_depth":null,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-20","parameters":{"weight_mode":"cell-distance","distance_space":"pca","n_components":100,"distance_standardization":"none","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":0.5,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":1.0,"min_samples_leaf":5,"max_depth":4,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-21","parameters":{"weight_mode":"group-distance","distance_space":"expression","n_components":100,"distance_standardization":"standard","distance_metric":"cosine","kernel":"exponential","bandwidth_scale":1.0,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":0.5,"min_samples_leaf":5,"max_depth":4,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-22","parameters":{"weight_mode":"cell-distance","distance_space":"expression","n_components":50,"distance_standardization":"standard","distance_metric":"cosine","kernel":"gaussian","bandwidth_scale":1.0,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":0.25,"min_samples_leaf":1,"max_depth":2,"min_weight_fraction_leaf":0.05}},
+      {"id":"candidate-23","parameters":{"weight_mode":"group-distance","distance_space":"pca","n_components":20,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":2.0,"group_size_correction":"cap-to-target","tree_method":"extra-trees","max_features":0.25,"min_samples_leaf":2,"max_depth":4,"min_weight_fraction_leaf":0.2}},
+      {"id":"candidate-24","parameters":{"weight_mode":"group-distance","distance_space":"expression","n_components":50,"distance_standardization":"none","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":0.5,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":1.0,"min_samples_leaf":1,"max_depth":8,"min_weight_fraction_leaf":0.0}},
+      {"id":"candidate-25","parameters":{"weight_mode":"group-distance","distance_space":"pca","n_components":100,"distance_standardization":"none","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":0.5,"group_size_correction":"cap-to-target","tree_method":"random-forest","max_features":"sqrt","min_samples_leaf":1,"max_depth":null,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-26","parameters":{"weight_mode":"group-distance","distance_space":"expression","n_components":100,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"gaussian","bandwidth_scale":1.0,"group_size_correction":"none","tree_method":"extra-trees","max_features":1.0,"min_samples_leaf":1,"max_depth":2,"min_weight_fraction_leaf":0.1}},
+      {"id":"candidate-27","parameters":{"weight_mode":"cell-distance","distance_space":"pca","n_components":20,"distance_standardization":"standard","distance_metric":"euclidean","kernel":"exponential","bandwidth_scale":0.5,"group_size_correction":"none","tree_method":"extra-trees","max_features":0.25,"min_samples_leaf":5,"max_depth":2,"min_weight_fraction_leaf":0.0}}
+    ],
+    "protocol": {
+      "screening": {"fit_trees": 50, "dataset_split": "development"},
+      "advancement": {
+        "finalists": 4,
+        "primary_metric": "aupr",
+        "tie_breakers": ["runtime_seconds", "between_dataset_and_replicate_stability"],
+        "privileged_candidates": []
+      },
+      "validation": {
+        "fit_trees": 250,
+        "score_exact_prefixes": [25, 50, 100, 250],
+        "dataset_split": "validation"
+      },
+      "selection": {
+        "primary_metric": "aupr",
+        "practical_equivalence_fraction": 0.02,
+        "tie_breakers": ["between_dataset_stability", "declared_tree_count"]
+      }
+    }
+  },
+  "comparison": {
+    "datasets": [
+      {
+        "id": "t1-linear-clean",
+        "label": "T1 · dyngen linear, clean",
+        "simulator": "dyngen",
+        "scenario": "linear-clean-test",
+        "dimensions": {"cells": 300, "genes": 100, "transcription_factors": 10, "groups": 4},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "topology": "linear", "noise": "low"}
+      },
+      {
+        "id": "t2-linear-noisy",
+        "label": "T2 · dyngen linear, noisy",
+        "simulator": "dyngen",
+        "scenario": "linear-noisy-test",
+        "dimensions": {"cells": 600, "genes": 400, "transcription_factors": 40, "groups": 4},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "topology": "linear", "noise": "high"}
+      },
+      {
+        "id": "t3-branching-clean",
+        "label": "T3 · dyngen branching, clean",
+        "simulator": "dyngen",
+        "scenario": "branching-clean-test",
+        "dimensions": {"cells": 600, "genes": 400, "transcription_factors": 40, "groups": 7},
+        "capabilities": ["group_labels", "tf_list", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "topology": "branching", "noise": "low"}
+      },
+      {
+        "id": "t4-branching-noisy",
+        "label": "T4 · dyngen branching, elevated kinetic noise",
+        "simulator": "dyngen",
+        "scenario": "branching-elevated-noise-test",
+        "dimensions": {"cells": 800, "genes": 400, "transcription_factors": 40, "groups": 7},
+        "capabilities": ["group_labels", "tf_list", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "topology": "branching", "noise": "high"}
+      },
+      {
+        "id": "t5-dynamic-balanced",
+        "label": "T5 · scMultiSim dynamic, balanced",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-balanced-test",
+        "dimensions": {"cells": 1000, "genes": 1000, "transcription_factors": 100, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "dynamic", "topology": "linear", "balance": "balanced"}
+      },
+      {
+        "id": "t6-dynamic-large",
+        "label": "T6 · scMultiSim dynamic, larger",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-large-test",
+        "dimensions": {"cells": 3000, "genes": 3000, "transcription_factors": 500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "dynamic", "topology": "linear", "scale": "large"}
+      },
+      {
+        "id": "i1-invariant-sergio",
+        "label": "I1 · SERGIO invariant-network control",
+        "simulator": "sergio",
+        "scenario": "invariant-network-test",
+        "dimensions": {"cells": 360, "genes": 100, "transcription_factors": 10, "groups": 9},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "invariant_control", "regulation": "invariant"}
+      },
+      {
+        "id": "i2-invariant-boolode",
+        "label": "I2 · BoolODE invariant-network control",
+        "simulator": "boolode",
+        "scenario": "invariant-network-test",
+        "dimensions": {"cells": 300, "genes": 19, "transcription_factors": 18, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "invariant_control", "regulation": "invariant"}
+      }
+    ],
+    "routes": [
+      {"id":"spathi","tool_id":"spathi","configuration_id":"selected-calibration-winner","delivery":"group_native","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{},"seed_parameter":"random_seed","max_threads":null},
+      {"id":"genie3","tool_id":"genie3","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{},"seed_parameter":"seed","max_threads":8},
+      {"id":"grnboost2","tool_id":"grnboost2","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{},"seed_parameter":"seed","max_threads":8},
+      {"id":"infercsn","tool_id":"infercsn","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{},"seed_parameter":"seed","max_threads":8},
+      {"id":"tigress","tool_id":"tigress","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{},"seed_parameter":"seed","max_threads":8},
+      {"id":"scmtni-independent","tool_id":"scmtni","configuration_id":"independent-no-prior","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"directed_tf_to_target","parameters":{"indep":true,"q":0},"seed_parameter":null,"max_threads":8},
+      {"id":"simic-ordered","tool_id":"simic","configuration_id":"upstream-default-order-aware","delivery":"group_native","required_capabilities":["group_labels","tf_list","ordered_groups"],"inputs":["expression","tf_list","column_phenotypes"],"output_semantics":"directed_tf_to_target","parameters":{"similarity":true},"seed_parameter":"random_seed","max_threads":8},
+      {"id":"scmtni-lineage","tool_id":"scmtni","configuration_id":"joint-lineage-no-prior","delivery":"group_native","required_capabilities":["group_labels","tf_list","lineage_tree"],"inputs":["expression","groups","tf_list","lineage_tree"],"output_semantics":"directed_tf_to_target","parameters":{"indep":false,"q":0},"seed_parameter":null,"max_threads":8},
+      {"id":"metasem","tool_id":"metasem","configuration_id":"unlabeled-all-genes","delivery":"group_emulated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"directed_all_gene","parameters":{"pseudo_grn_mode":"unlabeled_all_genes"},"seed_parameter":"random_seed","max_threads":8},
+      {"id":"kscreni","tool_id":"kscreni","configuration_id":"upstream-default","delivery":"group_aggregated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"directed_all_gene","parameters":{},"seed_parameter":null,"max_threads":8},
+      {"id":"pidc","tool_id":"pidc","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"undirected_topology","parameters":{},"seed_parameter":null,"max_threads":8},
+      {"id":"clr","tool_id":"clr","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"undirected_topology","parameters":{},"seed_parameter":null,"max_threads":1},
+      {"id":"ppcor","tool_id":"ppcor","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"undirected_topology","parameters":{},"seed_parameter":null,"max_threads":1},
+      {"id":"aracne3","tool_id":"aracne3","configuration_id":"upstream-default","delivery":"group_emulated","required_capabilities":["group_labels","tf_list"],"inputs":["expression","groups","tf_list"],"output_semantics":"undirected_topology","parameters":{},"seed_parameter":"seed","max_threads":8},
+      {"id":"cespgrn","tool_id":"cespgrn","configuration_id":"expression-no-prior","delivery":"group_aggregated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"undirected_topology","parameters":{"kernel_source":"expression","prior_mode":"none"},"seed_parameter":"random_seed","max_threads":8},
+      {"id":"lioness","tool_id":"lioness","configuration_id":"upstream-default","delivery":"group_aggregated","required_capabilities":["group_labels"],"inputs":["expression","groups"],"output_semantics":"undirected_topology","parameters":{},"seed_parameter":null,"max_threads":1}
+    ],
+    "families": [
+      {
+        "id": "a-information-matched",
+        "label": "A · Information-matched directed TF-to-target inference",
+        "rationale": "Every method receives expression, group labels, and the same transcription-factor list, but no group order, lineage, or regulatory prior. Outputs share directed TF-to-target candidate semantics, so this is the only family pooled in the primary rank tests.",
+        "statistical_role": "primary_friedman_holm",
+        "route_ids": ["spathi", "genie3", "grnboost2", "infercsn", "tigress", "scmtni-independent"]
+      },
+      {
+        "id": "b-order-aware",
+        "label": "B · Ordered-state directed inference",
+        "rationale": "SimiC consumes a valid order between states that SPATHI does not use. Both are evaluated only where the simulator emits an ordered-state contract, separately from the information-matched primary ranking.",
+        "statistical_role": "separate_family_analysis",
+        "route_ids": ["spathi", "simic-ordered"]
+      },
+      {
+        "id": "c-lineage-aware",
+        "label": "C · Lineage-aware directed inference",
+        "rationale": "Joint scMTNI consumes a simulator-derived lineage topology that SPATHI does not use. It is evaluated with SPATHI only on datasets whose lineage is part of the valid generation contract, and never pooled with the primary ranking.",
+        "statistical_role": "separate_family_analysis",
+        "route_ids": ["spathi", "scmtni-lineage"]
+      },
+      {
+        "id": "d-directed-all-gene",
+        "label": "D · Directed unrestricted-regulator fitting",
+        "rationale": "MetaSEM and kScReNI fit without a transcription-factor restriction, whereas SPATHI uses the declared TF list. Every output is nevertheless scored on the same TF-to-target candidate space. The unequal fitting search space makes this a separate secondary analysis rather than part of the information-matched primary ranking.",
+        "statistical_role": "separate_family_analysis",
+        "route_ids": ["spathi", "metasem", "kscreni"]
+      },
+      {
+        "id": "e-undirected-topology",
+        "label": "E · Undirected topology recovery",
+        "rationale": "Direction cannot be compared fairly for these estimators. Their outputs and the direction-collapsed SPATHI network are scored on the same TF-to-target candidate space only as undirected topology, separately from every directed family.",
+        "statistical_role": "separate_family_analysis",
+        "route_ids": ["spathi", "pidc", "clr", "ppcor", "aracne3", "cespgrn", "lioness"]
+      }
+    ],
+    "execution": {
+      "parameter_rule": "upstream_defaults_except_seed_threads_delivery_and_required_no_prior_switches",
+      "dataset_rule": "all_contract_compatible",
+      "failure_rule": "retain_failures_and_desist_decisions_in_coverage_denominators"
+    },
+    "statistics": {
+      "primary_family": "a-information-matched",
+      "metrics": ["aupr", "auroc", "f1"],
+      "omnibus": "friedman",
+      "post_hoc": "pairwise_wilcoxon_holm",
+      "blocking_unit": "seeded_dataset",
+      "estimand": {
+        "scenario_weighting": "equal_replicates_per_scenario",
+        "sampling_unit": "independent_seeded_dataset",
+        "missing_data_rule": "complete_blocks_within_family_and_metric"
+      },
+      "alpha": 0.05
+    }
+  },
+  "scalability": {
+    "scales": [
+      {
+        "id": "p-small",
+        "label": "P-S · small",
+        "simulator": "scale-stress",
+        "scenario": "deterministic-linear-grouped",
+        "dimensions": {"cells": 300, "genes": 100, "transcription_factors": 10, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"ordinal": 1, "size_class": "small"}
+      },
+      {
+        "id": "p-medium",
+        "label": "P-M · medium",
+        "simulator": "scale-stress",
+        "scenario": "deterministic-linear-grouped",
+        "dimensions": {"cells": 1000, "genes": 1000, "transcription_factors": 100, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"ordinal": 2, "size_class": "medium"}
+      },
+      {
+        "id": "p-large",
+        "label": "P-L · large",
+        "simulator": "scale-stress",
+        "scenario": "deterministic-linear-grouped",
+        "dimensions": {"cells": 3000, "genes": 5000, "transcription_factors": 500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"ordinal": 3, "size_class": "large"}
+      },
+      {
+        "id": "p-xlarge",
+        "label": "P-XL · real-scale synthetic",
+        "simulator": "scale-stress",
+        "scenario": "deterministic-linear-grouped",
+        "dimensions": {"cells": 10000, "genes": 20000, "transcription_factors": 1500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"ordinal": 4, "size_class": "real_scale_synthetic"}
+      }
+    ],
+    "route_rule": "all_contract_eligible_comparison_routes",
+    "resource_resolution": {
+      "available_cores": "process_affinity_intersect_cgroup_quota",
+      "available_memory": "cgroup_limit_intersect_host_available",
+      "standard_threads": "min(8,available_cores)",
+      "all_threads": "available_cores",
+      "freeze_at_study_creation": true
+    },
+    "execution": {
+      "ordering": "breadth_first_by_scale",
+      "advance_rule": "previous_scale_completed",
+      "timeout_rule": "andrea_physical_timeout"
+    },
+    "desist_reasons": [
+      "eligible",
+      "estimated_infeasible_time",
+      "completed_with_warnings",
+      "timeout",
+      "memory_limit",
+      "runtime_failure",
+      "not_attempted",
+      "completed"
+    ]
+  }
+}

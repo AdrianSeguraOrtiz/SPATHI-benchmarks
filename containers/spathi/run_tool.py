@@ -46,6 +46,7 @@ REQUIRED_PARAMS = {
     "max_depth",
     "max_features",
     "min_samples_leaf",
+    "min_weight_fraction_leaf",
     "n_components",
     "n_estimators",
     "pca_svd_solver",
@@ -54,7 +55,6 @@ REQUIRED_PARAMS = {
     "tree_method",
     "weight_mode",
 }
-MODEL_PARAMS = REQUIRED_PARAMS - {"random_seed"}
 
 
 def _positive_int(raw: str) -> int:
@@ -181,18 +181,6 @@ def _validate_files(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     return tf_list, groups, execution
 
 
-def _group_count(path: Path) -> int:
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle, delimiter="\t")
-        if reader.fieldnames is None or "cluster" not in reader.fieldnames:
-            raise ValueError("groups.tsv must contain a cluster column")
-        groups = {str(row.get("cluster", "")).strip() for row in reader}
-    groups.discard("")
-    if not groups:
-        raise ValueError("groups.tsv contains no non-empty group labels")
-    return len(groups)
-
-
 def _validated_scalar_params(params: dict[str, Any]) -> dict[str, Any]:
     unknown = sorted(set(params) - REQUIRED_PARAMS)
     if unknown:
@@ -203,136 +191,16 @@ def _validated_scalar_params(params: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
-def _resolve_group_policy(params: dict[str, Any], *, group_count: int) -> dict[str, Any]:
-    if set(params) != {"group_policy", "random_seed"}:
-        raise ValueError(
-            "a conditional SPATHI request must contain exactly group_policy and random_seed"
-        )
-    policy = params["group_policy"]
-    if not isinstance(policy, dict) or set(policy) != {
-        "routing_parameter",
-        "shared_parameters",
-        "branches",
-    }:
-        raise ValueError("group_policy has missing or unsupported fields")
-    if policy["routing_parameter"] != "group_count":
-        raise ValueError("group_policy.routing_parameter must be 'group_count'")
-    branches = policy["branches"]
-    if not isinstance(branches, dict) or set(branches) != {"single_group", "multi_group"}:
-        raise ValueError("group_policy must define exactly single_group and multi_group branches")
-    for candidate_id, expected_condition in (
-        ("single_group", {"minimum_group_count": 1, "maximum_group_count": 1}),
-        ("multi_group", {"minimum_group_count": 2}),
-    ):
-        candidate = branches[candidate_id]
-        if not isinstance(candidate, dict) or set(candidate) != {"condition", "parameters"}:
-            raise ValueError(f"group_policy.{candidate_id} has an invalid contract")
-        if candidate["condition"] != expected_condition:
-            raise ValueError(f"group_policy.{candidate_id}.condition is not canonical")
-        if (
-            not isinstance(candidate["parameters"], dict)
-            or set(candidate["parameters"]) != MODEL_PARAMS
-        ):
-            raise ValueError(
-                f"group_policy.{candidate_id}.parameters is not a complete SPATHI model"
-            )
-    branch_id = "single_group" if group_count == 1 else "multi_group"
-    branch = branches[branch_id]
-    branch_params = branch["parameters"]
-    other_branch = branches["multi_group" if branch_id == "single_group" else "single_group"]
-    shared = policy["shared_parameters"]
-    if (
-        not isinstance(shared, list)
-        or len(shared) != len(set(shared))
-        or set(shared) != MODEL_PARAMS - {"weight_mode", "distance_metric", "group_size_correction"}
-    ):
-        raise ValueError("group_policy.shared_parameters does not match the conditional contract")
-    other_params = other_branch["parameters"]
-    if any(other_params.get(name) != branch_params[name] for name in shared):
-        raise ValueError("group_policy branches differ in a declared shared parameter")
-    resolved = {**branch_params, "random_seed": params["random_seed"]}
-    return _validated_scalar_params(resolved)
+def _validated_params(path: Path) -> dict[str, Any]:
+    """Require one complete, unconditional SPATHI configuration.
 
+    Dataset-dependent routing and target subsampling were experimental benchmark
+    mechanisms, not part of the final method.  Keeping them in the adapter would
+    silently make one declared configuration mean different models on different
+    datasets, so the publication workflow accepts scalar SPATHI parameters only.
+    """
 
-def _validated_target_scope(raw: object) -> dict[str, Any]:
-    if raw is None or raw == {"method": "all"}:
-        return {"method": "all"}
-    if not isinstance(raw, dict):
-        raise ValueError("target_scope must be all targets or a resolved frozen hash scout")
-    expected_scopes = {
-        (256, "spathi-calibration-high-tf-v1"),
-        (64, "spathi-scalability-scout-v1"),
-        (128, "spathi-scalability-scout-v1"),
-    }
-    scope_identity = (raw.get("size"), raw.get("salt"))
-    if (
-        raw.get("method") != "sha256_gene_id"
-        or scope_identity not in expected_scopes
-        or set(raw) != {"method", "size", "salt", "dataset_id"}
-    ):
-        raise ValueError(
-            "target_scope must be all targets or a resolved frozen calibration/scalability scout"
-        )
-    dataset_id = raw.get("dataset_id")
-    if not isinstance(dataset_id, str) or not dataset_id:
-        raise ValueError("resolved hash target_scope requires a non-empty dataset_id")
-    return {
-        "method": "sha256_gene_id",
-        "size": int(raw["size"]),
-        "salt": str(raw["salt"]),
-        "dataset_id": dataset_id,
-    }
-
-
-def _validated_params(
-    path: Path, *, group_count: int | None = None
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    params = _load_json_object(path, "params")
-    target_scope = _validated_target_scope(params.pop("target_scope", None))
-    if "group_policy" in params:
-        if group_count is None:
-            raise ValueError("group_count is required to resolve a conditional SPATHI policy")
-        return _resolve_group_policy(params, group_count=group_count), target_scope
-    return _validated_scalar_params(params), target_scope
-
-
-def _hashed_target_list(
-    expression: Path,
-    output: Path,
-    scope: dict[str, Any],
-    *,
-    random_seed: int,
-) -> Path | None:
-    """Select targets from seed, dataset and gene IDs, never expression values or truth."""
-
-    if scope["method"] == "all":
-        return None
-    genes: list[str] = []
-    with expression.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.reader(handle, delimiter="\t")
-        header = next(reader, None)
-        if not header or len(header) < 2:
-            raise ValueError("expression matrix has no tabular header")
-        for row_number, row in enumerate(reader, start=2):
-            if not row or not row[0].strip():
-                raise ValueError(f"expression matrix row {row_number} has no gene identifier")
-            genes.append(row[0].strip())
-    if len(genes) != len(set(genes)):
-        raise ValueError("expression matrix contains duplicate gene identifiers")
-    size = int(scope["size"])
-    if len(genes) < size:
-        raise ValueError(f"hash scout requires at least {size} expression genes")
-    salt = str(scope["salt"])
-    dataset_id = str(scope["dataset_id"])
-    selected = sorted(
-        genes,
-        key=lambda gene: (
-            hashlib.sha256(f"{salt}\0{random_seed}\0{dataset_id}\0{gene}".encode()).digest(),
-            gene,
-        ),
-    )[:size]
-    output.write_text("".join(f"{gene}\n" for gene in selected), encoding="utf-8")
-    return output
+    return _validated_scalar_params(_load_json_object(path, "params"))
 
 
 def _validate_execution(path: Path) -> None:
@@ -545,7 +413,7 @@ def _failure_message(error: Exception, output_dir: Path) -> tuple[str, dict[str,
 
 def run(args: argparse.Namespace) -> None:
     tf_list, groups, execution_path = _validate_files(args)
-    params, target_scope = _validated_params(args.params, group_count=_group_count(groups))
+    params = _validated_params(args.params)
     _validate_execution(execution_path)
 
     published = {name: args.output_dir / name for name in ("network.csv", *AUDIT_SIDECARS)}
@@ -571,12 +439,6 @@ def run(args: argparse.Namespace) -> None:
     try:
         with TemporaryDirectory(prefix="spathi-adapter-") as scratch_name:
             scratch = Path(scratch_name)
-            target_list = _hashed_target_list(
-                args.input,
-                scratch / "target-list.txt",
-                target_scope,
-                random_seed=int(params["random_seed"]),
-            )
             config = SpathiConfig(
                 expression=args.input,
                 tf_list=tf_list,
@@ -584,7 +446,6 @@ def run(args: argparse.Namespace) -> None:
                 output_dir=scratch / "spathi-run",
                 threads=args.threads,
                 report=False,
-                target_list=target_list,
                 **params,
             )
             try:

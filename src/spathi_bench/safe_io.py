@@ -124,24 +124,6 @@ def unique_temporary_file(
         temporary.unlink(missing_ok=True)
 
 
-def _require_identical_text(
-    path: Path,
-    content: str,
-    label: str,
-    boundary: Path | None,
-) -> Path:
-    target = _output_path(path, label, boundary)
-    if not target.is_file():
-        raise BenchmarkConfigError(f"Existing {label} is not a regular file: {target}")
-    try:
-        observed = target.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise BenchmarkConfigError(f"Cannot read existing {label}: {target}: {exc}") from exc
-    if observed != content:
-        raise BenchmarkConfigError(f"Existing {label} differs: {target}")
-    return target
-
-
 def _json_text(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
@@ -181,47 +163,10 @@ def atomic_write_json(
     return atomic_write_text(path, _json_text(payload), label, boundary=boundary)
 
 
-def write_idempotent_text(
-    path: Path,
-    content: str,
-    label: str,
-    *,
-    boundary: Path | None = None,
-) -> Path:
-    """Publish immutable text once, or verify an identical concurrent publication."""
-
-    target = _output_path(path, label, boundary)
-    _prepare_parent(target, label, boundary)
-    temporary = _temporary_text(target, content)
-    try:
-        _output_path(target, label, boundary)
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            return _require_identical_text(target, content, label, boundary)
-        return target
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def write_idempotent_json(
-    path: Path,
-    payload: Mapping[str, Any],
-    label: str,
-    *,
-    boundary: Path | None = None,
-) -> Path:
-    """Publish immutable deterministic JSON, accepting only identical repeats."""
-
-    return write_idempotent_text(path, _json_text(payload), label, boundary=boundary)
-
-
 __all__ = [
     "atomic_write_json",
     "atomic_write_text",
     "path_below_no_symlinks",
     "reject_symlink_components",
     "unique_temporary_file",
-    "write_idempotent_json",
-    "write_idempotent_text",
 ]

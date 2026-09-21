@@ -1,7 +1,5 @@
-# Exact host-side environment used to orchestrate and analyse the v1 experiments.
-# ANDREA and SPATHI-benchmarks themselves are installed from the Git revisions
-# recorded by repos.lock.json; containerised simulators and inference tools are
-# pinned separately by images.lock.json.
+# Exact host-side environment used to orchestrate and analyse the article study.
+# Source identities and container outcomes are recorded in each study journal.
 absl-py==2.5.0
 aiofiles==24.1.0
 annotated-doc==0.0.5

@@ -1,4 +1,4 @@
-"""One command-line interface for planning, running and inspecting benchmark studies."""
+"""Small public CLI for the single article-study workflow."""
 
 from __future__ import annotations
 
@@ -14,8 +14,6 @@ from typing import Any
 from . import __version__
 from .config import BenchmarkConfigError
 from .doctor import run_doctor
-from .qualification import run_qualification
-from .study_amendments import amend_study_inputs
 from .study_workflow import (
     plan_study,
     rebuild_study_reports,
@@ -25,21 +23,21 @@ from .study_workflow import (
 
 
 def _path(value: str) -> Path:
-    # Preserve symlinks for the underlying provenance/path-boundary validators.
     return Path(os.path.abspath(value))
 
 
 def discover_repository(start: Path | None = None) -> Path:
-    """Find the checkout from the working directory, then the editable installation."""
-    origin = start or Path.cwd()
+    """Locate a checkout by its one canonical article-design document."""
+
+    origin = (start or Path.cwd()).absolute()
     candidates = [origin, *origin.parents, Path(__file__).resolve().parents[2]]
     for candidate in candidates:
-        if (candidate / "repos.lock.json").is_file() and (
-            candidate / "experiments" / "v1"
-        ).is_dir():
+        if (candidate / "experiments/article-study.json").is_file() and (
+            candidate / "pyproject.toml"
+        ).is_file():
             return candidate
     raise BenchmarkConfigError(
-        "Cannot locate the SPATHI-benchmarks checkout. Run inside it or pass --project PATH."
+        "Cannot locate SPATHI-benchmarks; run inside its checkout or pass --project"
     )
 
 
@@ -52,102 +50,94 @@ def _add_project(parser: argparse.ArgumentParser, *, repositories: bool = False)
 
 def _add_resources(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--cores", type=int, help="optional CPU ceiling; default: effective machine capacity"
+        "--max-cpus",
+        type=int,
+        help="maximum schedulable CPU threads (default: detected effective capacity)",
     )
     parser.add_argument(
-        "--ram-gb", type=float, help="optional RAM ceiling in GiB; default: available memory"
+        "--max-memory-gb",
+        type=float,
+        help="maximum schedulable RAM in GiB (default: detected effective capacity)",
     )
-
-
-def _resources(args: argparse.Namespace) -> dict[str, int | float | None]:
-    return {
-        "max_cores": args.cores,
-        "max_ram_gb": args.ram_gb,
-        "reserve_cores": 0,
-        "reserve_ram_gb": 0.0,
-    }
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="spathi-bench",
-        description="Reproducible SPATHI studies, from calibration to final reports.",
-        epilog="Start: spathi-bench run reduced --id pilot. Resume: spathi-bench run --id pilot.",
+        description="Run the reproducible three-phase SPATHI article study.",
+        epilog=(
+            "Start: spathi-bench run --profile reduced --id reduced-1. "
+            "Resume: spathi-bench run --id reduced-1."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     run = commands.add_parser("run", help="start or resume a complete study")
-    run.add_argument(
-        "profile", nargs="?", choices=("smoke", "reduced", "full"),
-        help="new study budget (default: reduced); omitted on resume to use the saved budget",
-    )
-    run.add_argument("--id", dest="run_id", help="study identity; existing IDs resume saved work")
+    run.add_argument("--profile", choices=("smoke", "reduced", "full"))
+    run.add_argument("--id", dest="study_id", required=True, help="stable study identity")
     _add_project(run, repositories=True)
     _add_resources(run)
 
-    status = commands.add_parser("status", help="show studies, or inspect one study")
-    status.add_argument("run_id", nargs="?", help="study identity; omitted to list studies")
-    _add_project(status)
+    status = commands.add_parser("status", help="list studies or inspect one")
+    status.add_argument("--id", dest="study_id", help="study identity; omit to list all")
     status.add_argument("--json", action="store_true", help="print structured evidence")
+    _add_project(status)
 
-    report = commands.add_parser("report", help="rebuild reports from a study's saved evidence")
-    report.add_argument("run_id", help="study identity")
-    _add_project(report)
-
-    amend = commands.add_parser("amend-inputs", help="explicitly correct pending simulation inputs in a stopped study")
-    amend.add_argument("run_id", help="study identity")
-    amend.add_argument("--reason", required=True, help="record why unproduced simulator requests must change")
-    _add_project(amend, repositories=True)
-
-    plan = commands.add_parser("plan", help="inspect the phase and resource plan without execution")
-    plan.add_argument("profile", nargs="?", choices=("smoke", "reduced", "full"), default="reduced")
+    plan = commands.add_parser("plan", help="inspect the exact DAG without executing it")
+    plan.add_argument("--profile", choices=("smoke", "reduced", "full"), required=True)
+    plan.add_argument("--json", action="store_true", help="print every planned task")
     _add_project(plan, repositories=True)
     _add_resources(plan)
-    plan.add_argument("--json", action="store_true", help="print the complete structured plan")
 
-    doctor = commands.add_parser("doctor", help="check prerequisites without installing or running")
+    report = commands.add_parser("report", help="rebuild portable reports from saved evidence")
+    report.add_argument("--id", dest="study_id", required=True, help="study identity")
+    _add_project(report)
+
+    doctor = commands.add_parser("doctor", help="check prerequisites without changing anything")
+    doctor.add_argument("--json", action="store_true", help="print structured checks")
     _add_project(doctor, repositories=True)
-    doctor.add_argument("--json", action="store_true", help="print all diagnostic details")
-
-    qualify = commands.add_parser("qualify", help="verify local SPATHI/ANDREA scientific contracts")
-    qualify.add_argument("--id", dest="run_id", help="qualification identity; existing IDs resume")
-    _add_project(qualify, repositories=True)
-    _add_resources(qualify)
     return parser
 
 
-def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
-    repo_root = args.project or discover_repository()
-    common = {"repo_root": repo_root, "work_root": repo_root / "work"}
-    if args.command == "status":
-        return "Study status", study_status(**common, run_id=args.run_id)
-    if args.command == "report":
-        return "Study reports", rebuild_study_reports(**common, run_id=args.run_id)
-    repositories = {
-        "andrea_repo": args.andrea or repo_root.parent / "ANDREA",
-        "spathi_repo": args.spathi or repo_root.parent / "SPATHI",
+def _repositories(args: argparse.Namespace, root: Path) -> dict[str, Path]:
+    return {
+        "andrea_repo": getattr(args, "andrea", None) or root.parent / "ANDREA",
+        "spathi_repo": getattr(args, "spathi", None) or root.parent / "SPATHI",
     }
-    if args.command == "doctor":
-        return "Environment diagnostics", run_doctor(
-            repo_root=repo_root, **repositories, python_executable=sys.executable,
-        )
-    if args.command == "amend-inputs":
-        return "Study inputs amended", amend_study_inputs(
-            **common, **repositories, run_id=args.run_id, reason=args.reason,
-        )
-    if args.command == "run":
-        return "Study finished", run_study_workflow(
-            **common, **repositories, profile=args.profile, run_id=args.run_id,
-            **_resources(args),
+
+
+def _dispatch(args: argparse.Namespace) -> tuple[str, Any]:
+    root = args.project or discover_repository()
+    work_root = root / "work"
+    if args.command == "status":
+        return "Study status", study_status(work_root=work_root, study_id=args.study_id)
+    if args.command == "report":
+        return "Study reports", rebuild_study_reports(
+            repo_root=root, work_root=work_root, study_id=args.study_id
         )
     if args.command == "plan":
+        repositories = _repositories(args, root)
         return "Study plan", plan_study(
-            **common, **repositories, profile=args.profile, **_resources(args),
+            repo_root=root,
+            work_root=work_root,
+            profile=args.profile,
+            andrea_repo=repositories["andrea_repo"],
+            max_cpus=args.max_cpus,
+            max_memory_gb=args.max_memory_gb,
         )
-    if args.command == "qualify":
-        return "Qualification finished", run_qualification(
-            **common, **repositories, run_id=args.run_id, **_resources(args),
+    repositories = _repositories(args, root)
+    if args.command == "doctor":
+        return "Environment diagnostics", run_doctor(repo_root=root, **repositories)
+    if args.command == "run":
+        return "Study completed", run_study_workflow(
+            repo_root=root,
+            work_root=work_root,
+            profile=args.profile,
+            study_id=args.study_id,
+            max_cpus=args.max_cpus,
+            max_memory_gb=args.max_memory_gb,
+            **repositories,
         )
     raise AssertionError(f"Unhandled command: {args.command}")
 
@@ -160,51 +150,44 @@ def _render(title: str, result: Any, *, structured: bool = False) -> None:
     if not isinstance(result, Mapping):
         print(result)
         return
-    if "checks" in result:
-        for check in result["checks"]:
-            print(f"  {str(check['status']).upper():5}  {check['id']}: {check['message']}")
-            if check.get("remediation") and check["status"] == "fail":
-                print(f"         {check['remediation']}")
+    checks = result.get("checks")
+    if isinstance(checks, list):
+        for check in checks:
+            print(f"  {str(check['status']).upper():4}  {check['id']}: {check['message']}")
+            if check.get("status") == "fail" and check.get("remediation"):
+                print(f"        {check['remediation']}")
         return
-    # Do not dump nested inference reports or every artifact to the terminal.
-    for key in ("run_id", "study_id", "profile", "status", "current_phase", "error", "report", "report_path"):
+    for key in ("study_id", "profile", "status", "current_phase", "report"):
         if result.get(key) is not None:
             print(f"  {key.replace('_', ' ')}: {result[key]}")
-    runs = result.get("studies", result.get("runs"))
-    if isinstance(runs, list):
-        if not runs:
-            print("  No studies yet. Start with: spathi-bench run reduced")
-        for run in runs:
+    studies = result.get("studies")
+    if isinstance(studies, list):
+        if not studies:
+            print("  No studies yet.")
+        for study in studies:
             print(
-                f"  {run.get('run_id', run.get('study_id', '?'))}"
-                f"  {run.get('profile', '')}  {run.get('status', '')}"
-                f"  {run.get('current_phase') or ''}"
+                f"  {study.get('study_id', '?')}  {study.get('profile', '')}  "
+                f"{study.get('status', '')}  {study.get('current_phase') or ''}"
             )
     phases = result.get("phases")
     if isinstance(phases, Mapping):
-        phases = [
-            {"phase": name, **value} if isinstance(value, Mapping)
-            else {"phase": name, "status": value}
-            for name, value in phases.items()
-        ]
-    if isinstance(phases, list):
-        for phase in phases:
-            if isinstance(phase, Mapping):
-                name = phase.get("phase", phase.get("name", phase.get("id", "?")))
-                print(f"  {name}: {phase.get('status', phase.get('purpose', 'planned'))}")
-    resources = result.get("resource_plan")
-    if isinstance(resources, Mapping):
-        capacity = resources.get("capacity", resources)
-        ram = capacity.get("memory_gib")
-        if ram is None and isinstance(capacity.get("memory_bytes"), (int, float)):
-            ram = capacity["memory_bytes"] / 1024**3
-        ram_label = f"{ram:.1f} GiB" if isinstance(ram, (int, float)) else "unspecified RAM"
-        print(f"  capacity: {capacity.get('cpu_threads', '?')} CPU threads, {ram_label}")
+        for phase, value in phases.items():
+            if isinstance(value, Mapping):
+                detail = value.get("status", f"{value.get('task_count', 0)} tasks")
+            else:
+                detail = value
+            print(f"  {phase}: {detail}")
+    resource_plan = result.get("resource_plan")
+    if isinstance(resource_plan, Mapping) and isinstance(resource_plan.get("capacity"), Mapping):
+        capacity = resource_plan["capacity"]
+        print(
+            f"  capacity: {capacity['cpu_threads']} CPU threads, "
+            f"{capacity['memory_bytes'] / 1024**3:.1f} GiB RAM"
+        )
     for warning in result.get("warnings", []):
         print(f"  warning: {warning}")
-    for key in ("estimate", "resume_command"):
-        if result.get(key):
-            print(f"  {key.replace('_', ' ')}: {result[key]}")
+    if result.get("resume_command"):
+        print(f"  resume: {result['resume_command']}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -213,16 +196,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         title, result = _dispatch(args)
     except KeyboardInterrupt:
-        print(
-            "Interrupted. Completed artifacts are retained; resume with the same study ID.",
-            file=sys.stderr,
-        )
+        print("Interrupted; resume with the same study ID.", file=sys.stderr)
         return 130
     except (BenchmarkConfigError, OSError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     _render(title, result, structured=getattr(args, "json", False))
-    if args.command == "doctor" and isinstance(result, dict) and not result.get("ok", False):
+    if args.command == "doctor" and not result.get("ok", False):
         return 2
     return 0
 

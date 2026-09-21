@@ -103,7 +103,9 @@ def test_publication_is_idempotent_for_an_existing_complete_key(tmp_path: Path) 
     assert second.file("data.txt").read_text(encoding="utf-8") == "first"
 
 
-@pytest.mark.parametrize("mutation", ["content_restored_mtime", "replacement", "unlisted", "symlink"])
+@pytest.mark.parametrize(
+    "mutation", ["content_restored_mtime", "replacement", "unlisted", "symlink"]
+)
 def test_repeated_lookup_detects_mutations_after_initial_validation(
     tmp_path: Path, mutation: str
 ) -> None:

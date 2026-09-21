@@ -1,140 +1,46 @@
-"""Non-destructive environment diagnostics for SPATHI benchmarks."""
+"""Read-only prerequisite diagnostics for the article benchmark."""
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
-from .config import (
-    BenchmarkConfigError,
-    load_repo_lock,
-    validate_all_profiles,
-    validate_design_contracts,
-    validate_locked_repository,
-)
-from .provenance import observe_benchmark_repository
+from .design import DesignError, load_design
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 ExecutableResolver = Callable[[str], str | None]
+DiskUsageReader = Callable[[Path], Any]
 
-_ANDREA_IMPORT_PROBE = """
+_GIB = 1024**3
+_DISK_FAIL_BYTES = 5 * _GIB
+_DISK_WARN_BYTES = 100 * _GIB
+
+_IMPORT_PROBE = """
 import importlib
 import pathlib
 import sys
 
 repository = pathlib.Path(sys.argv[1]).resolve()
-sys.path.insert(0, str(repository))
-module = importlib.import_module("andrea")
-module_file = pathlib.Path(module.__file__).resolve()
-print(module_file)
-""".strip()
-
-_SPATHI_API_PROBE = """
-import ast
-import dataclasses
-import importlib
-import json
-import pathlib
-import sys
-
-repository = pathlib.Path(sys.argv[1]).resolve()
-sys.path.insert(0, str(repository / "src"))
-module = importlib.import_module("spathi")
-module_file = pathlib.Path(module.__file__).resolve()
-required = {"SpathiConfig", "SpathiProgressEvent", "SpathiRunResult", "infer"}
-exports = set(getattr(module, "__all__", ()))
-config_type = getattr(module, "SpathiConfig")
-progress_type = getattr(module, "SpathiProgressEvent")
-config_field_partitions = {
-    "paths": {"expression", "tf_list", "groups", "output_dir"},
-    "scientific_inputs": {"target_list", "centroid_weights"},
-    "scientific_parameters": {
-        "bandwidth", "bandwidth_scale", "bootstrap",
-        "distance_metric", "distance_space", "distance_standardization",
-        "group_size_correction", "kernel", "max_depth", "max_features",
-        "min_samples_leaf", "n_components", "n_estimators", "pca_svd_solver",
-        "random_seed", "tree_method", "weight_mode",
-    },
-    "operational_options": {"threads", "parallel_backend", "report"},
-}
-config_definition = dataclasses.fields(config_type)
-config_fields = {field.name for field in config_definition}
-expected_config_fields = set().union(*config_field_partitions.values())
-partition_owners = {
-    field_name: sorted(
-        partition_name
-        for partition_name, members in config_field_partitions.items()
-        if field_name in members
-    )
-    for field_name in expected_config_fields
-}
-config_partition_overlap = sorted(
-    field_name for field_name, owners in partition_owners.items() if len(owners) != 1
-)
-required_config_fields = {
-    field.name
-    for field in config_definition
-    if field.default is dataclasses.MISSING
-    and field.default_factory is dataclasses.MISSING
-}
-requiredness_mismatches = sorted(required_config_fields ^ config_field_partitions["paths"])
-progress_fields = {field.name for field in dataclasses.fields(progress_type)}
-missing_progress_members = sorted(
-    {"phase", "message", "completed_models", "total_models"}
-    - progress_fields
-    - set(dir(progress_type))
-)
-tree = ast.parse((repository / "src" / "spathi" / "core.py").read_text(encoding="utf-8"))
-infer_defs = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "infer"]
-infer_signature_ok = False
-if len(infer_defs) == 1:
-    signature = infer_defs[0].args
-    positional = [argument.arg for argument in (*signature.posonlyargs, *signature.args)]
-    keyword_only = {argument.arg for argument in signature.kwonlyargs}
-    required_unprovided = {
-        argument.arg
-        for argument, default in zip(signature.kwonlyargs, signature.kw_defaults, strict=True)
-        if default is None and argument.arg not in {"progress_callback", "checkpoint"}
-    }
-    infer_signature_ok = positional == ["config"] and {
-        "progress_callback", "checkpoint"
-    } <= keyword_only and not required_unprovided
-result_defs = [
-    node for node in tree.body
-    if isinstance(node, ast.ClassDef) and node.name == "SpathiRunResult"
-]
-result_fields = set()
-if len(result_defs) == 1:
-    result_fields = {
-        node.target.id
-        for node in result_defs[0].body
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-    }
-print(json.dumps({
-    "module": str(module_file),
-    "missing_exports": sorted(required - exports),
-    "config_field_partitions": {
-        name: sorted(members) for name, members in config_field_partitions.items()
-    },
-    "missing_config_fields": sorted(expected_config_fields - config_fields),
-    "unexpected_config_fields": sorted(config_fields - expected_config_fields),
-    "config_partition_overlap": config_partition_overlap,
-    "requiredness_mismatches": requiredness_mismatches,
-    "missing_progress_members": missing_progress_members,
-    "missing_result_fields": sorted({"network_path", "warnings"} - result_fields),
-    "infer_signature_ok": infer_signature_ok,
-}))
+source = (repository / sys.argv[2]).resolve()
+sys.path.insert(0, str(source))
+module = importlib.import_module(sys.argv[3])
+print(pathlib.Path(module.__file__).resolve())
 """.strip()
 
 
-def _result(
+class _Repository(NamedTuple):
+    name: str
+    path: Path
+    source_subdirectory: str
+    package: str
+
+
+def _check(
     check_id: str,
     status: str,
     message: str,
@@ -142,7 +48,11 @@ def _result(
     details: dict[str, Any] | None = None,
     remediation: str | None = None,
 ) -> dict[str, Any]:
-    result: dict[str, Any] = {"id": check_id, "status": status, "message": message}
+    result: dict[str, Any] = {
+        "id": check_id,
+        "status": status,
+        "message": message,
+    }
     if details:
         result["details"] = details
     if remediation:
@@ -150,36 +60,7 @@ def _result(
     return result
 
 
-def _passed(
-    check_id: str,
-    message: str,
-    *,
-    details: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _result(check_id, "pass", message, details=details)
-
-
-def _failed(
-    check_id: str,
-    message: str,
-    *,
-    details: dict[str, Any] | None = None,
-    remediation: str,
-) -> dict[str, Any]:
-    return _result(
-        check_id,
-        "fail",
-        message,
-        details=details,
-        remediation=remediation,
-    )
-
-
-def _skipped(check_id: str, message: str, *, remediation: str) -> dict[str, Any]:
-    return _result(check_id, "skip", message, remediation=remediation)
-
-
-def _command(
+def _run(
     command: Sequence[str],
     *,
     runner: CommandRunner,
@@ -188,57 +69,116 @@ def _command(
 ) -> subprocess.CompletedProcess[str] | Exception:
     try:
         return runner(
-            list(command),
+            [str(part) for part in command],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
             env=environment,
         )
-    except Exception as exc:  # A diagnostic must report command failures, not abort midway.
+    except Exception as exc:  # Diagnostics report each unavailable dependency.
         return exc
 
 
-def _command_failure_details(
+def _failure_details(
     command: Sequence[str],
     outcome: subprocess.CompletedProcess[str] | Exception,
 ) -> dict[str, Any]:
-    details: dict[str, Any] = {"command": list(command)}
+    details: dict[str, Any] = {"command": [str(part) for part in command]}
     if isinstance(outcome, Exception):
         details["error"] = f"{type(outcome).__name__}: {outcome}"
         return details
     details["returncode"] = outcome.returncode
-    if (stdout := outcome.stdout or "").strip():
-        details["stdout"] = stdout.strip()
-    if (stderr := outcome.stderr or "").strip():
-        details["stderr"] = stderr.strip()
+    if stdout := (outcome.stdout or "").strip():
+        details["stdout"] = stdout
+    if stderr := (outcome.stderr or "").strip():
+        details["stderr"] = stderr
     return details
 
 
-def _repository_check(check_id: str, name: str, path: Path) -> dict[str, Any]:
-    resolved = path.resolve()
-    if not resolved.exists():
-        return _failed(
-            check_id,
-            f"{name} repository is missing: {resolved}",
-            details={"path": str(resolved)},
-            remediation=f"Clone {name} at {resolved} or pass the correct repository path.",
+def _repository_check(repository: _Repository) -> dict[str, Any]:
+    path = repository.path.resolve()
+    package_root = path / repository.source_subdirectory / repository.package
+    if not path.is_dir():
+        return _check(
+            f"{repository.name.lower()}_repository",
+            "fail",
+            f"{repository.name} repository is missing: {path}",
+            details={"path": str(path)},
+            remediation=f"Clone {repository.name} beside SPATHI-benchmarks or pass its path.",
         )
-    if not resolved.is_dir():
-        return _failed(
-            check_id,
-            f"{name} repository path is not a directory: {resolved}",
-            details={"path": str(resolved)},
-            remediation=f"Pass the directory containing the {name} Git checkout.",
+    if not package_root.is_dir():
+        return _check(
+            f"{repository.name.lower()}_repository",
+            "fail",
+            f"{path} does not contain the {repository.name} source package",
+            details={"expected_package": str(package_root)},
+            remediation=f"Use the root of the {repository.name} source checkout.",
         )
-    if not (resolved / ".git").exists():
-        return _failed(
+    return _check(
+        f"{repository.name.lower()}_repository",
+        "pass",
+        f"{repository.name} source checkout is present",
+        details={"path": str(path)},
+    )
+
+
+def _import_check(
+    repository: _Repository,
+    *,
+    python_executable: str,
+    repository_available: bool,
+    runner: CommandRunner,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    check_id = f"{repository.name.lower()}_import"
+    if not repository_available:
+        return _check(
             check_id,
-            f"{name} path exists but is not a Git checkout: {resolved}",
-            details={"path": str(resolved)},
-            remediation=f"Use a Git checkout of {name}, not an unpacked source directory.",
+            "fail",
+            f"Cannot import {repository.name} because its source checkout is unavailable",
+            remediation=f"Fix the {repository.name} repository path and rerun doctor.",
         )
-    return _passed(check_id, f"{name} repository exists", details={"path": str(resolved)})
+    command = [
+        python_executable,
+        "-c",
+        _IMPORT_PROBE,
+        str(repository.path.resolve()),
+        repository.source_subdirectory or ".",
+        repository.package,
+    ]
+    outcome = _run(command, runner=runner, timeout_seconds=timeout_seconds)
+    if isinstance(outcome, Exception) or outcome.returncode != 0:
+        return _check(
+            check_id,
+            "fail",
+            f"{repository.name} cannot be imported with the current interpreter",
+            details=_failure_details(command, outcome),
+            remediation=(
+                f"Install {repository.name}'s dependencies in the active environment "
+                "and keep using the source checkout."
+            ),
+        )
+    reported = (outcome.stdout or "").strip().splitlines()
+    imported = Path(reported[-1]).resolve() if reported else None
+    expected = repository.path.resolve()
+    if imported is None or not imported.is_relative_to(expected):
+        return _check(
+            check_id,
+            "fail",
+            f"{repository.name} resolved outside the requested source checkout",
+            details={
+                "expected_repository": str(expected),
+                "imported_module": str(imported) if imported is not None else None,
+            },
+            remediation="Remove the conflicting installation or select the intended checkout.",
+        )
+    return _check(
+        check_id,
+        "pass",
+        f"{repository.name} imports from the requested checkout",
+        details={"module": str(imported)},
+    )
 
 
 def _docker_checks(
@@ -247,389 +187,426 @@ def _docker_checks(
     runner: CommandRunner,
     timeout_seconds: float,
 ) -> list[dict[str, Any]]:
-    docker = resolver("docker")
-    if not docker:
-        remediation = "Install Docker and make the docker executable available on PATH."
+    executable = resolver("docker")
+    if executable is None:
+        remediation = "Install Docker with Buildx and expose docker on PATH."
         return [
-            _failed("docker_cli", "Docker CLI was not found", remediation=remediation),
-            _skipped(
+            _check("docker_cli", "fail", "Docker CLI is unavailable", remediation=remediation),
+            _check(
                 "docker_daemon",
-                "Docker daemon check requires the Docker CLI",
+                "fail",
+                "Docker daemon could not be checked",
                 remediation=remediation,
             ),
-            _skipped(
+            _check(
                 "docker_buildx",
-                "Docker Buildx check requires the Docker CLI",
+                "fail",
+                "Docker Buildx could not be checked",
                 remediation=remediation,
             ),
         ]
-
-    cli_command = [docker, "--version"]
-    cli_outcome = _command(cli_command, runner=runner, timeout_seconds=timeout_seconds)
-    cli_ok = not isinstance(cli_outcome, Exception) and cli_outcome.returncode == 0
-    if cli_ok:
-        cli = _passed(
-            "docker_cli",
-            "Docker CLI is available",
-            details={"executable": docker, "version": (cli_outcome.stdout or "").strip()},
-        )
-    else:
-        remediation = "Repair the Docker CLI installation or select a working executable."
-        return [
-            _failed(
-                "docker_cli",
-                "Docker CLI could not be executed",
-                details=_command_failure_details(cli_command, cli_outcome),
-                remediation=remediation,
-            ),
-            _skipped("docker_daemon", "Docker CLI check failed", remediation=remediation),
-            _skipped("docker_buildx", "Docker CLI check failed", remediation=remediation),
-        ]
-
-    daemon_command = [docker, "info", "--format", "{{.ServerVersion}}"]
-    daemon_outcome = _command(daemon_command, runner=runner, timeout_seconds=timeout_seconds)
-    if not isinstance(daemon_outcome, Exception) and daemon_outcome.returncode == 0:
-        daemon = _passed(
+    probes = (
+        ("docker_cli", [executable, "--version"], "Docker CLI"),
+        (
             "docker_daemon",
-            "Docker daemon is reachable",
-            details={"server_version": (daemon_outcome.stdout or "").strip()},
-        )
-    else:
-        daemon = _failed(
-            "docker_daemon",
-            "Docker daemon is not reachable",
-            details=_command_failure_details(daemon_command, daemon_outcome),
-            remediation="Start Docker and ensure the current user can access its daemon.",
-        )
-
-    buildx_command = [docker, "buildx", "version"]
-    buildx_outcome = _command(buildx_command, runner=runner, timeout_seconds=timeout_seconds)
-    if not isinstance(buildx_outcome, Exception) and buildx_outcome.returncode == 0:
-        buildx = _passed(
-            "docker_buildx",
-            "Docker Buildx is available",
-            details={"version": (buildx_outcome.stdout or "").strip()},
-        )
-    else:
-        buildx = _failed(
-            "docker_buildx",
-            "Docker Buildx is unavailable",
-            details=_command_failure_details(buildx_command, buildx_outcome),
-            remediation="Install or enable the Docker Buildx plugin.",
-        )
-    return [cli, daemon, buildx]
-
-
-def _andrea_cli_check(
-    andrea_repo: Path,
-    python_executable: str,
-    *,
-    runner: CommandRunner,
-    timeout_seconds: float,
-) -> dict[str, Any]:
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(andrea_repo.resolve()) + (
-        os.pathsep + environment["PYTHONPATH"] if environment.get("PYTHONPATH") else ""
+            [executable, "info", "--format", "{{.ServerVersion}}"],
+            "Docker daemon",
+        ),
+        ("docker_buildx", [executable, "buildx", "version"], "Docker Buildx"),
     )
-    command = [python_executable, "-m", "andrea", "--help"]
-    outcome = _command(
-        command,
-        runner=runner,
-        timeout_seconds=timeout_seconds,
-        environment=environment,
-    )
-    if not isinstance(outcome, Exception) and outcome.returncode == 0:
-        return _passed(
-            "andrea_cli",
-            "ANDREA CLI runs in the selected Python environment",
-            details={"python_executable": python_executable},
-        )
-    return _failed(
-        "andrea_cli",
-        "ANDREA CLI could not run in the selected Python environment",
-        details=_command_failure_details(command, outcome),
-        remediation="Install ANDREA dependencies into the benchmark Python environment.",
-    )
-
-
-def _benchmark_contract_check(
-    repo_root: Path,
-    andrea_repo: Path,
-    spathi_repo: Path,
-) -> dict[str, Any]:
-    try:
-        benchmark = observe_benchmark_repository(repo_root, require_clean=True)
-        validate_all_profiles(repo_root)
-        validate_design_contracts(repo_root, andrea_repo)
-        lock = load_repo_lock(repo_root)["repositories"]
-        andrea = validate_locked_repository(
-            name="andrea",
-            path=andrea_repo,
-            lock_entry=lock["andrea"],
-            require_clean=True,
-        )
-        spathi = validate_locked_repository(
-            name="spathi",
-            path=spathi_repo,
-            lock_entry=lock["spathi"],
-            require_clean=True,
-        )
-        from .pipeline import _validate_spathi_image_contract
-
-        _validate_spathi_image_contract(repo_root)
-    except (BenchmarkConfigError, OSError, ValueError) as exc:
-        return _failed(
-            "benchmark_contracts",
-            f"Benchmark locks or committed inputs are inconsistent: {exc}",
-            remediation="Commit the benchmark inputs and synchronize repos.lock.json and images.lock.json.",
-        )
-    return _passed(
-        "benchmark_contracts",
-        "Benchmark inputs and locked repositories are consistent",
-        details={
-            "benchmark_commit": benchmark["commit"],
-            "andrea_commit": andrea["commit"],
-            "spathi_commit": spathi["commit"],
-        },
-    )
-
-
-def _andrea_import_check(
-    andrea_repo: Path,
-    python_executable: str,
-    *,
-    repository_available: bool,
-    runner: CommandRunner,
-    timeout_seconds: float,
-) -> dict[str, Any]:
-    expected_repo = andrea_repo.resolve()
-    if not repository_available:
-        return _skipped(
-            "andrea_import",
-            "ANDREA import check requires an existing Git checkout",
-            remediation="Provide the expected ANDREA repository and rerun the diagnostic.",
-        )
-    command = [python_executable, "-c", _ANDREA_IMPORT_PROBE, str(expected_repo)]
-    outcome = _command(command, runner=runner, timeout_seconds=timeout_seconds)
-    if isinstance(outcome, Exception) or outcome.returncode != 0:
-        return _failed(
-            "andrea_import",
-            "ANDREA could not be imported from the expected repository",
-            details=_command_failure_details(command, outcome),
-            remediation="Install ANDREA's dependencies and verify that its checkout is importable.",
-        )
-    stdout = (outcome.stdout or "").strip()
-    raw_module_path = stdout.splitlines()[-1] if stdout else ""
-    if not raw_module_path:
-        return _failed(
-            "andrea_import",
-            "ANDREA import probe did not report the imported module path",
-            details=_command_failure_details(command, outcome),
-            remediation="Verify that the expected ANDREA package exposes a normal module file.",
-        )
-    module_path = Path(raw_module_path).resolve()
-    if not module_path.is_relative_to(expected_repo):
-        return _failed(
-            "andrea_import",
-            "ANDREA resolved outside the expected repository",
-            details={
-                "expected_repository": str(expected_repo),
-                "imported_module": str(module_path),
-            },
-            remediation="Remove the conflicting installation or select the matching ANDREA checkout.",
-        )
-    return _passed(
-        "andrea_import",
-        "ANDREA imports from the expected repository",
-        details={"repository": str(expected_repo), "module": str(module_path)},
-    )
-
-
-def _spathi_api_check(
-    spathi_repo: Path,
-    python_executable: str,
-    *,
-    repository_available: bool,
-    runner: CommandRunner,
-    timeout_seconds: float,
-) -> dict[str, Any]:
-    expected_repo = spathi_repo.resolve()
-    if not repository_available:
-        return _skipped(
-            "spathi_api",
-            "SPATHI API check requires an existing Git checkout",
-            remediation="Provide the expected SPATHI repository and rerun the diagnostic.",
-        )
-    command = [python_executable, "-c", _SPATHI_API_PROBE, str(expected_repo)]
-    outcome = _command(command, runner=runner, timeout_seconds=timeout_seconds)
-    if isinstance(outcome, Exception) or outcome.returncode != 0:
-        return _failed(
-            "spathi_api",
-            "SPATHI's public API could not be inspected from the expected repository",
-            details=_command_failure_details(command, outcome),
-            remediation="Synchronize the locked SPATHI checkout and verify its public package.",
-        )
-    try:
-        payload = json.loads((outcome.stdout or "").strip().splitlines()[-1])
-        module_path = Path(payload["module"]).resolve()
-        missing_exports = payload["missing_exports"]
-        missing_config_fields = payload["missing_config_fields"]
-        unexpected_config_fields = payload["unexpected_config_fields"]
-        config_partition_overlap = payload["config_partition_overlap"]
-        requiredness_mismatches = payload["requiredness_mismatches"]
-        config_field_partitions = payload["config_field_partitions"]
-        missing_progress_members = payload["missing_progress_members"]
-        missing_result_fields = payload["missing_result_fields"]
-        infer_signature_ok = payload["infer_signature_ok"]
-        for key, values in (
-            ("missing_exports", missing_exports),
-            ("missing_config_fields", missing_config_fields),
-            ("unexpected_config_fields", unexpected_config_fields),
-            ("config_partition_overlap", config_partition_overlap),
-            ("requiredness_mismatches", requiredness_mismatches),
-            ("missing_progress_members", missing_progress_members),
-            ("missing_result_fields", missing_result_fields),
-        ):
-            if not isinstance(values, list) or not all(isinstance(name, str) for name in values):
-                raise TypeError(f"{key} must be a list of strings")
-        if not isinstance(infer_signature_ok, bool):
-            raise TypeError("infer_signature_ok must be a boolean")
-        if (
-            not isinstance(config_field_partitions, dict)
-            or set(config_field_partitions)
-            != {"paths", "scientific_inputs", "scientific_parameters", "operational_options"}
-            or not all(
-                isinstance(values, list) and all(isinstance(name, str) for name in values)
-                for values in config_field_partitions.values()
+    checks = []
+    for check_id, command, label in probes:
+        outcome = _run(command, runner=runner, timeout_seconds=timeout_seconds)
+        if not isinstance(outcome, Exception) and outcome.returncode == 0:
+            checks.append(
+                _check(
+                    check_id,
+                    "pass",
+                    f"{label} is available",
+                    details={"version": (outcome.stdout or "").strip()},
+                )
             )
-        ):
-            raise TypeError("config_field_partitions must be the exact four-way partition")
-    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        return _failed(
-            "spathi_api",
-            "SPATHI API probe returned an invalid payload",
-            details={**_command_failure_details(command, outcome), "error": str(exc)},
-            remediation="Verify that the locked SPATHI package exposes its public API metadata.",
+        else:
+            checks.append(
+                _check(
+                    check_id,
+                    "fail",
+                    f"{label} is unavailable",
+                    details=_failure_details(command, outcome),
+                    remediation="Install/enable Docker and ensure this user can access the daemon.",
+                )
+            )
+    return checks
+
+
+def _design_check(repo_root: Path) -> dict[str, Any]:
+    path = repo_root.resolve() / "experiments" / "article-study.json"
+    try:
+        design = load_design(path)
+    except (DesignError, OSError, ValueError) as exc:
+        return _check(
+            "article_design",
+            "fail",
+            f"Article study design is invalid: {exc}",
+            details={"path": str(path)},
+            remediation="Fix experiments/article-study.json before starting a study.",
         )
-    if not module_path.is_relative_to(expected_repo):
-        return _failed(
-            "spathi_api",
-            "SPATHI resolved outside the expected repository",
-            details={
-                "expected_repository": str(expected_repo),
-                "imported_module": str(module_path),
-            },
-            remediation="Remove the conflicting installation or select the matching SPATHI checkout.",
-        )
-    if missing_exports:
-        return _failed(
-            "spathi_api",
-            "SPATHI does not expose the API required by its benchmark adapter",
-            details={"missing_exports": missing_exports, "module": str(module_path)},
-            remediation="Update SPATHI-benchmarks for the locked SPATHI public API.",
-        )
-    if (
-        missing_config_fields
-        or unexpected_config_fields
-        or config_partition_overlap
-        or requiredness_mismatches
-        or missing_progress_members
-        or missing_result_fields
-        or not infer_signature_ok
-    ):
-        return _failed(
-            "spathi_api",
-            "SPATHI's public API contract is incompatible with its benchmark adapter",
-            details={
-                "missing_config_fields": missing_config_fields,
-                "unexpected_config_fields": unexpected_config_fields,
-                "config_partition_overlap": config_partition_overlap,
-                "requiredness_mismatches": requiredness_mismatches,
-                "config_field_partitions": config_field_partitions,
-                "missing_progress_members": missing_progress_members,
-                "missing_result_fields": missing_result_fields,
-                "infer_signature_ok": infer_signature_ok,
-                "module": str(module_path),
-            },
-            remediation="Update SPATHI-benchmarks for the locked SPATHI configuration and infer signature.",
-        )
-    return _passed(
-        "spathi_api",
-        "SPATHI exposes the public API required by its benchmark adapter",
+    return _check(
+        "article_design",
+        "pass",
+        "Article study design is valid",
         details={
-            "repository": str(expected_repo),
-            "module": str(module_path),
-            "config_field_partitions": config_field_partitions,
+            "path": str(path),
+            "study_id": design.id,
+            "fingerprint": design.fingerprint,
+            "profiles": sorted(design.profiles),
         },
+    )
+
+
+def _catalog_contract_check(repo_root: Path, andrea_repo: Path) -> dict[str, Any]:
+    """Check that frozen external routes still match the local ANDREA catalog."""
+
+    design_path = repo_root.resolve() / "experiments" / "article-study.json"
+    catalog_root = andrea_repo.resolve() / "andrea" / "catalog_inference_tools" / "tools"
+    try:
+        design = load_design(design_path)
+    except (DesignError, OSError, ValueError) as exc:
+        return _check(
+            "andrea_catalog_contract",
+            "fail",
+            f"Cannot validate ANDREA routes because the article design is invalid: {exc}",
+            details={"design": str(design_path), "catalog": str(catalog_root)},
+            remediation="Fix experiments/article-study.json and rerun doctor.",
+        )
+
+    routes = tuple(route for route in design.tool_routes.values() if route.tool_id != "spathi")
+    loaded: dict[str, tuple[dict[str, Any] | None, tuple[str, ...], Path]] = {}
+    route_results: list[dict[str, Any]] = []
+
+    for route in routes:
+        toolspec_path = catalog_root / route.tool_id / "toolspec.json"
+        if route.tool_id not in loaded:
+            specification: dict[str, Any] | None = None
+            specification_issues: list[str] = []
+            if not toolspec_path.is_file():
+                specification_issues.append(f"ToolSpec is missing: {toolspec_path}")
+            else:
+                try:
+                    raw = json.loads(toolspec_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    specification_issues.append(
+                        f"ToolSpec is not valid JSON: {type(exc).__name__}: {exc}"
+                    )
+                else:
+                    if not isinstance(raw, dict):
+                        specification_issues.append("ToolSpec JSON root must be an object")
+                    else:
+                        specification = raw
+            loaded[route.tool_id] = (
+                specification,
+                tuple(specification_issues),
+                toolspec_path,
+            )
+
+        toolspec, specification_issues, toolspec_path = loaded[route.tool_id]
+        issues = list(specification_issues)
+        if toolspec is not None:
+            if toolspec.get("id") != route.tool_id:
+                issues.append(f"ToolSpec id is {toolspec.get('id')!r}, expected {route.tool_id!r}")
+
+            capabilities = toolspec.get("execution_capabilities")
+            if not (
+                isinstance(capabilities, list)
+                and all(isinstance(value, str) and value for value in capabilities)
+            ):
+                issues.append("execution_capabilities must be a list of non-empty strings")
+            elif route.delivery not in capabilities:
+                issues.append(f"delivery {route.delivery!r} is not in execution_capabilities")
+
+            parameters = toolspec.get("params")
+            if not isinstance(parameters, dict):
+                issues.append("params must be an object")
+            else:
+                undeclared = sorted(set(route.parameters) - set(parameters))
+                if undeclared:
+                    issues.append(
+                        "route parameters are not declared in params: " + ", ".join(undeclared)
+                    )
+                if route.seed_parameter is not None and route.seed_parameter not in parameters:
+                    issues.append(
+                        f"seed_parameter {route.seed_parameter!r} is not declared in params"
+                    )
+
+            extra_inputs = toolspec.get("extra_inputs")
+            declared_inputs: set[str] = set()
+            if not isinstance(extra_inputs, dict):
+                issues.append("extra_inputs must be an object")
+            else:
+                for field in ("required", "optional", "conditional_required"):
+                    entries = extra_inputs.get(field, [])
+                    if not isinstance(entries, list):
+                        issues.append(f"extra_inputs.{field} must be a list")
+                        continue
+                    for index, entry in enumerate(entries):
+                        if not isinstance(entry, dict) or not isinstance(entry.get("input"), str):
+                            issues.append(
+                                f"extra_inputs.{field}[{index}] must declare a string input"
+                            )
+                            continue
+                        declared_inputs.add(entry["input"])
+                missing_inputs = sorted(set(route.inputs) - {"expression"} - declared_inputs)
+                if missing_inputs:
+                    issues.append(
+                        "route inputs are absent from extra_inputs: " + ", ".join(missing_inputs)
+                    )
+
+            threading = toolspec.get("runtime_resources")
+            threading = threading.get("threading") if isinstance(threading, dict) else None
+            if not isinstance(threading, dict) or "max_threads" not in threading:
+                issues.append("runtime_resources.threading.max_threads is missing")
+            else:
+                catalog_max_threads = threading["max_threads"]
+                valid_max_threads = catalog_max_threads is None or (
+                    isinstance(catalog_max_threads, int)
+                    and not isinstance(catalog_max_threads, bool)
+                    and catalog_max_threads >= 1
+                )
+                if not valid_max_threads:
+                    issues.append(
+                        "runtime_resources.threading.max_threads must be null or a positive integer"
+                    )
+                elif route.max_threads != catalog_max_threads:
+                    issues.append(
+                        f"max_threads is {route.max_threads!r}, but the ToolSpec declares "
+                        f"{catalog_max_threads!r}"
+                    )
+
+            outputs = toolspec.get("outputs")
+            if not isinstance(outputs, dict):
+                issues.append("outputs must be an object")
+            else:
+                directed = outputs.get("directed")
+                sign = outputs.get("sign")
+                if not isinstance(directed, bool):
+                    issues.append("outputs.directed must be boolean")
+                elif (
+                    route.output_semantics in {"directed_tf_to_target", "directed_all_gene"}
+                    and not directed
+                ):
+                    issues.append(
+                        f"output_semantics {route.output_semantics!r} requires directed=true"
+                    )
+                elif route.output_semantics == "undirected_topology" and directed:
+                    issues.append("output_semantics 'undirected_topology' requires directed=false")
+                if not isinstance(sign, str) or not sign:
+                    issues.append("outputs.sign must be a non-empty string")
+
+        route_results.append(
+            {
+                "route_id": route.id,
+                "tool_id": route.tool_id,
+                "toolspec": str(toolspec_path),
+                "status": "fail" if issues else "pass",
+                "issues": issues,
+            }
+        )
+
+    failed = [result for result in route_results if result["status"] == "fail"]
+    details = {
+        "design": str(design_path),
+        "catalog": str(catalog_root),
+        "external_routes_checked": len(route_results),
+        "tools_checked": sorted(loaded),
+        "routes": route_results,
+    }
+    if failed:
+        return _check(
+            "andrea_catalog_contract",
+            "fail",
+            f"ANDREA catalog drift affects {len(failed)} external article route(s)",
+            details=details,
+            remediation=(
+                "Align experiments/article-study.json with the current ANDREA ToolSpecs "
+                "before starting or resuming the study."
+            ),
+        )
+    return _check(
+        "andrea_catalog_contract",
+        "pass",
+        f"All {len(route_results)} external article routes match the ANDREA catalog",
+        details=details,
+    )
+
+
+def _git_state(
+    repositories: Sequence[tuple[str, Path]],
+    *,
+    runner: CommandRunner,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    states: dict[str, Any] = {}
+    dirty: list[str] = []
+    unavailable: list[str] = []
+    for name, repository in repositories:
+        path = repository.resolve()
+        head_command = ["git", "-C", str(path), "rev-parse", "HEAD"]
+        status_command = [
+            "git",
+            "-C",
+            str(path),
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+        ]
+        head = _run(head_command, runner=runner, timeout_seconds=timeout_seconds)
+        status = _run(status_command, runner=runner, timeout_seconds=timeout_seconds)
+        if (
+            isinstance(head, Exception)
+            or head.returncode != 0
+            or isinstance(status, Exception)
+            or status.returncode != 0
+        ):
+            states[name] = {"available": False, "path": str(path)}
+            unavailable.append(name)
+            continue
+        changes = [line for line in (status.stdout or "").splitlines() if line]
+        states[name] = {
+            "available": True,
+            "path": str(path),
+            "commit": (head.stdout or "").strip(),
+            "dirty": bool(changes),
+            "changed_paths": len(changes),
+        }
+        if changes:
+            dirty.append(name)
+    if dirty or unavailable:
+        facts = []
+        if dirty:
+            facts.append("dirty: " + ", ".join(dirty))
+        if unavailable:
+            facts.append("Git metadata unavailable: " + ", ".join(unavailable))
+        return _check(
+            "source_provenance",
+            "warn",
+            "; ".join(facts),
+            details={"repositories": states},
+            remediation=(
+                "Results remain runnable and record source identities; review mixed or "
+                "uncommitted revisions before publication."
+            ),
+        )
+    return _check(
+        "source_provenance",
+        "pass",
+        "Source revisions are identifiable and worktrees are clean",
+        details={"repositories": states},
+    )
+
+
+def _disk_check(repo_root: Path, reader: DiskUsageReader) -> dict[str, Any]:
+    try:
+        usage = reader(repo_root.resolve())
+        total = int(usage.total)
+        free = int(usage.free)
+    except (OSError, TypeError, ValueError, AttributeError) as exc:
+        return _check(
+            "disk_space",
+            "fail",
+            f"Cannot determine available disk space: {exc}",
+            remediation="Mount a writable filesystem and rerun doctor.",
+        )
+    details = {
+        "path": str(repo_root.resolve()),
+        "total_bytes": total,
+        "free_bytes": free,
+        "free_gib": round(free / _GIB, 2),
+    }
+    if free < _DISK_FAIL_BYTES:
+        return _check(
+            "disk_space",
+            "fail",
+            "Less than 5 GiB of disk space is available",
+            details=details,
+            remediation="Free disk space before executing any benchmark profile.",
+        )
+    if free < _DISK_WARN_BYTES:
+        return _check(
+            "disk_space",
+            "warn",
+            "Disk space is sufficient for smoke but may be insufficient for reduced/full",
+            details=details,
+            remediation="Use a filesystem with at least 100 GiB free for article runs.",
+        )
+    return _check(
+        "disk_space",
+        "pass",
+        "Disk capacity is suitable for benchmark execution",
+        details=details,
     )
 
 
 def write_doctor_report(report: dict[str, Any], path: Path) -> Path:
-    """Atomically write a doctor report as UTF-8 JSON."""
+    """Write the explicitly requested diagnostic report."""
 
-    target = path.resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
     )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(report, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-        os.replace(temporary, target)
-    except Exception:
-        temporary.unlink(missing_ok=True)
-        raise
-    return target
+    return destination
 
 
 def run_doctor(
     *,
+    repo_root: Path,
     andrea_repo: Path,
     spathi_repo: Path,
-    repo_root: Path | None = None,
     python_executable: str | None = None,
     python_version: Sequence[int] | None = None,
     report_path: Path | None = None,
     runner: CommandRunner | None = None,
     resolver: ExecutableResolver | None = None,
-    timeout_seconds: float = 15.0,
+    disk_usage: DiskUsageReader | None = None,
+    timeout_seconds: float = 20.0,
 ) -> dict[str, Any]:
-    """Run all read-only environment checks and optionally persist their report.
-
-    ``runner``, ``resolver`` and ``python_version`` are injectable so callers can
-    test diagnostics without invoking host commands.
-    """
+    """Inspect prerequisites without installing, building, or changing sources."""
 
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be greater than zero")
+    root = Path(repo_root).resolve()
+    current_python = python_executable or sys.executable
+    version = tuple(python_version or sys.version_info[:3])
     command_runner = runner or subprocess.run
     executable_resolver = resolver or shutil.which
-    selected_python = python_executable or sys.executable
-    detected_version = tuple(python_version or sys.version_info[:3])
+    disk_reader = disk_usage or shutil.disk_usage
 
-    if detected_version >= (3, 11):
-        python_check = _passed(
+    if version >= (3, 11):
+        python_check = _check(
             "python_version",
+            "pass",
             "Python version is supported",
             details={
-                "detected": ".".join(map(str, detected_version)),
+                "detected": ".".join(map(str, version)),
                 "minimum": "3.11",
-                "executable": selected_python,
+                "executable": current_python,
             },
         )
     else:
-        python_check = _failed(
+        python_check = _check(
             "python_version",
-            f"Python 3.11 or newer is required; found {'.'.join(map(str, detected_version))}",
-            details={"detected": list(detected_version), "minimum": [3, 11]},
+            "fail",
+            f"Python 3.11 or newer is required; found {'.'.join(map(str, version))}",
             remediation="Run SPATHI-benchmarks in a Python 3.11+ environment.",
         )
 
-    andrea_repository = _repository_check("andrea_repository", "ANDREA", Path(andrea_repo))
-    spathi_repository = _repository_check("spathi_repository", "SPATHI", Path(spathi_repo))
-    checks = [python_check, andrea_repository, spathi_repository]
+    repositories = (
+        _Repository("ANDREA", Path(andrea_repo), "", "andrea"),
+        _Repository("SPATHI", Path(spathi_repo), "src", "spathi"),
+    )
+    repository_checks = [_repository_check(repository) for repository in repositories]
+    checks = [python_check, *repository_checks]
     checks.extend(
         _docker_checks(
             resolver=executable_resolver,
@@ -637,47 +614,39 @@ def run_doctor(
             timeout_seconds=timeout_seconds,
         )
     )
-    checks.append(
-        _andrea_cli_check(
-            Path(andrea_repo),
-            selected_python,
-            runner=command_runner,
-            timeout_seconds=timeout_seconds,
-        )
-    )
-    checks.append(
-        _andrea_import_check(
-            Path(andrea_repo),
-            selected_python,
-            repository_available=andrea_repository["status"] == "pass",
-            runner=command_runner,
-            timeout_seconds=timeout_seconds,
-        )
-    )
-    checks.append(
-        _spathi_api_check(
-            Path(spathi_repo),
-            selected_python,
-            repository_available=spathi_repository["status"] == "pass",
-            runner=command_runner,
-            timeout_seconds=timeout_seconds,
-        )
-    )
-    if repo_root is not None:
+    for repository, available in zip(repositories, repository_checks, strict=True):
         checks.append(
-            _benchmark_contract_check(
-                Path(repo_root),
-                Path(andrea_repo),
-                Path(spathi_repo),
+            _import_check(
+                repository,
+                python_executable=current_python,
+                repository_available=available["status"] == "pass",
+                runner=command_runner,
+                timeout_seconds=timeout_seconds,
             )
         )
+    checks.extend(
+        (
+            _design_check(root),
+            _catalog_contract_check(root, Path(andrea_repo)),
+            _git_state(
+                (
+                    ("benchmark", root),
+                    ("andrea", Path(andrea_repo)),
+                    ("spathi", Path(spathi_repo)),
+                ),
+                runner=command_runner,
+                timeout_seconds=timeout_seconds,
+            ),
+            _disk_check(root, disk_reader),
+        )
+    )
 
     counts = {
         status: sum(check["status"] == status for check in checks)
-        for status in ("pass", "fail", "skip")
+        for status in ("pass", "warn", "fail")
     }
     report: dict[str, Any] = {
-        "schema_version": "1.0",
+        "schema_version": 1,
         "ok": counts["fail"] == 0,
         "summary": counts,
         "checks": checks,

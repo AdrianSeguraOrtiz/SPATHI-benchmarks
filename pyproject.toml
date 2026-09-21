@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "spathi-bench"
 version = "0.1.0"
-description = "Reproducible ANDREA benchmarks for SPATHI"
+description = "Reproducible three-phase article study for SPATHI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -13,7 +13,6 @@ license-files = ["LICENSE"]
 authors = [{ name = "Adrián Segura" }]
 dependencies = [
   "jinja2>=3.1,<4",
-  "jsonschema>=4.23,<5",
   "numpy>=2.0,<3",
   "plotly>=6,<7",
 ]
