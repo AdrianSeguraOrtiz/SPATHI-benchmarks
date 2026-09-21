@@ -1,13 +1,25 @@
-# SPATHI benchmarks
+# SPATHI article benchmark
 
-Reproducible synthetic experiments for calibrating SPATHI,
-comparing the frozen method with ANDREA catalog tools, and measuring scale and runtime.
-SPATHI implements the method; ANDREA provides simulation, inference and evaluation contracts;
-this repository defines the experiment and owns its orchestration and reports.
+This repository defines and runs the reproducible synthetic study used to select a SPATHI
+configuration, compare the selected method with other network-inference tools, and measure
+computational scalability. SPATHI contains the method itself; ANDREA provides the simulator,
+inference, evaluation, and resource-outcome contracts; this repository owns the experimental
+design, orchestration, statistical analysis, and portable reports.
 
-## Install once
+There is one workflow and exactly three scientific phases:
 
-Keep the three checkouts together:
+1. **Calibration** selects one SPATHI configuration without privileging a reference candidate.
+2. **Comparison** measures held-out accuracy inside formally defined competitor families.
+3. **Scalability** measures runtime, memory, parallel scaling, and the feasibility frontier.
+
+The single source of truth is
+[`experiments/article-study.json`](experiments/article-study.json). All generated datasets are
+synthetic. Application datasets, annotations, identifiers, and derived results do not belong in
+this repository.
+
+## Installation
+
+Keep the three checkouts next to one another:
 
 ```text
 workspace/
@@ -16,402 +28,290 @@ workspace/
 └── SPATHI-benchmarks/
 ```
 
-From `SPATHI-benchmarks`:
+Then install the editable projects into one environment:
 
 ```bash
+cd SPATHI-benchmarks
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -c constraints/benchmark.txt -e ../ANDREA -e ../SPATHI -e '.[dev]'
+.venv/bin/python -m pip install \
+  -c constraints/benchmark.txt \
+  -e ../ANDREA \
+  -e ../SPATHI \
+  -e '.[dev]'
 .venv/bin/spathi-bench doctor
 ```
 
-The benchmark executable discovers this checkout and the sibling repositories. No environment
-exports or shell wrappers are needed. All examples below use `.venv/bin/spathi-bench`; after
-activating the environment, `spathi-bench` is equivalent. ANDREA runs in this environment and
-inference tools run in Docker. Installing SPATHI here also supplies the dependencies needed for
-local qualification on a fresh machine. Qualification uses a sibling project's `.venv` when one
-exists; otherwise it uses this interpreter. The Docker SPATHI image is built from the exact source
-revision pinned by the study's image contract and the committed adapter. Docker, permission to
-access its daemon, and Buildx must be available.
+`doctor` is read-only. It checks Python, Docker, disk space, both sibling checkouts, the article
+design, the imports needed by the workflow, and every external route against the current ANDREA
+ToolSpec catalog. Catalog drift in delivery mode, declared inputs or parameters, seed parameter,
+thread cap, or directedness fails before a study starts. The command does not install, build, or
+execute anything. Use `doctor --json` for machine-readable output.
 
-`doctor` checks prerequisites, repository and image contracts, and committed experimental inputs.
-It does not install software, build images or run experiments. Use `doctor --json` for complete
-diagnostic details. `repos.lock.json`, `images.lock.json` and `constraints/benchmark.txt` describe
-the intended software environment. Keep scientific inputs committed before starting a new study.
+## One command to run, one ID to resume
 
-## Run, resume and inspect
+Start a study with a stable identifier:
 
 ```bash
-.venv/bin/spathi-bench qualify
-.venv/bin/spathi-bench run smoke --id first-smoke
-.venv/bin/spathi-bench plan reduced
-.venv/bin/spathi-bench run reduced --id pilot
+.venv/bin/spathi-bench run --profile smoke   --id smoke-1
+.venv/bin/spathi-bench run --profile reduced --id reduced-1
+.venv/bin/spathi-bench run --profile full    --id article-full-1
 ```
 
-`qualify` verifies local scientific contracts using real SPATHI output and ANDREA evaluation on
-small known inputs. It covers diagnostic interpretation and independent metric agreement.
-`smoke` exercises Docker simulation, both inference adapters, integration, evaluation and exports.
-Neither has statistical power, and the simple smoke is not a physical execution of all five
-scientific phases. New reduced/full studies run the local contract qualification before proceeding.
-
-One ID identifies the entire study, including all phases. If omitted, a new ID is generated and
-printed. A new `run` with no profile uses `reduced`. An existing ID resumes its saved profile:
+Resume the same study after interruption with:
 
 ```bash
-.venv/bin/spathi-bench run --id pilot
+.venv/bin/spathi-bench run --id reduced-1
+```
+
+The study ID identifies its immutable scientific design, frozen machine-resource budget, SQLite
+journal, and content-addressed artifacts. Completed tasks are reused only when their scientific
+request, dependency evidence, and executor contract are unchanged. A Git revision change is
+recorded in provenance and reported as a warning; it does not by itself discard valid results.
+If a planned scientific request or explicit executor contract changes, that task and its
+dependants are invalidated and recomputed. Any incompatible implementation change must therefore
+bump the explicit executor/workflow contract in the same commit; those contracts are propagated
+through every task and artifact identity. A source-only revision change remains resumable by
+design, is retained per attempt, and must be reviewed as mixed-revision provenance before
+publication.
+Each planned task is also bound to the SHA-256 identity and declared Docker image of every ANDREA
+ToolSpec or SimulatorSpec it consumes. Changing a catalog definition while retaining the same
+image tag therefore invalidates exactly the affected task branch. The executor checks the binding
+again when the task starts, so an edit made after planning cannot enter an attempt unnoticed.
+This makes compatible orchestration or reporting fixes resumable across commits without silently
+mixing incompatible evidence. A change that adds, removes, or rewires tasks changes the frozen DAG
+fingerprint and requires a new study ID.
+
+Useful read-only commands are:
+
+```bash
+# Inspect the deterministic DAG and detected capacity without running it.
+.venv/bin/spathi-bench plan --profile reduced
+.venv/bin/spathi-bench plan --profile reduced --json
+
+# List all studies or inspect one study.
 .venv/bin/spathi-bench status
-.venv/bin/spathi-bench status pilot
-.venv/bin/spathi-bench report pilot
+.venv/bin/spathi-bench status --id reduced-1
+.venv/bin/spathi-bench status --id reduced-1 --json
+
+# Rebuild every portable report from journalled evidence; no inference is repeated.
+.venv/bin/spathi-bench report --id reduced-1
 ```
 
-IDs have 1–96 characters: lowercase letters, digits, hyphens or underscores, starting with a
-letter or digit. Examples: `pilot`, `reduced-sep12`, `article_full_01`.
-
-`status` lists studies; `status ID` shows phase progress and failures. `report ID` rebuilds the
-study entry page and recovers missing phase reports from saved evidence, without rerunning inference
-or selecting another configuration. Published phase bundles are immutable: recovering them requires
-the same renderer; this command does not overwrite earlier plots with a different rendering revision.
-Add `--json` to `status` or `plan` for structured details.
-
-The study journal carries the upstream calibration identity internally. There is no
-need to find a calibration ID, delete other studies, or remember which phase failed. A completed
-phase remains associated with its original software and inputs. Resuming after a commit change
-emits and records a warning and allows continuation under the same study ID; it does not rewrite
-the provenance of prior results. The experimental settings, seeds, dataset contracts,
-`repos.lock.json`, `images.lock.json` and host dependency constraints remain frozen for that ID;
-changing these normally requires a new study. The explicit pending-generation repair below is a
-narrow exception; it cannot replace already generated data. Hash and artifact-integrity checks still apply. For a
-publication run, freeze the software first or explicitly disclose any mixed-revision continuation.
-
-Calibration rankings retain each stage's recorded benchmark revision. A resumed chain may span
-revisions and emits a warning, including when its frozen selection is validated later outside
-a live resume. Equal benchmark commit IDs are not a substitute for scientific validation: parent
-hashes, search design, algorithm seeds, SPATHI build identity, scores and candidate transitions
-must still reconcile. Existing ranking files are never relabelled with the current commit.
-
-### Correct a failed simulator request without discarding the study
-
-Ordinary `run --id` never changes frozen scientific inputs. If a committed correction changes
-simulator parameters **before that request has published any dataset**, stop the study and apply
-an explicit, documented amendment:
+The workflow detects usable CPU affinity/cgroup quota and available/cgroup-limited RAM. Optional
+ceilings make a run coexist with other jobs:
 
 ```bash
-.venv/bin/spathi-bench amend-inputs pilot --reason "Correct an unsupported simulator integration step"
-.venv/bin/spathi-bench run --id pilot
+.venv/bin/spathi-bench run \
+  --profile reduced \
+  --id shared-reduced \
+  --max-cpus 24 \
+  --max-memory-gb 128
 ```
 
-With PM2, first `pm2 stop PROCESS_NAME`, run `amend-inputs`, and then `pm2 restart PROCESS_NAME`
-if its saved command already runs this study ID. The amendment does not launch simulations or
-inference: it checks completed phase receipts and frozen inputs, rejects changes to published
-datasets, refreshes only affected simulation plans, and preserves the prior requests, manifests,
-plans and journal in `work/studies/ID/amendments/`. Its reason and before/after checksums are
-recorded in the study journal and its warning appears in the study report. If interrupted while
-applying an amendment, repeat the same `amend-inputs` command before resuming.
+Parallel-safe calibration and comparison tasks share the declared capacity. Formal scalability
+measurements run in isolation so wall time and peak memory remain attributable. Each tool receives
+its declared thread budget; the scheduler never oversubscribes the frozen study capacity.
+External simulator generation uses the largest CPU/RAM tier measured by ANDREA that fits the host
+(RAM: 8, 16, or 32 GiB; parallel simulator CPUs: 1, 2, 4, or 8). Hosts with less than 8 GiB of
+available benchmark memory are rejected before launching a simulator. The chunked in-repository
+scalability generator uses a separate memmap-aware estimate. Generation therefore participates
+honestly in the rolling admission policy instead of being treated as negligible work.
 
-Only parameters in existing simulator-run requests may change: seeds, run identities, replicate
-counts, scenarios, selection settings, resource policies and image locks remain protected. An
-accompanying update of the ANDREA commit in `repos.lock.json` and the catalog matrix is accepted
-only when it matches the observed clean ANDREA checkout; previous frozen locks and cached
-artifact identities are retained. This is an explicit mixed-revision correction, not permission
-to retune a benchmark after observing its results. Amendments to a published dataset or a completed
-generation phase require a new study instead.
+## Profiles
 
-A checkout advancing does not silently upgrade the study's SPATHI container. The image contract
-still requests its exact locked source revision, even if the checkout HEAD is newer; the build
-extracts that revision and records the concrete image identity. Local qualification checks the
-observed local SPATHI source, so its revision is recorded separately. Update the declared image
-contract and start a new study when the intention is to benchmark a changed scientific method.
-The pinned source commit must still exist in the local Git checkout for an image rebuild. The
-study index lists checkout revisions per invocation; each inference artifact's image identity
-records the software actually executed in its container.
+The three profiles use the same code paths and scientific contracts. They differ only in coverage
+and replication.
 
-A new ID creates a separate study directory and its own artifact store. Reuse happens within that
-study when its ID is resumed. To repeat the entire experiment from the beginning, choose a new ID;
-there is no need to delete other studies. Deleting a study directory discards both its evidence
-and its reusable computation. Keep it until the desired reports and analysis archives have been saved.
-Older phase-oriented directories under `work/v1/` are not automatically adopted or migrated into
-the named-study interface. Their existing reports remain available at their original paths;
-the new workflow starts in `work/studies/<id>/` and does not interpret old phase IDs as study IDs.
+| Profile | Calibration | Held-out comparison | Scalability | Intended use and qualitative duration |
+| --- | --- | --- | --- | --- |
+| `smoke` | C1 only; 1 development and 1 validation replicate; 31 fits | T1, 1 replicate | P-S; 1 ladder replicate; 1 and standard-thread points | Contract and installation check; minutes to a few hours, depending on image builds |
+| `reduced` | C1–C5; 1 development and 1 validation replicate; 155 fits | T1–T6, I1, I2; 1 replicate each | P-S through P-XL; 1 ladder replicate; P-M at 1, standard, and all threads; 1-hour task limit | Development-grade end-to-end evidence; normally hours to roughly a day on a capable many-core host |
+| `full` | C1–C5; 2 development and 2 validation replicates; 390 fits | 24 independent instances: three replicates of each T1–T6, I1, and I2 scenario | P-S through P-XL; 3 ladder and 3 P-M thread-scaling replicates; 4-hour task limit | Publication study; multiple days, with a target envelope of about one week on a large server |
 
-The machine is detected automatically, including CPU affinity/cgroup limits, topology and RAM.
-Optional ceilings are useful on shared hosts:
+Durations are planning ranges, not promises. They include simulator and container startup costs and
+depend on which external tools reach their time or memory boundaries. `plan` records the exact DAG
+and capacity for the current machine before execution. Per-physical-task limits are 30 minutes in
+smoke, 1 hour in reduced, and—only in full—2 hours for comparison and 4 hours for scalability.
 
-```bash
-.venv/bin/spathi-bench run reduced --id shared-host --cores 16 --ram-gb 64
-```
+## Phase 1 — calibration
 
-These ceilings are total study capacity, not a promise that every individual tool will use that
-many threads. The resource plan gives each task its quota and records actual usage. Calibration
-and accuracy-only repetitions can share the machine; designated timing measurements run alone.
-The frozen execution policy also caps each physical inference task: 30 minutes for smoke,
-four hours for calibration, comparison and formal performance, and 24 hours for
-dimensional-transfer and scalability (the reduced scalability boundary is 12 hours).
-This is separate from the five-minute planner limit. In `group_emulated` delivery, each
-group is a separate physical task, so the cap is **per group**, not a cap on the
-whole logical method/dataset combination. Formal performance retains attributable
-timeouts as failed measurements. Calibration and the primary accuracy comparison
-stop on a timeout instead of silently removing a method from a paired comparison.
-`--project PATH`, `--andrea PATH` and `--spathi PATH` are optional overrides for unusual layouts.
-Output stays in the project's ignored `work/` tree.
+Calibration tests a finite, predeclared 27-candidate design. Every candidate has the same status,
+development data, seed budget, and advancement rule; there is no reference configuration and no
+candidate receives protected treatment.
 
-For PM2, give the process the same stable study ID so an ordinary restart resumes it:
+| Condition | Simulator and property | Cells | Genes | TFs | Groups |
+| --- | --- | ---: | ---: | ---: | ---: |
+| C1 | dyngen, linear and clean | 300 | 100 | 10 | 4 |
+| C2 | dyngen, branching, elevated kinetic noise | 600 | 400 | 40 | 7 |
+| C3 | scMultiSim, dynamic and balanced | 300 | 100 | 10 | 3 |
+| C4 | scMultiSim, dynamic and imbalanced | 800 | 400 | 40 | 3 |
+| C5 | scMultiSim, 50% regulator fraction | 600 | 600 | 300 | 3 |
 
-```bash
-pm2 start .venv/bin/spathi-bench --name spathi-pilot --interpreter none \
-  --no-autorestart --time -- run reduced --id pilot
-pm2 logs spathi-pilot --lines 100
-```
+These are prospective design dimensions. scMultiSim, SERGIO, BoolODE and the benchmark-owned
+scale generator must reproduce their declared dimensions exactly. dyngen may add transcription
+factors required by its backbone; for dyngen only, cells and groups remain exact while the observed
+TF and gene expansion is validated against the requested target and housekeeping counts. Every
+report shows the observed dimensions and any accepted requested-to-observed deviation.
 
-After pulling a compatible orchestration fix into the editable checkout:
+All calibration conditions contain multiple biological groups. Single-group data require a
+different SPATHI weighting contract, so they cannot fairly select the policy later frozen for the
+multi-group comparison and are deliberately outside this study. C5 keeps half of all genes as
+candidate regulators while bounding the 27-way screening cost; it tests regulator-density stress,
+not the large-matrix boundary reserved for scalability.
 
-```bash
-pm2 restart spathi-pilot
-```
+The 27 candidates form a deterministic, balanced pairwise covering array. Every declared value
+appears, marginal level counts differ by at most one, and every two-parameter value combination
+appears at least once. This supports main-effect and two-factor screening without pretending to be
+the astronomically larger full factorial. It covers:
 
-The saved command already contains the complete workflow and its ID. Do not keep a previous PM2
-process pointing at a phase-specific command. A changed dependency constraint still requires the
-installation command above to be rerun.
+- weighting mode, PCA or expression distance space, 20/50/100 components, and optional distance
+  standardisation;
+- cosine or Euclidean distance, Gaussian or exponential kernel, bandwidth scales 0.5/1/2, and
+  optional group-size correction;
+- Extra-Trees or random forest, `max_features` in `sqrt`/0.25/0.5/1.0, leaf sizes 1/2/5,
+  maximum depths 2/4/8/unlimited, and minimum weighted leaf fractions 0/0.05/0.1/0.2.
 
-## The five scientific phases
+The remaining model fields are declared, not silently ignored. `bandwidth=auto` defines the
+data-adaptive bandwidth and `bandwidth_scale` is the calibrated control; `pca_svd_solver=auto`
+selects the numerically appropriate solver; and `bootstrap=null` preserves the canonical choice of
+the selected tree family. Threads, backend, seed and report generation are operational controls.
+No target list is supplied because the study models the usual unknown-target setting, and no
+centroid-confidence weights are used because the synthetic generators do not emit an independent,
+biologically meaningful annotation-confidence measurement.
 
-| Phase | Purpose and frozen output | `reduced` | `full` |
-| --- | --- | --- | --- |
-| 1. Calibration | Select an exact conditional SPATHI policy by directed AUPR; write `selected-config.json` | 8 ordinary development + 1 high-TF development + 8 independent validation datasets; 431 physical fits / 527 logical results | 24 + 3 + 24 datasets; 1,762 physical fits / 2,482 logical results |
-| 2. Dimensional transfer | Inspect frozen-policy accuracy across dimensions and routing controls, without tuning | 4 moderate/control datasets, 1 seed; no scale contrasts | 9 datasets across 7 conditions, 1 seed; 3 descriptive one-axis contrasts |
-| 3. Held-out comparison | Compare frozen SPATHI with catalog defaults on independent test data | 10 datasets; descriptive paired scores and ranks | 60 datasets: 40 dynamic + 20 invariant controls; predeclared confirmatory and exploratory families |
-| 4. Scalability | Measure SPATHI feasibility across a public synthetic stress grid | 2 shapes; 64-target scout before possible all-target fit | 7 shapes; 128-target scout before possible all-target fit |
-| 5. Performance | Measure isolated software cost and parallel scaling | 4 methods × 1 dataset × 1/8 threads; 8 measured runs + 8 warm-ups | 6 methods × 2 datasets × 1/2/4/8 threads × 3 repetitions; 144 measured runs + 48 warm-ups |
+All 27 candidates first receive 50 trees on development data. The same declared primary metric and
+tie-breakers advance four candidates. Those four are fitted once to 250 trees on independent
+validation data and scored at exact 25/50/100/250-tree prefixes. The winner is chosen by directed
+AUPR, a predeclared 2% practical-equivalence band, then between-dataset stability and declared tree
+count. All four prefixes come from one shared 250-tree physical fit, so the workflow records that
+batch cost once and does not invent a per-prefix runtime. This is a deterministic selection rule,
+not a statistical non-inferiority test. Operational settings such as thread count and random seed
+are controlled by the study rather than tuned.
 
-`reduced` is for development and inspection: it has no inferential winner claim, bootstrap interval
-or hypothesis-test decision. `full` is the publication budget, with inference only where
-the committed design permits it. Reduced and full use independent generation and algorithm seeds;
-one is not a prefix of the other's data. Do not combine their results into a single analysis.
+The calibration report shows candidate score distributions, the accuracy–cost plane,
+dataset-level consistency, every parameter vector, the recorded advancement/selection decisions,
+and exceptions.
 
-The source of truth is [experiments/v1/design.md](experiments/v1/design.md), with executable
-contracts in [experiments/v1/profiles](experiments/v1/profiles), the
-[seed ledger](experiments/v1/seeds/seed-plan.json), and the phase-specific files linked below.
-Times depend strongly on the selected forest, host, Docker images and simulator workloads.
-`plan` describes scheduled work and available resource evidence; a reduced run completing within
-one day remains an estimate until that exact environment and design have been measured end to end.
+## Phase 2 — held-out comparison
 
-### Calibration: which SPATHI configurations compete?
+The selected SPATHI policy is frozen before any comparison dataset is evaluated.
 
-The ordinary development and validation panels contain four dyngen conditions and four scMultiSim
-conditions. Dyngen requests linear baseline (200 cells), linear noisy (500), bifurcating baseline
-(300) and bifurcating noisy (400), with 10 requested TFs and respectively 50/90/70/80 target genes
-and 10/30/20/10 housekeeping genes. Realized dimensions and group counts come from the simulator
-manifest. scMultiSim supplies 80-gene/300-cell dynamic, imbalanced and single-group cases, plus a
-400-gene/600-cell case. Its high-TF development panel has 2,200 genes, 1,000 TFs and 300 cells.
+| Dataset | Simulator and role | Cells | Genes | TFs | Groups |
+| --- | --- | ---: | ---: | ---: | ---: |
+| T1 | dyngen linear, clean | 300 | 100 | 10 | 4 |
+| T2 | dyngen linear, noisy | 600 | 400 | 40 | 4 |
+| T3 | dyngen branching, clean | 600 | 400 | 40 | 7 |
+| T4 | dyngen branching, elevated kinetic noise | 800 | 400 | 40 | 7 |
+| T5 | scMultiSim dynamic, balanced | 1,000 | 1,000 | 100 | 3 |
+| T6 | scMultiSim dynamic, larger | 3,000 | 3,000 | 500 | 3 |
+| I1 | SERGIO invariant-network control | 360 | 100 | 10 | 9 |
+| I2 | BoolODE invariant-network control | 300 | 19 | 18 | 3 |
 
-The [bounded search](experiments/v1/spathi/search-space.json) advances candidates through:
+Competitors use the defaults of their corresponding ANDREA catalog integrations. Only seeds,
+threads, delivery mode, and explicitly stated no-prior/information-contract switches are supplied;
+no competitor is tuned on study outcomes.
 
-| Stage | Predeclared choices |
-| --- | --- |
-| Geometry | 16 initial configurations spanning PCA/full-expression distance; 20/50/100 PCA components; auto/full/randomized SVD; none/standard scaling; cosine/Euclidean distance; Gaussian/exponential kernel; bandwidth scale 0.5/1/2; cell-distance, group-distance and cell-distance-group-anchored weighting; none/cap-to-target group correction |
-| Estimator | Up to 3 geometries × 12 forest choices: Extra-Trees/random forest; `max_features` = integer `1`, `sqrt`, `log2`, fraction `0.25`, `0.5`, `1.0`; leaf size 1/2/5; unlimited/20 depth; valid bootstrap choices |
-| Interaction | Up to 3 finalists × 6 explicitly crossed forest/regularization settings |
-| High-TF transfer | Up to 3 finalists × all 6 `max_features` rules on the independent 1,000-TF panel; outcome-blind 256-target scout, then all targets |
-| Convergence | Up to 2 finalists × 250/500/750/1,000 trees, obtained as exact prefixes of one 1,000-tree fit per dataset and seed |
-| Validation | Choose one of the two finalists on independent validation data |
-
-This is a finite, constrained design, not an exhaustive Cartesian product and not a claim to test
-every value of continuous parameters. Every public SPATHI parameter is accounted for in
-[parameter-accountability.json](experiments/v1/spathi/parameter-accountability.json).
-Integer `max_features=1` means one candidate per split; float `1.0` means all predictors.
-
-The objective averages groups within a dataset, then algorithm seeds, then datasets. Ties use
-stability, declared simplicity and canonical configuration ID. Runtime does not select calibration
-parameters. Reduced uses one scout and one confirmation seed and two convergence/validation seeds;
-full uses one scout, two confirmation seeds and five convergence/validation seeds.
-
-Calibration uses every requested target and fixed-size forests, with `bandwidth=auto`.
-Annotation-confidence weights and application-specific target lists are excluded. A single-group
-dataset follows the frozen cell-distance/Euclidean/no-group-correction branch; all other learned
-parameters are shared. No per-test-dataset tuning is allowed.
-
-### Dimensional transfer: does the frozen policy transfer?
-
-All cases use truth-bearing scMultiSim. Reduced includes `(genes, TFs, cells)` equal to
-`(3000, 100, 300)` and `(100, 10, 300)`, plus the 500-cell single-group and 10/40/250 imbalance
-controls. Full adds `(15000, 100, 300)`, `(3000, 1500, 300)` and `(100, 10, 10000)`; its
-3,000-gene anchor has three replicates, with one at each other condition.
-
-The calibrated policy remains frozen and feeds every downstream phase directly. Full reports
-separate gene-, TF- and cell-axis
-contrasts; the TF contrast also changes regulatory topology and is not a causal isolation of TF
-count. Reduced has no scale contrast. Neither profile contributes these data to the external
-accuracy ranking or uses them for selection.
-
-### Comparison: data and competitors
-
-| Simulator condition | Requested scale | Reduced datasets | Full datasets |
-| --- | --- | ---: | ---: |
-| Dyngen linear baseline/noisy | 200/500 cells; 10 TFs + 50/90 targets + 10/30 housekeeping genes | 1 each | 5 each |
-| Dyngen bifurcating baseline/noisy | 300/400 cells; 10 TFs + 70/80 targets + 20/10 housekeeping genes | 1 each | 5 each |
-| scMultiSim low balanced/high imbalanced rewiring | 80 genes, 240/300 cells; high case has technical noise and a small group | 1 each | 5 each |
-| scMultiSim medium balanced/imbalanced | 400 genes, 600/800 cells | — | 5 each |
-| SERGIO invariant | 100 genes, 9 bins × 40 cells | 1 | 5 |
-| BoolODE invariant clean/dropout | GSD network preset, 300 cells, 3 clusters, integration step 0.01 | 1 each | 5 each |
-| GeneSPIDER2 invariant | 80 genes, 4 perturbation replicates per gene | 1 | 5 |
-
-Dyngen/scMultiSim provide group-specific truth; the remaining simulators are invariant-network
-controls. Simulators may realize dimensions differently from their requests; reports start with
-actual dataset dimensions and identities. Ordinary scMultiSim graph inputs are role-exclusive;
-safety and dimensional-transfer topology contracts impose additional edge-disjointness.
-
-All catalog tools use the locked ANDREA defaults corresponding to their libraries. Seeds and
-input/execution contracts are supplied for reproducibility and a common information set; no
-competitor is tuned against benchmark outcomes. Inclusion and blocked reasons are recorded in the
-[catalog matrix](experiments/v1/inference/catalog-matrix.json).
-
-| Analysis family | `reduced` | `full` |
+| Family | Methods | Why it is separate |
 | --- | --- | --- |
-| Group-only directed accuracy and invariant stability | Frozen SPATHI, GENIE3, GRNBoost2, inferCSN | Same + TIGRESS |
-| Dynamic topology | — | Frozen SPATHI, GENIE3, GRNBoost2, inferCSN, TIGRESS, ARACNe3 |
-| GRNBoost implementation sensitivity | — | Direct GRNBoost2 vs pySCENIC's default GRN step |
-| Order-aware, linear dyngen only | — | Frozen SPATHI vs SimiC |
-| All-gene directed, linear dyngen only | Frozen SPATHI vs MetaSEM | Same + kSReCNI |
-| All-gene topology, linear dyngen only | Frozen SPATHI, CeSpGRN without a prior, CLR, MetaSEM | Same + kSReCNI, LIONESS, PIDC, PPCOR |
+| A · information-matched directed TF-to-target | SPATHI, GENIE3, GRNBoost2, inferCSN, TIGRESS, scMTNI independent/no-prior | All receive expression, groups, and the same TF list, without order, lineage, or prior. This is the primary Friedman plus all-pairs Wilcoxon–Holm family. |
+| B · ordered-state directed | SPATHI, SimiC | SimiC receives valid state order that SPATHI ignores; only datasets with an explicit ordered-state contract enter this secondary family. |
+| C · lineage-aware directed | SPATHI, scMTNI joint-lineage/no-prior | scMTNI receives valid simulator lineage that SPATHI ignores; only datasets with a trustworthy lineage contract enter this separate family. |
+| D · unrestricted-regulator fitting | SPATHI, MetaSEM, kScReNI | MetaSEM and kScReNI fit over all genes whereas SPATHI uses the TF list. All are scored on the same TF-to-target candidate space, but the unequal fitting search space keeps this secondary analysis separate. |
+| E · undirected topology | direction-collapsed SPATHI, PIDC, CLR, PPCOR, ARACNe3, CeSpGRN, LIONESS | Direction is unavailable for every method, so all outputs are direction-collapsed and scored on the same TF-to-target topology candidate space in a separate family. |
 
-Stochastic configurations use three algorithm seeds; deterministic or internally fixed-seed
-methods have one declared execution. All-gene competitors infer over all genes, then ANDREA
-projects their predictions onto the common TF-restricted evaluation space. They remain separate
-from the primary family. inferCSN uses ANDREA `group_emulated`: one independent default core call
-per declared group, with no pseudotime or hidden state windows. V1 has no pseudotime-aware family.
-Prior-assisted tools are catalogued but are not executed as primary competitors.
+Eligibility is derived from each dataset's actual input capabilities. Statistical tests use only
+complete paired blocks inside one family. No method from an information-richer or directionally
+different family is pooled into the primary ranking. The report offers family-specific interactive
+accuracy distributions, paired-score heatmaps, execution coverage, complete audit tables, and all
+failures or exclusions.
 
-Full's confirmatory family is directed AUPR on the 40 dynamic test datasets. Dataset-level
-aggregation prevents cells, groups and algorithm seeds from becoming artificial independent
-replicates. Friedman omnibus tests and paired nonparametric post-hoc tests with Holm correction
-are applied only under their declared contracts. Other metrics/families retain their exploratory
-labels. Reduced shows paired effects and ranks without p-values or winner claims.
+The publication estimand is declared prospectively as an equal mixture of the eight scenarios.
+`full` therefore contributes exactly three independently seeded datasets per scenario; every
+seeded dataset is one paired block, so cheap scenarios receive no extra statistical weight. Within
+each family and metric, only blocks completed by every eligible member enter Friedman and paired
+Wilcoxon–Holm inference. Available-case plots remain descriptive and are labelled as such.
 
-### Scalability: which large matrices?
+## Phase 3 — scalability
 
-The [public synthetic generator](experiments/v1/simulations/scale_stress) produces counts-like
-expression with declared latent structure, noise, dropout, imbalance and rewiring, then applies
-`log1p(10000 * value / full-cell-library-size)`. These are engineering workloads, not a validated
-model of a particular biological cohort.
+Every contract-eligible method starts on the same ordered synthetic ladder:
 
-| Profile/case | Genes | TFs | Cells |
-| --- | ---: | ---: | ---: |
-| Reduced baseline | 5,000 | 250 | 1,000 |
-| Reduced moderate | 10,000 | 500 | 3,000 |
-| Full baseline | 5,000 | 250 | 1,000 |
-| Full cell-heavy | 5,000 | 250 | 10,000 |
-| Full gene-heavy | 25,000 | 250 | 1,000 |
-| Full TF-heavy | 5,000 | 1,500 | 1,000 |
-| Full joint balanced | 25,000 | 1,500 | 10,000 |
-| Full joint imbalanced | 20,000 | 1,250 | 5,000 |
-| Full invariant control | 20,000 | 1,250 | 5,000 |
+| Scale | Cells | Genes | TFs | Groups |
+| --- | ---: | ---: | ---: | ---: |
+| P-S | 300 | 100 | 10 | 3 |
+| P-M | 1,000 | 1,000 | 100 | 3 |
+| P-L | 3,000 | 5,000 | 500 | 3 |
+| P-XL | 10,000 | 20,000 | 1,500 | 3 |
 
-Only frozen SPATHI runs here. Each shape begins with an outcome-blind hashed target scout.
-The committed resource boundary permits an all-target fit only within 80% of the 12-hour reduced
-or 24-hour full envelope and 80% of allocated RAM. The envelope is enforced as a physical timeout.
-A reached boundary stops downstream shapes in its declared progression lane. Completion, timeout,
-OOM and attributable tool failures remain evidence; malformed contracts or missing telemetry
-abort the experiment. Accuracy claims do not come from this phase.
+P-XL is a public synthetic engineering workload with real-scale dimensions; it does not encode or
+approximate any private cohort. Methods advance breadth-first by scale. ANDREA may classify a run
+as empirically time-infeasible before launch when a valid cost profile supports that conclusion;
+otherwise it is attempted under the profile's hard physical timeout. Completion with warnings,
+timeout, memory limit, and runtime failure are preserved as results rather than hidden exclusions.
+Once ANDREA reports one of those non-completion outcomes for a method, its remaining larger-scale
+measurements are recorded as `not_attempted`, with the originating ANDREA status and reason; they
+are never relabelled as additional timeouts. In `full`, later replicates are likewise targets only
+while that method keeps advancing through the ordered scout chain. This bounds predictable cost
+without hard-coded "fast" and "slow" tool panels.
 
-### Performance: how fast are the tools under comparable resources?
+The same P-M realization is reused for the 1-thread, standard-thread (`min(8, available)`), and
+all-available-thread measurements. Size-ladder and thread-scaling timings are isolated. The report
+shows log-scale runtime, peak memory, parallel scaling, and a method-by-scale feasibility frontier.
 
-Reduced uses one scMultiSim 400-gene/600-cell dataset, frozen SPATHI, GENIE3, GRNBoost2 and
-inferCSN at 1 and 8 threads. Full adds an 80-gene/300-cell dataset, ARACNe3 and TIGRESS, uses
-1/2/4/8 threads, and repeats each measured condition three times. One warm-up per condition is
-retained but excluded from summaries. Each system repetition uses the same algorithm seed.
+## Seeds and reproducibility
 
-The entire invocation runs alone with nested, topology-aware CPU affinity, and requests full
-ANDREA outputs. Canonical wall time includes preparation, scheduling, merging and output writing.
-Memory is the recorded overlap upper bound of physical-container peaks, excluding ANDREA's host
-process. Reports distinguish unavailable block-I/O counters from measured output bytes.
-Speedup and parallel efficiency require complete, semantically equal networks across the thread
-endpoints and repetitions; otherwise they show an explicit unavailable reason. These runs cannot
-select a policy or enter accuracy rankings.
+Generation and algorithm seeds are derived from the committed master seed plus semantic
+coordinates (phase, dataset, split, replicate, method, and algorithm replicate). Scheduling order,
+worker count, and resume timing therefore do not change them. Reduced and full replication is
+declared in the design rather than inferred from files on disk.
 
-## Results and reports
+Each study records:
 
-The central entry point for a study is:
+- the complete design fingerprint and frozen resource plan;
+- scientific source identities and every observed repository revision;
+- task requests, dependency digests, attempts, results, and failures, with every attempt linked to
+  the exact source revision active when it started;
+- the effective ToolSpec/SimulatorSpec hash and immutable container identity observed by every
+  attempt; distinct definitions sharing one image are retained separately rather than collapsed;
+- ANDREA plans, run reports, evaluation evidence, and resource outcomes;
+- hashes for published artifacts and report deliverables.
 
-```text
-work/studies/<id>/
-├── study.json
-├── reports/index.html
-└── v1/
-    ├── artifacts/                     # immutable datasets/inferences/evaluations
-    ├── workflows/<phase>/<profile>/   # phase evidence and frozen decisions
-    └── reports/<profile>/<phase-id>/  # self-contained English phase reports
-```
+## Portable reports
 
-Open `work/studies/<id>/reports/index.html`. It links every phase that has published a report.
-Individual HTML reports embed Plotly and their data; they need no server or internet connection.
-The entry page and artifact links require the corresponding local directory structure to remain
-available. Each report shows its dataset base, profile, exact configurations, claim scope and
-provenance. The calibration report exposes candidate parameter values, convergence prefixes and
-selection. Transfer separates
-routing controls from scale contrasts. Comparison labels each information regime. Scalability and
-performance show measured resource endpoints and failures, with no biological-accuracy claim.
-
-Repeated scikit-learn parallel-configuration warnings are grouped in the console; the full original
-messages remain in command logs. Scientific warnings are not suppressed. In particular, external
-groups can contribute more aggregate weight when `group_size_correction=none`; this describes the
-tested weighting configuration, not a failed fit or a reason to discard the run.
-
-Plots present the canonical saved results. Rebuilding HTML must not rerank candidates, recalculate
-statistical decisions or silently replace corrupted scientific evidence. Report manifests record
-both evidence and renderer inputs so a presentation fix remains distinguishable from a scientific
-change.
-
-ANDREA-compatible exports from ordinary inference/evaluation pipelines have this structure:
+Successful execution, or `spathi-bench report`, writes one self-contained directory:
 
 ```text
-exports/
-├── manifest.json
-├── datasets/<dataset>/analysis.zip
-├── inference/<dataset>/<regime>/individual/<run-id>/analysis.zip
-├── inference/<dataset>/<regime>/joint/analysis.zip
-├── evaluation/<dataset>/<regime>/individual/<run-id>/analysis.zip
-└── evaluation/<dataset>/<regime>/joint/analysis.zip
+deliverables/<study-id>/
+├── article-report.html
+├── calibration.html
+├── comparison.html
+├── scalability.html
+├── results-calibration.csv
+├── results-comparison.csv
+├── results-scalability.csv
+├── results-outcomes.csv
+├── provenance.json
+└── SHA256SUMS
 ```
 
-Inference archives can be passed to ANDREA `evaluate-inference`. Joint views contain all methods
-for one dataset and regime and preserve ANDREA's contracts for its GUI and `compare-networks`.
-Each archive has integrity metadata. Internal calibration artifacts need not duplicate every full
-visualization export; the public comparison produces the archives used to inspect results.
+Every HTML file embeds its CSS, JavaScript, Plotly runtime, data, and provenance. It can be copied
+or opened independently without the work directory, a web server, network access, or relative
+assets. The combined report and each phase report are disposable views of journalled evidence;
+regenerating them never changes a scientific result.
 
-Comparison panels can share the same selected SPATHI execution. All batch references remain in
-the study state for attribution, but identical executions appear only once per dataset and regime
-in joint views, metric rows and analysis exports. Reuse requires matching artifact identities and
-scientific metadata; a repeated run ID with different results or parameters is an error. Different
-seeds and information regimes remain separate observations.
+Runtime state and large artifacts live under `work/studies/<study-id>/`; portable deliverables live
+under `deliverables/<study-id>/`. Both locations are ignored by Git.
 
-## Reproducibility, failures and development
-
-The seed ledger derives positive seeds from semantic coordinates using SHA-256 domain separation.
-Separate streams cover simulation, augmentation, inference, execution order and, only for the
-inferential full analyses, statistical resampling. SPATHI then derives its own per-group/target
-model seeds; those are deliberately different from its caller seed. Unestimable targets remain
-explicitly accounted for in diagnostics and never disappear from coverage denominators.
-
-Both evaluation paths use the declared candidate space. Simulator truth outside the common
-TF-by-gene space is excluded with counts and examples, while genes outside the declared universe
-remain an error. Missing predicted edges receive the contract's minimum score. An empty valid
-network is distinct from a failed inference. Failed inference preserves logs, diagnostics and
-available telemetry and cannot masquerade as a successful cache artifact.
-
-Source, dataset, parameter, image and artifact hashes remain attached to the computations that
-produced them. Machine quotas and observed resources are recorded separately. An operator-accepted
-commit warning on resume is not evidence of numerical equivalence; it is a traceable decision to
-continue. Existing scientific files must still pass integrity checks. For deliberate scientific
-changes, use a new study ID and freeze the revised design before examining held-out outcomes.
-
-Tests and static checks:
+## Development checks
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/pytest
 .venv/bin/ruff check src tests containers/spathi
-.venv/bin/spathi-bench qualify
+.venv/bin/python -m pip wheel . --no-deps -w /tmp/spathi-bench-wheel
 ```
 
-The repository contains public synthetic inputs and experimental contracts only. Do not add
-patient data, identifiers, private annotation files or paths to restricted research material. Runtime datasets,
-networks, archives and logs stay under ignored `work/`; compact public reports may be archived
-separately when appropriate.
+The wheel includes the report template and front-end assets used to build standalone HTML files.
+It is a development and packaging check, not a standalone distribution of the study: the canonical
+design and Docker adapter remain repository-owned inputs. Run the benchmark from this checkout (or
+point an installed CLI to it with `--project`) so those inputs and both sibling repositories are
+available.
