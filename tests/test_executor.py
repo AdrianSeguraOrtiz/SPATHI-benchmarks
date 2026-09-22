@@ -265,12 +265,12 @@ def test_dyngen_records_only_valid_backbone_dimension_expansion(tmp_path: Path) 
         },
     )
 
-    assert contract["policy"] == "dyngen_backbone_augmented"
+    assert contract["policy"] == "dyngen_native_materialization"
     assert contract["dimension_policy"] == {
         "cells": "exact",
         "genes": "dyngen_backbone_augmented",
         "transcription_factors": "dyngen_backbone_augmented",
-        "groups": "exact",
+        "groups": "dyngen_observed_milestone_occupancy",
     }
     assert contract["status"] == "accepted_declared_deviation"
     assert contract["observed_dimensions"] == {
@@ -330,7 +330,7 @@ def test_exact_simulator_records_matched_policy(tmp_path: Path) -> None:
     assert set(contract["dimension_policy"].values()) == {"exact"}
 
 
-def test_dyngen_requires_exact_cells_and_groups(tmp_path: Path) -> None:
+def test_dyngen_requires_exact_cells(tmp_path: Path) -> None:
     with pytest.raises(BenchmarkConfigError, match="violated its exact dimensions"):
         _dataset_materialization_contract(
             _write_materialized_dataset(tmp_path),
@@ -339,6 +339,76 @@ def test_dyngen_requires_exact_cells_and_groups(tmp_path: Path) -> None:
                 "seed": 17,
                 "dimensions": {
                     "cells": 2,
+                    "genes": 2,
+                    "transcription_factors": 1,
+                    "groups": 2,
+                },
+                "simulator_parameters": {"num_tfs": 1, "num_targets": 1, "num_hks": 0},
+                "capabilities": ["group_labels", "tf_list"],
+            },
+        )
+
+
+def test_dyngen_accepts_and_records_unoccupied_declared_milestones(tmp_path: Path) -> None:
+    contract = _dataset_materialization_contract(
+        _write_materialized_dataset(tmp_path),
+        {
+            "generator": "dyngen",
+            "seed": 17,
+            "dimensions": {
+                "cells": 3,
+                "genes": 2,
+                "transcription_factors": 1,
+                "groups": 3,
+            },
+            "simulator_parameters": {"num_tfs": 1, "num_targets": 1, "num_hks": 0},
+            "capabilities": ["group_labels", "tf_list"],
+        },
+    )
+
+    assert contract["status"] == "accepted_declared_deviation"
+    assert contract["observed_dimensions"]["groups"] == 2
+    assert contract["dimension_deviations"]["groups"] == {
+        "requested": 3,
+        "observed": 2,
+        "delta": -1,
+    }
+
+
+def test_dyngen_rejects_more_groups_than_declared_milestones(tmp_path: Path) -> None:
+    with pytest.raises(BenchmarkConfigError, match="milestone-occupancy contract"):
+        _dataset_materialization_contract(
+            _write_materialized_dataset(tmp_path),
+            {
+                "generator": "dyngen",
+                "seed": 17,
+                "dimensions": {
+                    "cells": 3,
+                    "genes": 2,
+                    "transcription_factors": 1,
+                    "groups": 1,
+                },
+                "simulator_parameters": {"num_tfs": 1, "num_targets": 1, "num_hks": 0},
+                "capabilities": ["group_labels", "tf_list"],
+            },
+        )
+
+
+def test_dyngen_rejects_single_observed_group(tmp_path: Path) -> None:
+    manifest = _write_materialized_dataset(tmp_path)
+    (tmp_path / "datasets/actual/extras/groups.tsv").write_text(
+        "column\tcluster\nc1\ta\nc2\ta\nc3\ta\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BenchmarkConfigError, match="milestone-occupancy contract"):
+        _dataset_materialization_contract(
+            manifest,
+            {
+                "generator": "dyngen",
+                "seed": 17,
+                "dimensions": {
+                    "cells": 3,
                     "genes": 2,
                     "transcription_factors": 1,
                     "groups": 2,

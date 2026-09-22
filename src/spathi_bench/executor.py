@@ -495,9 +495,10 @@ def _dataset_materialization_contract(
     scMultiSim, SERGIO, BoolODE and the benchmark-owned scale generator have an
     exact contract for the panels declared by this study.  dyngen is different:
     its backbone may add regulators, so requested genes/TFs are prospective
-    minima while cells and biological groups remain exact.  The accepted dyngen
-    expansion is validated structurally instead of through an arbitrary numeric
-    tolerance.
+    minima. Its requested group count is the number of backbone milestones, while
+    exported groups are the milestones actually occupied as a cell's dominant
+    membership. Cells remain exact; gene expansion and milestone occupancy are
+    validated structurally instead of through arbitrary numeric tolerances.
     """
 
     benchmark = _json_file(benchmark_manifest, "benchmark manifest")
@@ -643,12 +644,12 @@ def _dataset_materialization_contract(
         policy = "exact"
         dimension_policy = {field: "exact" for field in normalized_requested}
     elif generator == "dyngen":
-        policy = "dyngen_backbone_augmented"
+        policy = "dyngen_native_materialization"
         dimension_policy = {
             "cells": "exact",
             "genes": "dyngen_backbone_augmented",
             "transcription_factors": "dyngen_backbone_augmented",
-            "groups": "exact",
+            "groups": "dyngen_observed_milestone_occupancy",
         }
     else:
         raise BenchmarkConfigError(
@@ -699,6 +700,13 @@ def _dataset_materialization_contract(
         ):
             raise BenchmarkConfigError(
                 "Observed dyngen genes/TFs violate the declared backbone-augmentation contract"
+            )
+        observed_groups = observed_dimensions["groups"]
+        requested_milestones = normalized_requested["groups"]
+        if observed_groups < 2 or observed_groups > requested_milestones:
+            raise BenchmarkConfigError(
+                "Observed dyngen groups violate the declared milestone-occupancy contract: "
+                f"observed={observed_groups}, requested_milestones={requested_milestones}"
             )
 
     return {

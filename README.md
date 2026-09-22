@@ -150,8 +150,10 @@ candidate receives protected treatment.
 
 These are prospective design dimensions. scMultiSim, SERGIO, BoolODE and the benchmark-owned
 scale generator must reproduce their declared dimensions exactly. dyngen may add transcription
-factors required by its backbone; for dyngen only, cells and groups remain exact while the observed
-TF and gene expansion is validated against the requested target and housekeeping counts. Every
+factors required by its backbone, and its declared group count denotes backbone milestones rather
+than guaranteed dominant cell assignments. For dyngen, cells remain exact; TF/gene expansion is
+validated against the requested target and housekeeping counts, and the observed group count must
+contain at least two occupied milestones without exceeding the declared backbone milestones. Every
 report shows the observed dimensions and any accepted requested-to-observed deviation.
 
 All calibration conditions contain multiple biological groups. Single-group data require a
