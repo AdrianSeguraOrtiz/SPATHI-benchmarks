@@ -270,11 +270,7 @@ def _task(
         "scientific_digest": canonical_json_sha256(request),
         "executor_contract": (
             f"{EXECUTOR_CONTRACT}:{WORKFLOW_CONTRACT}:{kind}"
-            + (
-                f":{INFERENCE_RESOURCE_CONTRACT}"
-                if kind == "comparison_dataset"
-                else ""
-            )
+            + (f":{INFERENCE_RESOURCE_CONTRACT}" if kind == "comparison_dataset" else "")
         ),
         "spec": request,
         "dependencies": list(dependencies),
@@ -396,17 +392,53 @@ def _calibration_tasks(
         tasks.append(validation)
         validation_ids.append(validation["task_id"])
 
+    transfer_ids: list[str] = []
+    for dataset in view.datasets["calibration"]["transfer"]:
+        generation = _generation_task(
+            dataset,
+            design=design,
+            capacity=capacity,
+            dependencies=validation_ids,
+        )
+        tasks.append(generation)
+        transfer = _task(
+            phase="calibration",
+            stage="transfer",
+            kind="calibration_transfer",
+            spec={
+                "identity": {"dataset_id": dataset.id, "finalists": finalists["task_id"]},
+                "design_digest": design.fingerprint,
+                "dataset": _dataset_payload(dataset),
+                "finalists_dependency": finalists["task_id"],
+                "algorithm_seeds": _algorithm_seeds(
+                    design,
+                    dataset=dataset,
+                    stage="transfer",
+                    count=budget.transfer_algorithm_seeds,
+                ),
+                "fit_trees": view.validation_fit_trees,
+                "exact_prefixes": list(view.validation_prefixes),
+                "resources": _analysis_claim(dataset, capacity),
+            },
+            dependencies=[generation["task_id"], finalists["task_id"], *validation_ids],
+        )
+        tasks.append(transfer)
+        transfer_ids.append(transfer["task_id"])
+
     winner = _task(
         phase="calibration",
         stage="select-winner",
         kind="select_calibration_winner",
         spec={
-            "identity": {"validations": sorted(validation_ids)},
+            "identity": {
+                "validations": sorted(validation_ids),
+                "transfers": sorted(transfer_ids),
+            },
             "design_digest": design.fingerprint,
             "protocol": dict(design.raw["calibration"]["protocol"]["selection"]),
             "resources": _small_claim(capacity),
         },
-        dependencies=validation_ids,
+        dependencies=[*validation_ids, *transfer_ids],
     )
     tasks.append(winner)
     return tasks, str(winner["task_id"])
@@ -859,6 +891,12 @@ def _report_snapshot(store: StudyStore) -> dict[str, Any]:
                     record.get("observed_dimensions") if isinstance(record, Mapping) else None
                 )
                 if isinstance(observed, Mapping):
+                    materialization = record.get("materialization", {})
+                    group_sizes = (
+                        materialization.get("group_sizes")
+                        if isinstance(materialization, Mapping)
+                        else None
+                    )
                     reported.update(
                         dimensions=dict(observed),
                         observed_dimensions=dict(observed),
@@ -868,6 +906,9 @@ def _report_snapshot(store: StudyStore) -> dict[str, Any]:
                         dimension_policy=dict(record.get("dimension_policy", {})),
                         materialization_status=record.get("materialization_status"),
                         tf_count=observed.get("transcription_factors"),
+                        group_sizes=(
+                            dict(group_sizes) if isinstance(group_sizes, Mapping) else None
+                        ),
                         **dict(observed),
                     )
                 existing = datasets.get(dataset_id)

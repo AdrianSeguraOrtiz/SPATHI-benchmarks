@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -186,10 +187,13 @@ class CompetitorFamily:
 @dataclass(frozen=True, slots=True)
 class CalibrationBudget:
     condition_ids: tuple[str, ...]
+    transfer_condition_ids: tuple[str, ...]
     development_replicates: int
     validation_replicates: int
+    transfer_replicates: int
     screening_algorithm_seeds: int
     validation_algorithm_seeds: int
+    transfer_algorithm_seeds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +248,7 @@ class PlannedDataset:
     generated_inputs: Mapping[str, Mapping[str, Any]]
     dimensions: Dimensions
     capabilities: frozenset[str]
+    attributes: Mapping[str, Any]
     replicate: int
     seed: int
     order_kind: str
@@ -275,6 +280,7 @@ class StudyDesign:
     profiles: Mapping[str, Profile]
     candidates: tuple[Candidate, ...]
     calibration_conditions: Mapping[str, DatasetSpec]
+    calibration_transfer_conditions: Mapping[str, DatasetSpec]
     comparison_datasets: Mapping[str, DatasetSpec]
     tool_routes: Mapping[str, ToolRoute]
     competitor_families: tuple[CompetitorFamily, ...]
@@ -306,7 +312,13 @@ class StudyDesign:
             * budget.validation_replicates
             * budget.validation_algorithm_seeds
         )
-        return screening + validation
+        transfer = (
+            self.finalists
+            * len(budget.transfer_condition_ids)
+            * budget.transfer_replicates
+            * budget.transfer_algorithm_seeds
+        )
+        return screening + validation + transfer
 
     def comparison_dataset_count(self, profile_id: str) -> int:
         return sum(self.profile(profile_id).comparison.replicates.values())
@@ -348,12 +360,18 @@ def calibration_instances(
 ) -> tuple[DatasetInstance, ...]:
     """Expand the nested calibration dataset budget without execution-order seeds."""
 
-    if split not in {"development", "validation"}:
-        raise DesignError("Calibration split must be 'development' or 'validation'")
+    if split not in {"development", "validation", "transfer"}:
+        raise DesignError("Calibration split must be development, validation or transfer")
     budget = design.profile(profile_id).calibration
-    replicate_count = (
-        budget.development_replicates if split == "development" else budget.validation_replicates
-    )
+    if split == "development":
+        dataset_ids = budget.condition_ids
+        replicate_count = budget.development_replicates
+    elif split == "validation":
+        dataset_ids = budget.condition_ids
+        replicate_count = budget.validation_replicates
+    else:
+        dataset_ids = budget.transfer_condition_ids
+        replicate_count = budget.transfer_replicates
     return tuple(
         DatasetInstance(
             dataset_id=dataset_id,
@@ -370,7 +388,7 @@ def calibration_instances(
                 },
             ),
         )
-        for dataset_id in budget.condition_ids
+        for dataset_id in dataset_ids
         for replicate in range(1, replicate_count + 1)
     )
 
@@ -455,6 +473,7 @@ def _planned_dataset(
         generated_inputs=generated_inputs,
         dimensions=dataset.dimensions,
         capabilities=dataset.capabilities,
+        attributes=dict(dataset.attributes),
         replicate=replicate,
         seed=derive_seed(
             design,
@@ -475,6 +494,27 @@ def _group_sizes(cells: int, groups: int, *, imbalanced: bool) -> list[int]:
         return [first, second, cells - first - second]
     base, remainder = divmod(cells, groups)
     return [base + int(index < remainder) for index in range(groups)]
+
+
+def _dataset_group_sizes(dataset: DatasetSpec) -> list[int]:
+    declared = dataset.attributes.get("group_sizes")
+    if declared is None:
+        return _group_sizes(
+            dataset.dimensions.cells,
+            dataset.dimensions.groups,
+            imbalanced=dataset.attributes.get("balance") == "imbalanced",
+        )
+    if (
+        not isinstance(declared, list)
+        or len(declared) != dataset.dimensions.groups
+        or any(type(value) is not int or value < 1 for value in declared)
+        or sum(declared) != dataset.dimensions.cells
+    ):
+        raise DesignError(
+            f"Dataset {dataset.id!r} group_sizes must contain one positive cell count per "
+            "group and sum to dimensions.cells"
+        )
+    return list(declared)
 
 
 def _simulator_parameters(dataset: DatasetSpec) -> dict[str, Any]:
@@ -513,15 +553,12 @@ def _simulator_parameters(dataset: DatasetSpec) -> dict[str, Any]:
             },
         }
     if dataset.simulator == "scmultisim":
-        imbalanced = attributes.get("balance") == "imbalanced"
         noisy = attributes.get("noise") not in {None, "low"}
         return {
             "grn_source": "input_tsv",
             "tree_preset": "input_newick",
             "population_mode": "discrete",
-            "discrete_population": {
-                "pop_size": _group_sizes(dimensions.cells, dimensions.groups, imbalanced=imbalanced)
-            },
+            "discrete_population": {"pop_size": _dataset_group_sizes(dataset)},
             "num_cells": dimensions.cells,
             "num_genes": dimensions.genes,
             "num_cifs": min(50, max(10, dimensions.genes // 20)),
@@ -591,11 +628,7 @@ def _simulator_parameters(dataset: DatasetSpec) -> dict[str, Any]:
         }
     if dataset.simulator == "scale-stress":
         return {
-            "groups": _group_sizes(
-                dimensions.cells,
-                dimensions.groups,
-                imbalanced=False,
-            ),
+            "groups": _dataset_group_sizes(dataset),
             "genes": dimensions.genes,
             "transcription_factors": dimensions.transcription_factors,
             "network_mode": "dynamic",
@@ -709,6 +742,17 @@ def profile_view(design: StudyDesign, profile_id: str) -> ProfileView:
             for condition_id in profile.calibration.condition_ids
             for replicate in range(1, count + 1)
         )
+    calibration["transfer"] = tuple(
+        _planned_dataset(
+            design,
+            design.calibration_transfer_conditions[condition_id],
+            phase="calibration",
+            role="transfer",
+            replicate=replicate,
+        )
+        for condition_id in profile.calibration.transfer_condition_ids
+        for replicate in range(1, profile.calibration.transfer_replicates + 1)
+    )
 
     comparison = tuple(
         _planned_dataset(
@@ -1030,6 +1074,7 @@ def _profile(
     raw: object,
     *,
     condition_ids: set[str],
+    transfer_condition_ids: set[str],
     comparison_ids: set[str],
     scale_ids: set[str],
 ) -> Profile:
@@ -1040,10 +1085,13 @@ def _profile(
         calibration,
         {
             "condition_ids",
+            "transfer_condition_ids",
             "development_replicates",
             "validation_replicates",
+            "transfer_replicates",
             "screening_algorithm_seeds",
             "validation_algorithm_seeds",
+            "transfer_algorithm_seeds",
         },
         f"profiles.{profile_id}.calibration",
     )
@@ -1056,6 +1104,20 @@ def _profile(
     )
     if not selected_conditions or not set(selected_conditions) <= condition_ids:
         raise DesignError(f"Profile {profile_id!r} selects unknown calibration conditions")
+    selected_transfer_conditions = _unique(
+        (
+            _text(value, "calibration transfer condition id")
+            for value in _array(
+                calibration["transfer_condition_ids"], "calibration.transfer_condition_ids"
+            )
+        ),
+        f"{profile_id} calibration transfer conditions",
+    )
+    if (
+        not selected_transfer_conditions
+        or not set(selected_transfer_conditions) <= transfer_condition_ids
+    ):
+        raise DesignError(f"Profile {profile_id!r} selects unknown transfer conditions")
 
     comparison = _object(profile["comparison"], f"profiles.{profile_id}.comparison")
     _require_exact_keys(
@@ -1106,11 +1168,15 @@ def _profile(
         id=profile_id,
         calibration=CalibrationBudget(
             condition_ids=selected_conditions,
+            transfer_condition_ids=selected_transfer_conditions,
             development_replicates=_integer(
                 calibration["development_replicates"], "development replicates", minimum=1
             ),
             validation_replicates=_integer(
                 calibration["validation_replicates"], "validation replicates", minimum=1
+            ),
+            transfer_replicates=_integer(
+                calibration["transfer_replicates"], "transfer replicates", minimum=1
             ),
             screening_algorithm_seeds=_integer(
                 calibration["screening_algorithm_seeds"],
@@ -1120,6 +1186,11 @@ def _profile(
             validation_algorithm_seeds=_integer(
                 calibration["validation_algorithm_seeds"],
                 "validation algorithm seeds",
+                minimum=1,
+            ),
+            transfer_algorithm_seeds=_integer(
+                calibration["transfer_algorithm_seeds"],
+                "transfer algorithm seeds",
                 minimum=1,
             ),
         ),
@@ -1177,10 +1248,23 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
     calibration = _object(raw["calibration"], "calibration")
     _require_exact_keys(
         calibration,
-        {"conditions", "parameter_domains", "parameter_policy", "candidates", "protocol"},
+        {
+            "conditions",
+            "transfer_conditions",
+            "parameter_domains",
+            "parameter_policy",
+            "candidates",
+            "protocol",
+        },
         "calibration",
     )
     conditions = _datasets(calibration["conditions"], "calibration.conditions")
+    transfer_conditions = _datasets(
+        calibration["transfer_conditions"], "calibration.transfer_conditions"
+    )
+    overlap = sorted(set(conditions) & set(transfer_conditions))
+    if overlap:
+        raise DesignError(f"Calibration and transfer condition IDs overlap: {overlap}")
     single_group_conditions = sorted(
         condition.id for condition in conditions.values() if condition.dimensions.groups == 1
     )
@@ -1188,6 +1272,15 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         raise DesignError(
             "Calibration may contain only multi-group conditions; single-group data require "
             f"a different SPATHI weighting contract: {single_group_conditions}"
+        )
+    single_group_transfer = sorted(
+        condition.id
+        for condition in transfer_conditions.values()
+        if condition.dimensions.groups == 1
+    )
+    if single_group_transfer:
+        raise DesignError(
+            f"Calibration transfer may contain only multi-group conditions: {single_group_transfer}"
         )
     candidates = _candidates(calibration)
     parameter_policy = _object(calibration["parameter_policy"], "calibration.parameter_policy")
@@ -1238,7 +1331,9 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         raise DesignError("Calibration covering-array scope is unsupported")
     protocol = _object(calibration["protocol"], "calibration.protocol")
     _require_exact_keys(
-        protocol, {"screening", "advancement", "validation", "selection"}, "calibration.protocol"
+        protocol,
+        {"screening", "advancement", "validation", "transfer", "selection"},
+        "calibration.protocol",
     )
     screening = _object(protocol["screening"], "calibration.protocol.screening")
     _require_exact_keys(screening, {"fit_trees", "dataset_split"}, "calibration.protocol.screening")
@@ -1273,10 +1368,31 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         raise DesignError("Validation tree prefixes must be unique and increasing")
     if not validation_prefixes or validation_prefixes[-1] != validation_fit_trees:
         raise DesignError("The final exact tree prefix must equal the fitted tree count")
+    transfer = _object(protocol["transfer"], "calibration.protocol.transfer")
+    _require_exact_keys(
+        transfer,
+        {"fit_trees", "score_exact_prefixes", "dataset_split"},
+        "calibration.protocol.transfer",
+    )
+    if transfer["dataset_split"] != "transfer":
+        raise DesignError("Calibration transfer must use the transfer split")
+    if _integer(transfer["fit_trees"], "transfer trees", minimum=1) != validation_fit_trees:
+        raise DesignError("Validation and transfer must fit the same maximum forest size")
+    transfer_prefixes = tuple(
+        _integer(value, "transfer tree prefix", minimum=1)
+        for value in _array(transfer["score_exact_prefixes"], "transfer prefixes")
+    )
+    if transfer_prefixes != validation_prefixes:
+        raise DesignError("Validation and transfer must score the same exact tree prefixes")
     selection = _object(protocol["selection"], "calibration.protocol.selection")
     _require_exact_keys(
         selection,
-        {"primary_metric", "practical_equivalence_fraction", "tie_breakers"},
+        {
+            "primary_metric",
+            "practical_equivalence_fraction",
+            "panel_weights",
+            "tie_breakers",
+        },
         "calibration.protocol.selection",
     )
     if selection["primary_metric"] != "aupr":
@@ -1288,6 +1404,17 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
     )
     if not 0.0 < equivalence < 1.0:
         raise DesignError("Calibration practical-equivalence fraction must be in (0, 1)")
+    panel_weights = _object(selection["panel_weights"], "calibration selection panel weights")
+    if set(panel_weights) != {"moderate_validation", "near_real_transfer"}:
+        raise DesignError("Calibration selection must weight validation and transfer panels")
+    normalized_weights = {
+        key: _number(value, f"calibration selection weight {key}", minimum=0.0)
+        for key, value in panel_weights.items()
+    }
+    if any(value <= 0 for value in normalized_weights.values()) or not math.isclose(
+        sum(normalized_weights.values()), 1.0, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise DesignError("Calibration selection panel weights must be positive and sum to one")
     expected_tie_breakers = (
         "between_dataset_stability",
         "declared_tree_count",
@@ -1328,6 +1455,8 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         statistics,
         {
             "primary_family",
+            "primary_panel",
+            "descriptive_panel",
             "metrics",
             "omnibus",
             "post_hoc",
@@ -1337,6 +1466,22 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         },
         "comparison.statistics",
     )
+    comparison_panels = {
+        dataset.id: dataset.attributes.get("comparison_panel")
+        for dataset in comparison_datasets.values()
+    }
+    allowed_panels = {"primary_accuracy", "deployment_transfer"}
+    invalid_panels = {
+        dataset_id: panel
+        for dataset_id, panel in comparison_panels.items()
+        if panel not in allowed_panels
+    }
+    if invalid_panels:
+        raise DesignError(f"Comparison datasets have invalid panel assignments: {invalid_panels}")
+    if statistics["primary_panel"] != "primary_accuracy":
+        raise DesignError("Formal comparison statistics must use the primary accuracy panel")
+    if statistics["descriptive_panel"] != "deployment_transfer":
+        raise DesignError("Deployment transfer must remain a separate descriptive panel")
     estimand = _object(statistics["estimand"], "comparison.statistics.estimand")
     _require_exact_keys(
         estimand,
@@ -1344,7 +1489,7 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         "comparison.statistics.estimand",
     )
     expected_estimand = {
-        "scenario_weighting": "equal_replicates_per_scenario",
+        "scenario_weighting": "equal_replicates_per_primary_scenario",
         "sampling_unit": "independent_seeded_dataset",
         "missing_data_rule": "complete_blocks_within_family_and_metric",
     }
@@ -1401,6 +1546,7 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
             profile_id,
             profiles_raw[profile_id],
             condition_ids=set(conditions),
+            transfer_condition_ids=set(transfer_conditions),
             comparison_ids=set(comparison_datasets),
             scale_ids=set(scales),
         )
@@ -1413,6 +1559,7 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         profiles=profiles,
         candidates=candidates,
         calibration_conditions=conditions,
+        calibration_transfer_conditions=transfer_conditions,
         comparison_datasets=comparison_datasets,
         tool_routes=routes,
         competitor_families=families,
@@ -1423,16 +1570,32 @@ def parse_design(raw: Mapping[str, Any]) -> StudyDesign:
         validation_prefixes=validation_prefixes,
         fingerprint=hashlib.sha256(_canonical_bytes(raw)).hexdigest(),
     )
-    if design.calibration_fit_count("reduced") != 155:
-        raise DesignError("The reduced calibration budget must contain exactly 155 physical fits")
-    if design.calibration_fit_count("full") != 390:
-        raise DesignError("The full calibration budget must contain exactly 390 physical fits")
-    if design.comparison_dataset_count("reduced") != 8:
-        raise DesignError("The reduced held-out comparison panel must contain 8 datasets")
-    full_replication = set(design.profile("full").comparison.replicates.values())
-    if full_replication != {3} or design.comparison_dataset_count("full") != 24:
+    if design.calibration_fit_count("reduced") != 221:
+        raise DesignError("The reduced calibration budget must contain exactly 221 physical fits")
+    if design.calibration_fit_count("full") != 554:
+        raise DesignError("The full calibration budget must contain exactly 554 physical fits")
+    if design.comparison_dataset_count("reduced") != 11:
+        raise DesignError("The reduced held-out comparison must contain 11 datasets")
+    full_replicates = design.profile("full").comparison.replicates
+    primary_ids = {
+        dataset_id
+        for dataset_id, panel in comparison_panels.items()
+        if panel == "primary_accuracy"
+    }
+    deployment_ids = {
+        dataset_id
+        for dataset_id, panel in comparison_panels.items()
+        if panel == "deployment_transfer"
+    }
+    if (
+        set(full_replicates) != primary_ids | deployment_ids
+        or {full_replicates[dataset_id] for dataset_id in primary_ids} != {3}
+        or {full_replicates[dataset_id] for dataset_id in deployment_ids} != {1}
+        or design.comparison_dataset_count("full") != 32
+    ):
         raise DesignError(
-            "The full held-out comparison must contain three replicates of every scenario"
+            "Full comparison requires three replicates per primary scenario and one per "
+            "deployment-transfer scenario"
         )
     return design
 

@@ -60,6 +60,13 @@ def _materialized_record(**values: Any) -> dict[str, Any]:
         "dimensions",
         {"cells": 3, "genes": 3, "transcription_factors": 2, "groups": 2},
     )
+    group_sizes = values.pop("group_sizes", None)
+    if group_sizes is None:
+        base, remainder = divmod(dimensions["cells"], dimensions["groups"])
+        group_sizes = {
+            f"group_{index + 1}": base + int(index < remainder)
+            for index in range(dimensions["groups"])
+        }
     return {
         "dataset_manifest": "/unused/dataset-manifest.json",
         "ground_truth_manifest": "/unused/ground-truth-manifest.json",
@@ -67,6 +74,7 @@ def _materialized_record(**values: Any) -> dict[str, Any]:
             "policy": "exact",
             "dimension_policy": {field: "exact" for field in dimensions},
             "status": "matched",
+            "group_sizes": group_sizes,
         },
         "requested_dimensions": dict(dimensions),
         "observed_dimensions": dict(dimensions),
@@ -780,6 +788,7 @@ def test_equal_candidate_selector_has_no_reference_or_privilege(tmp_path: Path) 
                     "configuration_id": "candidate-01",
                     "dataset_id": "development-1",
                     "metric": "aupr",
+                    "metric_scope": "macro_groups",
                     "status": "completed",
                     "candidate_space_sha256": _candidate_hash(),
                     "value": 0.4,
@@ -790,6 +799,7 @@ def test_equal_candidate_selector_has_no_reference_or_privilege(tmp_path: Path) 
                     "configuration_id": "candidate-02",
                     "dataset_id": "development-1",
                     "metric": "aupr",
+                    "metric_scope": "macro_groups",
                     "status": "completed",
                     "candidate_space_sha256": _candidate_hash(),
                     "value": 0.5,
@@ -813,6 +823,76 @@ def test_equal_candidate_selector_has_no_reference_or_privilege(tmp_path: Path) 
     assert result["decision"]["decision"] == "advance_equal_candidates"
 
 
+def test_metric_rows_preserve_macro_and_group_context_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _executor(tmp_path)
+    metrics = tmp_path / "metrics.csv"
+    metrics.write_text(
+        "tool_id,context,level,status,aupr,auroc,f1_at_truth_count\n"
+        "run-1,group:small,directed,ok,0.2,0.3,0.4\n"
+        "run-1,group:large,directed,ok,0.8,0.9,0.7\n",
+        encoding="utf-8",
+    )
+    evidence = tmp_path / "candidate-space-evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "identity": {
+                    "candidate_space_sha256": _candidate_hash(),
+                    "sources_sha256": _candidate_hash("b"),
+                    "targets_sha256": _candidate_hash("c"),
+                    "n_sources": 10,
+                    "n_targets": 100,
+                },
+                "evaluation": {
+                    "n_candidates_by_level": {"directed": 990},
+                    "n_truth_rows_outside_candidate_space_by_level": {"directed": 0},
+                    "n_truth_edges_outside_candidate_space_by_level": {"directed": 0},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def resolve(_store: Any, _reference: Any, member: str) -> Path:
+        return {"metrics": metrics, "candidate_space_evidence": evidence}[member]
+
+    monkeypatch.setattr("spathi_bench.executor.resolve_artifact_reference", resolve)
+    rows = executor._metric_rows(
+        {},
+        dataset={
+            "id": "dataset-1",
+            "condition_id": "t8",
+            "role": "test",
+            "generator": "scmultisim",
+            "replicate": 1,
+            "attributes": {"comparison_panel": "primary_accuracy"},
+            "observed_dimensions": {
+                "cells": 100,
+                "genes": 100,
+                "transcription_factors": 10,
+                "groups": 2,
+            },
+            "group_sizes_by_context": {"group:small": 5, "group:large": 95},
+        },
+        runs={"run-1": {"method_id": "spathi", "configuration_id": "winner"}},
+        family="a-information-matched",
+    )
+
+    aupr = [row for row in rows if row["metric"] == "aupr"]
+    assert len(aupr) == 3
+    macro = next(row for row in aupr if row["metric_scope"] == "macro_groups")
+    minority = next(row for row in aupr if row.get("context") == "group:small")
+    majority = next(row for row in aupr if row.get("context") == "group:large")
+    assert macro["value"] == pytest.approx(0.5)
+    assert macro["comparison_panel"] == "primary_accuracy"
+    assert minority["group_size_class"] == "minority"
+    assert minority["group_fraction"] == pytest.approx(0.05)
+    assert majority["group_size_class"] == "majority"
+    assert majority["group_fraction"] == pytest.approx(0.95)
+
+
 def test_winner_stability_is_measured_between_datasets_after_seed_averaging(
     tmp_path: Path,
 ) -> None:
@@ -821,9 +901,10 @@ def test_winner_stability_is_measured_between_datasets_after_seed_averaging(
     # Candidate A has seed variation within each dataset but identical dataset
     # means. Candidate B has no within-dataset variation but transfers less
     # consistently between datasets. Their global mean is exactly equal.
-    for dataset_id, a_values, b_values in (
-        ("validation-1", (0.7, 0.9), (0.7, 0.7)),
-        ("validation-2", (0.75, 0.85), (0.9, 0.9)),
+    for role, dataset_id, a_values, b_values in (
+        ("validation", "validation-1", (0.7, 0.9), (0.7, 0.7)),
+        ("validation", "validation-2", (0.75, 0.85), (0.9, 0.9)),
+        ("transfer", "transfer-1", (0.79, 0.81), (0.8, 0.8)),
     ):
         for configuration_id, values in (("candidate-a", a_values), ("candidate-b", b_values)):
             for seed, value in enumerate(values, start=1):
@@ -831,9 +912,12 @@ def test_winner_stability_is_measured_between_datasets_after_seed_averaging(
                     {
                         "configuration_id": configuration_id,
                         "dataset_id": dataset_id,
+                        "condition_id": dataset_id,
+                        "dataset_role": role,
                         "algorithm_seed": seed,
                         "n_estimators": 50,
                         "metric": "aupr",
+                        "metric_scope": "macro_groups",
                         "status": "completed",
                         "candidate_space_sha256": _candidate_hash(dataset_id[-1]),
                         "value": value,
@@ -845,7 +929,13 @@ def test_winner_stability_is_measured_between_datasets_after_seed_averaging(
         _task(
             "select_calibration_winner",
             {
-                "protocol": {"practical_equivalence_fraction": 0.0},
+                "protocol": {
+                    "practical_equivalence_fraction": 0.0,
+                    "panel_weights": {
+                        "moderate_validation": 0.5,
+                        "near_real_transfer": 0.5,
+                    },
+                },
             },
         ),
         {"validation": {"kind": "calibration_validate", "rows": rows}},
@@ -855,7 +945,11 @@ def test_winner_stability_is_measured_between_datasets_after_seed_averaging(
     ranking = {row["configuration_id"]: row for row in result["rows"]}
     assert ranking["candidate-a"]["stability_sd"] == pytest.approx(0.0)
     assert ranking["candidate-b"]["stability_sd"] > 0.0
-    assert ranking["candidate-a"]["stability_unit"] == ("validation_dataset_after_seed_averaging")
+    assert ranking["candidate-a"]["stability_unit"] == (
+        "panel_weighted_condition_after_replicate_and_seed_averaging"
+    )
+    assert ranking["candidate-a"]["moderate_validation_mean_aupr"] == pytest.approx(0.8)
+    assert ranking["candidate-a"]["near_real_transfer_mean_aupr"] == pytest.approx(0.8)
 
 
 def test_validation_uses_one_physical_forest_per_finalist_seed(
@@ -1080,6 +1174,7 @@ def test_comparison_with_no_completed_runs_preserves_outcomes_without_evaluation
     assert result["failures"] == [
         {
             "dataset_id": "d1",
+            "comparison_panel": None,
             "method_id": "genie3",
             "status": "timeout",
             "reason": "wall_time_limit_exceeded",
@@ -1429,6 +1524,8 @@ def test_statistics_keep_repeated_method_ids_separate_between_families(
                         "family": family,
                         "method_id": "spathi",
                         "metric": "aupr",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "primary_accuracy",
                         "status": "completed",
                         "candidate_space_sha256": _candidate_hash(str(index + 1)),
                         "value": 0.8 - index * 0.01,
@@ -1438,6 +1535,8 @@ def test_statistics_keep_repeated_method_ids_separate_between_families(
                         "family": family,
                         "method_id": competitor,
                         "metric": "aupr",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "primary_accuracy",
                         "status": "completed",
                         "candidate_space_sha256": _candidate_hash(str(index + 1)),
                         "value": 0.5 + index * 0.01,
@@ -1457,8 +1556,10 @@ def test_statistics_keep_repeated_method_ids_separate_between_families(
                     "metrics": ["aupr"],
                     "alpha": 0.05,
                     "primary_family": "family-a",
+                    "primary_panel": "primary_accuracy",
+                    "descriptive_panel": "deployment_transfer",
                     "estimand": {
-                        "scenario_weighting": "equal_replicates_per_scenario",
+                        "scenario_weighting": "equal_replicates_per_primary_scenario",
                         "sampling_unit": "independent_seeded_dataset",
                         "missing_data_rule": "complete_blocks_within_family_and_metric",
                     },

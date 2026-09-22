@@ -92,12 +92,13 @@ def test_current_spathi_configuration_is_one_unprivileged_candidate() -> None:
 def test_calibration_budgets_match_the_frozen_physical_fit_ledger() -> None:
     design = load_design(REPO_ROOT)
 
-    assert design.calibration_fit_count("smoke") == 31
-    assert design.calibration_fit_count("reduced") == 155
-    assert design.calibration_fit_count("full") == 390
-    assert len(calibration_instances(design, "reduced", split="development")) == 5
-    assert len(calibration_instances(design, "full", split="development")) == 10
-    assert len(calibration_instances(design, "full", split="validation")) == 10
+    assert design.calibration_fit_count("smoke") == 35
+    assert design.calibration_fit_count("reduced") == 221
+    assert design.calibration_fit_count("full") == 554
+    assert len(calibration_instances(design, "reduced", split="development")) == 7
+    assert len(calibration_instances(design, "full", split="development")) == 14
+    assert len(calibration_instances(design, "full", split="validation")) == 14
+    assert len(calibration_instances(design, "full", split="transfer")) == 2
 
 
 def test_profile_expansion_is_nested_and_seeded_by_scientific_coordinates() -> None:
@@ -106,7 +107,7 @@ def test_profile_expansion_is_nested_and_seeded_by_scientific_coordinates() -> N
     full = profile_view(design, "full")
 
     assert {phase: set(roles) for phase, roles in reduced.datasets.items()} == {
-        "calibration": {"development", "validation"},
+        "calibration": {"development", "validation", "transfer"},
         "comparison": {"test"},
         "scalability": {"ladder", "thread_scaling"},
     }
@@ -137,16 +138,32 @@ def test_comparison_panel_is_held_out_and_has_declared_replicate_counts() -> Non
     design = load_design(REPO_ROOT)
 
     assert design.comparison_dataset_count("smoke") == 1
-    assert design.comparison_dataset_count("reduced") == 8
-    assert design.comparison_dataset_count("full") == 24
-    assert len(comparison_instances(design, "full")) == 24
-    assert set(design.profile("full").comparison.replicates.values()) == {3}
+    assert design.comparison_dataset_count("reduced") == 11
+    assert design.comparison_dataset_count("full") == 32
+    assert len(comparison_instances(design, "full")) == 32
+    primary = {
+        dataset_id
+        for dataset_id, dataset in design.comparison_datasets.items()
+        if dataset.attributes["comparison_panel"] == "primary_accuracy"
+    }
+    deployment = set(design.comparison_datasets) - primary
+    full_replicates = design.profile("full").comparison.replicates
+    assert {full_replicates[dataset_id] for dataset_id in primary} == {3}
+    assert {full_replicates[dataset_id] for dataset_id in deployment} == {1}
     assert design.profile("smoke").comparison.task_timeout_seconds == 1_800
     assert design.profile("reduced").comparison.task_timeout_seconds == 3_600
     assert design.profile("full").comparison.task_timeout_seconds == 7_200
     calibration_ids = set(design.calibration_conditions)
     comparison_ids = set(design.comparison_datasets)
     assert calibration_ids.isdisjoint(comparison_ids)
+
+    assert design.comparison_datasets["t7-dynamic-strong-skew"].attributes[
+        "group_sizes"
+    ] == [25, 225, 750]
+    assert design.comparison_datasets["t8-dynamic-rare-group"].attributes[
+        "group_sizes"
+    ] == [5, 95, 900]
+    assert design.comparison_datasets["d2-near-real-scale"].dimensions.genes == 15_000
 
 
 def test_competitor_families_enforce_information_and_output_contracts() -> None:
@@ -180,11 +197,36 @@ def test_dataset_contract_drives_eligibility_without_manual_tool_panels() -> Non
     design = load_design(REPO_ROOT)
     linear_routes = {route.id for route in eligible_routes(design, "t1-linear-clean")}
     branching_routes = {route.id for route in eligible_routes(design, "t3-branching-clean")}
+    imbalance_routes = {
+        route.id for route in eligible_routes(design, "t7-dynamic-strong-skew")
+    }
+    deployment_routes = {
+        route.id for route in eligible_routes(design, "d1-high-dimensional-imbalanced")
+    }
 
     assert "simic-ordered" in linear_routes
     assert "scmtni-lineage" in linear_routes
     assert "simic-ordered" not in branching_routes
     assert "scmtni-lineage" in branching_routes
+    assert imbalance_routes == deployment_routes
+    assert {
+        "spathi",
+        "genie3",
+        "grnboost2",
+        "infercsn",
+        "tigress",
+        "scmtni-independent",
+        "metasem",
+        "kscreni",
+        "pidc",
+        "clr",
+        "ppcor",
+        "aracne3",
+        "cespgrn",
+        "lioness",
+        "simic-ordered",
+        "scmtni-lineage",
+    } <= imbalance_routes
 
 
 def test_calibration_and_comparison_exclude_single_group_datasets() -> None:
@@ -193,11 +235,16 @@ def test_calibration_and_comparison_exclude_single_group_datasets() -> None:
     assert all(
         condition.dimensions.groups > 1 for condition in design.calibration_conditions.values()
     )
+    assert all(
+        condition.dimensions.groups > 1
+        for condition in design.calibration_transfer_conditions.values()
+    )
     assert all(dataset.dimensions.groups > 1 for dataset in design.comparison_datasets.values())
     assert all(
         "single_group" not in dataset.attributes.values()
         for dataset in (
             *design.calibration_conditions.values(),
+            *design.calibration_transfer_conditions.values(),
             *design.comparison_datasets.values(),
         )
     )
@@ -223,6 +270,14 @@ def test_design_rejects_single_group_scientific_panels(section: str, message: st
         parse_design(raw)
 
 
+def test_design_rejects_single_group_transfer_conditions() -> None:
+    raw = json.loads(DESIGN_PATH.read_text(encoding="utf-8"))
+    raw["calibration"]["transfer_conditions"][0]["dimensions"]["groups"] = 1
+
+    with pytest.raises(DesignError, match="Calibration transfer may contain only multi-group"):
+        parse_design(raw)
+
+
 def test_simulator_materialization_matches_declared_group_contracts() -> None:
     design = load_design(REPO_ROOT)
     view = profile_view(design, "full")
@@ -233,6 +288,7 @@ def test_simulator_materialization_matches_declared_group_contracts() -> None:
     for planned in datasets:
         declared = (
             design.calibration_conditions.get(planned.condition_id)
+            or design.calibration_transfer_conditions.get(planned.condition_id)
             or design.comparison_datasets.get(planned.condition_id)
             or design.scalability_scales[planned.condition_id]
         )
@@ -250,6 +306,33 @@ def test_simulator_materialization_matches_declared_group_contracts() -> None:
                 planned.generated_inputs["regulatory_network"]["transcription_factors"]
                 == declared.dimensions.transcription_factors
             )
+        if planned.generator == "scale-stress":
+            assert sum(planned.simulator_parameters["groups"]) == declared.dimensions.cells
+
+
+def test_calibration_declares_distinct_imbalance_and_transfer_panels() -> None:
+    design = load_design(REPO_ROOT)
+
+    assert design.calibration_conditions["c6-dynamic-strong-skew"].attributes["group_sizes"] == [
+        20,
+        180,
+        600,
+    ]
+    assert design.calibration_conditions["c7-dynamic-rare-group"].attributes["group_sizes"] == [
+        2,
+        98,
+        700,
+    ]
+    assert design.profile("reduced").calibration.transfer_condition_ids == (
+        "x1-transfer-high-dimensional",
+    )
+    assert design.profile("full").calibration.transfer_condition_ids == (
+        "x1-transfer-high-dimensional",
+        "x2-transfer-near-real-scale",
+    )
+    near_real = design.calibration_transfer_conditions["x2-transfer-near-real-scale"]
+    assert (near_real.dimensions.cells, near_real.dimensions.genes) == (5_000, 15_000)
+    assert near_real.attributes["group_sizes"] == [10, 490, 4_500]
 
 
 def test_scalability_is_breadth_first_portable_and_contains_a_real_scale_synthetic_case() -> None:

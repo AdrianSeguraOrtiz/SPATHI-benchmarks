@@ -466,7 +466,7 @@ def _text_identifiers(path: Path, label: str) -> set[str]:
     return set(values)
 
 
-def _group_contract(path: Path, expression_columns: set[str]) -> tuple[int, int]:
+def _group_contract(path: Path, expression_columns: set[str]) -> tuple[int, dict[str, int]]:
     try:
         with path.open(encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
@@ -485,7 +485,10 @@ def _group_contract(path: Path, expression_columns: set[str]) -> tuple[int, int]
         raise BenchmarkConfigError("Groups TSV contains duplicate expression columns")
     if set(identifiers) != expression_columns:
         raise BenchmarkConfigError("Groups TSV does not cover expression columns exactly")
-    return len(rows), len(set(clusters))
+    counts: dict[str, int] = defaultdict(int)
+    for cluster in clusters:
+        counts[cluster] += 1
+    return len(rows), dict(sorted(counts.items()))
 
 
 def _dataset_materialization_contract(
@@ -566,7 +569,8 @@ def _dataset_materialization_contract(
     if not tf_ids <= genes:
         raise BenchmarkConfigError("TF list contains identifiers absent from expression")
     groups_path = _manifest_file(dataset_manifest.parent, extras.get("groups"), "Groups TSV")
-    group_rows, group_count = _group_contract(groups_path, columns)
+    group_rows, group_sizes = _group_contract(groups_path, columns)
+    group_count = len(group_sizes)
     if group_rows != len(columns):
         raise BenchmarkConfigError("Groups TSV row count differs from expression cells")
 
@@ -721,6 +725,7 @@ def _dataset_materialization_contract(
         "dimension_deviations": deviations,
         "requested_capabilities": sorted(requested_capabilities),
         "observed_capabilities": observed_capabilities,
+        "group_sizes": group_sizes,
         "expression": {
             "genes": len(genes),
             "columns": len(columns),
@@ -745,6 +750,19 @@ def _materialized_dataset_view(
     materialization = record.get("materialization")
     if not isinstance(materialization, Mapping):
         raise BenchmarkConfigError("Generated dependency omits materialization evidence")
+    group_sizes = materialization.get("group_sizes")
+    if not isinstance(group_sizes, Mapping) or any(
+        not isinstance(group, str)
+        or not group
+        or isinstance(size, bool)
+        or not isinstance(size, int)
+        or size < 1
+        for group, size in group_sizes.items()
+    ):
+        raise BenchmarkConfigError("Generated dependency omits observed group sizes")
+    total_cells = sum(group_sizes.values())
+    if total_cells != dimensions.get("cells"):
+        raise BenchmarkConfigError("Observed group sizes do not sum to materialized cells")
     return {
         **dict(requested),
         "dimensions": dimensions,
@@ -756,6 +774,10 @@ def _materialized_dataset_view(
         "materialization_status": materialization.get("status"),
         **dimensions,
         "tf_count": dimensions.get("transcription_factors"),
+        "group_sizes": dict(group_sizes),
+        "group_sizes_by_context": {
+            f"group:{group}": size for group, size in group_sizes.items()
+        },
     }
 
 
@@ -1752,6 +1774,9 @@ class AndreaExecutor:
             raw_rows = list(csv.DictReader(handle))
         measured = self._report_measurements(report or {})
         values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        context_values: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(list))
+        )
         prediction_audit: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
         for raw in raw_rows:
             run_id = str(raw.get("tool_id") or raw.get("run_id") or "")
@@ -1768,20 +1793,44 @@ class AndreaExecutor:
                     prediction_audit[run_id][field].append(int(observed_count))
             if raw.get("status") != "ok":
                 continue
+            context = str(raw.get("context") or "")
             for metric, column in _METRIC_FIELDS.items():
                 value = _finite(raw.get(column))
                 if value is not None:
                     values[run_id][metric].append(value)
+                    if context.startswith("group:"):
+                        context_values[run_id][context][metric].append(value)
+        attributes = dataset.get("attributes", {})
+        comparison_panel = (
+            attributes.get("comparison_panel") if isinstance(attributes, Mapping) else None
+        )
+        group_sizes = dataset.get("group_sizes_by_context", {})
+        if not isinstance(group_sizes, Mapping) or not group_sizes:
+            raise BenchmarkConfigError("Metric extraction requires observed group sizes")
+        minimum_group_size = min(int(value) for value in group_sizes.values())
+        maximum_group_size = max(int(value) for value in group_sizes.values())
+        total_group_cells = sum(int(value) for value in group_sizes.values())
+
+        def group_size_class(size: int) -> str:
+            if minimum_group_size == maximum_group_size:
+                return "balanced"
+            if size == minimum_group_size:
+                return "minority"
+            if size == maximum_group_size:
+                return "majority"
+            return "intermediate"
+
         rows: list[dict[str, Any]] = []
         for run_id, metadata in runs.items():
             for metric in _METRIC_FIELDS:
                 observed = values[run_id].get(metric, [])
                 if not observed:
                     continue
-                row = {
+                base = {
                     "dataset_id": dataset["id"],
                     "condition_id": dataset["condition_id"],
                     "dataset_role": dataset["role"],
+                    "comparison_panel": comparison_panel,
                     "simulator": dataset["generator"],
                     "replicate": dataset["replicate"],
                     **dict(dataset.get("observed_dimensions", dataset.get("dimensions", {}))),
@@ -1795,11 +1844,7 @@ class AndreaExecutor:
                     "configuration_id": metadata.get("configuration_id"),
                     "algorithm_seed": metadata.get("algorithm_seed"),
                     "metric": metric,
-                    "value": fmean(observed),
-                    "contexts": len(observed),
                     "status": "completed",
-                    "duration_seconds": measured.get(run_id, {}).get("duration_seconds"),
-                    "peak_memory_bytes": measured.get(run_id, {}).get("peak_memory_bytes"),
                     "parameters": metadata.get("parameters"),
                     "requested_threads": metadata.get("requested_threads"),
                     "effective_threads": metadata.get("effective_threads"),
@@ -1826,11 +1871,57 @@ class AndreaExecutor:
                         )
                     },
                 }
+                row = {
+                    **base,
+                    "metric_scope": "macro_groups",
+                    "context": None,
+                    "group_size": None,
+                    "group_fraction": None,
+                    "group_size_class": None,
+                    "value": fmean(observed),
+                    "contexts": len(observed),
+                    "duration_seconds": measured.get(run_id, {}).get("duration_seconds"),
+                    "peak_memory_bytes": measured.get(run_id, {}).get("peak_memory_bytes"),
+                }
                 if family is not None:
                     row["family"] = family
                 if "n_estimators" in metadata:
                     row["n_estimators"] = metadata["n_estimators"]
                 rows.append(row)
+                for context in sorted(context_values[run_id]):
+                    contextual = context_values[run_id][context].get(metric, [])
+                    if not contextual:
+                        continue
+                    raw_size = group_sizes.get(context)
+                    if isinstance(raw_size, bool) or not isinstance(raw_size, int):
+                        raise BenchmarkConfigError(
+                            f"Evaluation context {context!r} has no observed group size"
+                        )
+                    context_row = {
+                        **base,
+                        # Prediction-audit totals describe the complete run,
+                        # not one evaluation context. Keeping them only on the
+                        # macro row avoids multiplying those counts by the
+                        # number of groups in flat exports.
+                        "n_prediction_rows": None,
+                        "n_prediction_rows_outside_candidate_space": None,
+                        "n_predicted_edges": None,
+                        "n_predicted_edges_outside_candidate_space": None,
+                        "metric_scope": "group_context",
+                        "context": context,
+                        "group_size": raw_size,
+                        "group_fraction": raw_size / total_group_cells,
+                        "group_size_class": group_size_class(raw_size),
+                        "value": fmean(contextual),
+                        "contexts": 1,
+                        "duration_seconds": None,
+                        "peak_memory_bytes": None,
+                    }
+                    if family is not None:
+                        context_row["family"] = family
+                    if "n_estimators" in metadata:
+                        context_row["n_estimators"] = metadata["n_estimators"]
+                    rows.append(context_row)
         return rows
 
     @staticmethod
@@ -2312,7 +2403,7 @@ class AndreaExecutor:
                 image=image,
                 threads=threads,
                 memory_bytes=memory_each,
-                purpose=f"calibration-validation-{spec['dataset']['id']}",
+                purpose=f"calibration-{spec['dataset']['role']}-{spec['dataset']['id']}",
             )
 
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="spathi-prefix") as pool:
@@ -2354,7 +2445,8 @@ class AndreaExecutor:
                     )
                 )
         expected = len(jobs) * len(spec["exact_prefixes"]) * len(_METRIC_FIELDS)
-        if len(rows) != expected:
+        aggregate_count = sum(row.get("metric_scope") == "macro_groups" for row in rows)
+        if aggregate_count != expected:
             raise BenchmarkConfigError("Exact-prefix validation omitted required metrics")
         return rows, references
 
@@ -2424,6 +2516,7 @@ class AndreaExecutor:
         observed = {
             (row["configuration_id"], row["algorithm_seed"], row["n_estimators"], row["metric"])
             for row in rows
+            if row.get("metric_scope") == "macro_groups"
         }
         expected = {
             (configuration_id, seed, trees, metric)
@@ -2448,6 +2541,7 @@ class AndreaExecutor:
             "calibration_screen": self._execute_calibration_screen,
             "select_calibration_finalists": self._execute_select_finalists,
             "calibration_validate": self._execute_calibration_validate,
+            "calibration_transfer": self._execute_calibration_validate,
             "select_calibration_winner": self._execute_select_winner,
             "comparison_dataset": self._execute_comparison,
             "comparison_statistics": self._execute_statistics,
@@ -2466,6 +2560,15 @@ class AndreaExecutor:
         self, spec: Mapping[str, Any], _dependencies: Mapping[str, Mapping[str, Any]]
     ) -> Mapping[str, Any]:
         dataset = dict(spec["dataset"])
+        simulator_parameters = dataset.get("simulator_parameters", {})
+        requested_group_sizes = None
+        if isinstance(simulator_parameters, Mapping):
+            if dataset.get("generator") == "scale-stress":
+                requested_group_sizes = simulator_parameters.get("groups")
+            elif dataset.get("generator") == "scmultisim":
+                population = simulator_parameters.get("discrete_population")
+                if isinstance(population, Mapping):
+                    requested_group_sizes = population.get("pop_size")
         reference = self.generate(dataset, dict(spec["resources"]))
         record = self.datasets(reference)[0]
         evidence = _json_file(
@@ -2495,6 +2598,12 @@ class AndreaExecutor:
                 ),
                 **dict(materialized["observed_dimensions"]),
                 "tf_count": materialized["tf_count"],
+                "requested_group_sizes": (
+                    list(requested_group_sizes)
+                    if isinstance(requested_group_sizes, list)
+                    else None
+                ),
+                "group_sizes": dict(materialized["group_sizes"]),
             },
             "rows": [],
         }
@@ -2538,7 +2647,7 @@ class AndreaExecutor:
         self._require_comparable_candidate_spaces(rows)
         by_candidate: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            if row.get("metric") == "aupr":
+            if row.get("metric") == "aupr" and row.get("metric_scope") == "macro_groups":
                 by_candidate[str(row["configuration_id"])].append(row)
         expected = {str(value) for value in spec["candidate_ids"]}
         if set(by_candidate) != expected:
@@ -2633,24 +2742,66 @@ class AndreaExecutor:
         self._require_comparable_candidate_spaces(rows)
         grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            if row.get("metric") == "aupr":
+            if row.get("metric") == "aupr" and row.get("metric_scope") == "macro_groups":
                 grouped[(str(row["configuration_id"]), int(row["n_estimators"]))].append(row)
         if not grouped:
-            raise BenchmarkConfigError("Calibration validation produced no AUPR observations")
+            raise BenchmarkConfigError("Calibration validation and transfer produced no AUPR")
+        panel_weights = {
+            str(key): float(value) for key, value in spec["protocol"]["panel_weights"].items()
+        }
+        role_to_panel = {
+            "validation": "moderate_validation",
+            "transfer": "near_real_transfer",
+        }
         ranking = []
         for (candidate, trees), values in grouped.items():
-            scores = [float(row["value"]) for row in values]
-            by_dataset: dict[str, list[float]] = defaultdict(list)
+            by_panel_condition: dict[str, dict[str, list[float]]] = {
+                panel: defaultdict(list) for panel in panel_weights
+            }
             for row in values:
-                by_dataset[str(row["dataset_id"])].append(float(row["value"]))
-            dataset_means = [fmean(by_dataset[key]) for key in sorted(by_dataset)]
+                role = str(row.get("dataset_role", ""))
+                try:
+                    panel = role_to_panel[role]
+                except KeyError as exc:
+                    raise BenchmarkConfigError(
+                        f"Winner selection received an undeclared calibration role: {role!r}"
+                    ) from exc
+                condition = str(row.get("condition_id") or row["dataset_id"])
+                by_panel_condition[panel][condition].append(float(row["value"]))
+            missing_panels = [
+                panel
+                for panel, condition_values in by_panel_condition.items()
+                if not condition_values
+            ]
+            if missing_panels:
+                raise BenchmarkConfigError(
+                    f"Calibration candidate {candidate!r} at {trees} trees omits panels: "
+                    + ", ".join(missing_panels)
+                )
+            panel_means: dict[str, float] = {}
+            panel_condition_means: dict[str, list[float]] = {}
+            for panel, condition_values in by_panel_condition.items():
+                means = [fmean(condition_values[key]) for key in sorted(condition_values)]
+                panel_condition_means[panel] = means
+                panel_means[panel] = fmean(means)
+            weighted_aupr = sum(
+                panel_weights[panel] * panel_means[panel] for panel in sorted(panel_weights)
+            )
+            weighted_variance = sum(
+                panel_weights[panel]
+                * fmean((value - weighted_aupr) ** 2 for value in panel_condition_means[panel])
+                for panel in sorted(panel_weights)
+            )
             ranking.append(
                 {
                     "configuration_id": candidate,
                     "n_estimators": trees,
-                    "mean_aupr": fmean(scores),
-                    "stability_sd": pstdev(dataset_means),
-                    "stability_unit": "validation_dataset_after_seed_averaging",
+                    "mean_aupr": weighted_aupr,
+                    "moderate_validation_mean_aupr": panel_means["moderate_validation"],
+                    "near_real_transfer_mean_aupr": panel_means["near_real_transfer"],
+                    "stability_sd": math.sqrt(weighted_variance),
+                    "stability_unit": "panel_weighted_condition_after_replicate_and_seed_averaging",
+                    "panel_weights": panel_weights,
                     "parameters": values[0]["parameters"],
                 }
             )
@@ -2684,16 +2835,20 @@ class AndreaExecutor:
                 "n_estimators": winner["n_estimators"],
                 "parameters": parameters,
                 "mean_aupr": winner["mean_aupr"],
+                "moderate_validation_mean_aupr": winner["moderate_validation_mean_aupr"],
+                "near_real_transfer_mean_aupr": winner["near_real_transfer_mean_aupr"],
             },
             "decision": {
                 "decision": "selected_configuration",
                 "selected": winner["configuration_id"],
                 "n_estimators": winner["n_estimators"],
                 "practical_equivalence_threshold": threshold,
+                "panel_weights": panel_weights,
             },
             "summary": {
                 "primary_metric": "aupr",
                 "evaluated_configurations": len(ranking),
+                "panel_weights": panel_weights,
             },
         }
 
@@ -2847,6 +3002,10 @@ class AndreaExecutor:
 
         coverage: list[dict[str, Any]] = []
         dataset = spec["dataset"]
+        attributes = dataset.get("attributes", {})
+        comparison_panel = (
+            attributes.get("comparison_panel") if isinstance(attributes, Mapping) else None
+        )
         for family in spec["families"]:
             family_id = str(family["id"])
             declared = {
@@ -2865,6 +3024,7 @@ class AndreaExecutor:
                         "dataset_id": dataset["id"],
                         "condition_id": dataset.get("condition_id"),
                         "replicate": dataset.get("replicate"),
+                        "comparison_panel": comparison_panel,
                         "family": family_id,
                         "method_id": value.get("method_id", run_id),
                         "configuration_id": value.get("configuration_id"),
@@ -2912,6 +3072,9 @@ class AndreaExecutor:
             failures = [
                 {
                     "dataset_id": spec["dataset"]["id"],
+                    "comparison_panel": spec["dataset"].get("attributes", {}).get(
+                        "comparison_panel"
+                    ),
                     "method_id": metadata[run_id].get("method_id", run_id),
                     **outcome,
                 }
@@ -2970,6 +3133,9 @@ class AndreaExecutor:
         failures = [
             {
                 "dataset_id": spec["dataset"]["id"],
+                "comparison_panel": spec["dataset"].get("attributes", {}).get(
+                    "comparison_panel"
+                ),
                 "method_id": metadata[run_id].get("method_id", run_id),
                 **outcome,
             }
@@ -3076,7 +3242,14 @@ class AndreaExecutor:
     def _execute_statistics(
         self, spec: Mapping[str, Any], dependencies: Mapping[str, Mapping[str, Any]]
     ) -> Mapping[str, Any]:
-        rows = [row for value in dependencies.values() for row in value.get("rows", [])]
+        all_rows = [row for value in dependencies.values() for row in value.get("rows", [])]
+        primary_panel = str(spec["statistics"]["primary_panel"])
+        rows = [
+            row
+            for row in all_rows
+            if row.get("metric_scope") == "macro_groups"
+            and row.get("comparison_panel") == primary_panel
+        ]
         self._require_comparable_candidate_spaces(rows)
         families = {str(item["id"]): list(item["route_ids"]) for item in spec["families"]}
         protocol = spec["statistics"]
@@ -3111,6 +3284,8 @@ class AndreaExecutor:
             "decisions": [{"decision": "primary_family", "selected": protocol["primary_family"]}],
             "summary": {
                 "primary_family": protocol["primary_family"],
+                "primary_panel": primary_panel,
+                "descriptive_panel": protocol["descriptive_panel"],
                 "estimand": dict(protocol["estimand"]),
                 "families": [dict(family) for family in spec["families"]],
                 "rankings": ranking_rows,

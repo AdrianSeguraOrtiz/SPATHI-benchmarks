@@ -41,7 +41,9 @@ def test_plan_contains_only_three_phases_and_equal_calibration_candidates() -> N
         "scalability",
     }
     screens = [task for task in tasks if task["kind"] == "calibration_screen"]
+    transfers = [task for task in tasks if task["kind"] == "calibration_transfer"]
     assert screens
+    assert len(transfers) == 1
     for task in screens:
         candidates = task["spec"]["candidates"]
         assert len(candidates) == 27
@@ -49,6 +51,9 @@ def test_plan_contains_only_three_phases_and_equal_calibration_candidates() -> N
             f"candidate-{index:02d}" for index in range(1, 28)
         }
         assert all("reference" not in candidate["id"] for candidate in candidates)
+    validation_ids = {task["task_id"] for task in tasks if task["kind"] == "calibration_validate"}
+    assert validation_ids
+    assert validation_ids <= set(transfers[0]["dependencies"])
 
 
 def test_generators_receive_honest_resource_allowances() -> None:
@@ -118,11 +123,10 @@ def test_comparison_batches_methods_but_scalability_isolates_them() -> None:
     tasks = build_task_plan(design, "reduced", _resource_plan(cpus=32, gib=128))
 
     comparison = [task for task in tasks if task["kind"] == "comparison_dataset"]
-    assert len(comparison) == 8
+    assert len(comparison) == 11
     assert all(len(task["spec"]["routes"]) > 1 for task in comparison)
     assert all(
-        task["executor_contract"].endswith(":machine-relative-memory-slots")
-        for task in comparison
+        task["executor_contract"].endswith(":machine-relative-memory-slots") for task in comparison
     )
     assert all(
         not task["executor_contract"].endswith(":machine-relative-memory-slots")

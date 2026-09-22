@@ -9,10 +9,13 @@
     "smoke": {
       "calibration": {
         "condition_ids": ["c1-linear-clean"],
+        "transfer_condition_ids": ["x0-transfer-smoke"],
         "development_replicates": 1,
         "validation_replicates": 1,
+        "transfer_replicates": 1,
         "screening_algorithm_seeds": 1,
-        "validation_algorithm_seeds": 1
+        "validation_algorithm_seeds": 1,
+        "transfer_algorithm_seeds": 1
       },
       "comparison": {
         "replicates": {"t1-linear-clean": 1},
@@ -34,12 +37,17 @@
           "c2-branching-noisy",
           "c3-dynamic-balanced",
           "c4-dynamic-imbalanced",
-          "c5-high-regulator"
+          "c5-high-regulator",
+          "c6-dynamic-strong-skew",
+          "c7-dynamic-rare-group"
         ],
+        "transfer_condition_ids": ["x1-transfer-high-dimensional"],
         "development_replicates": 1,
         "validation_replicates": 1,
+        "transfer_replicates": 1,
         "screening_algorithm_seeds": 1,
-        "validation_algorithm_seeds": 1
+        "validation_algorithm_seeds": 1,
+        "transfer_algorithm_seeds": 1
       },
       "comparison": {
         "replicates": {
@@ -49,6 +57,9 @@
           "t4-branching-noisy": 1,
           "t5-dynamic-balanced": 1,
           "t6-dynamic-large": 1,
+          "t7-dynamic-strong-skew": 1,
+          "t8-dynamic-rare-group": 1,
+          "d1-high-dimensional-imbalanced": 1,
           "i1-invariant-sergio": 1,
           "i2-invariant-boolode": 1
         },
@@ -70,12 +81,20 @@
           "c2-branching-noisy",
           "c3-dynamic-balanced",
           "c4-dynamic-imbalanced",
-          "c5-high-regulator"
+          "c5-high-regulator",
+          "c6-dynamic-strong-skew",
+          "c7-dynamic-rare-group"
+        ],
+        "transfer_condition_ids": [
+          "x1-transfer-high-dimensional",
+          "x2-transfer-near-real-scale"
         ],
         "development_replicates": 2,
         "validation_replicates": 2,
+        "transfer_replicates": 1,
         "screening_algorithm_seeds": 1,
-        "validation_algorithm_seeds": 3
+        "validation_algorithm_seeds": 3,
+        "transfer_algorithm_seeds": 1
       },
       "comparison": {
         "replicates": {
@@ -85,6 +104,10 @@
           "t4-branching-noisy": 3,
           "t5-dynamic-balanced": 3,
           "t6-dynamic-large": 3,
+          "t7-dynamic-strong-skew": 3,
+          "t8-dynamic-rare-group": 3,
+          "d1-high-dimensional-imbalanced": 1,
+          "d2-near-real-scale": 1,
           "i1-invariant-sergio": 3,
           "i2-invariant-boolode": 3
         },
@@ -146,6 +169,53 @@
         "dimensions": {"cells": 600, "genes": 600, "transcription_factors": 300, "groups": 3},
         "capabilities": ["group_labels", "tf_list"],
         "attributes": {"regulation": "dynamic", "tf_fraction": "high", "noise": "moderate"}
+      },
+      {
+        "id": "c6-dynamic-strong-skew",
+        "label": "C6 · scMultiSim dynamic, strong 1:9:30 group skew",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-strong-skew",
+        "dimensions": {"cells": 800, "genes": 400, "transcription_factors": 40, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"regulation": "dynamic", "balance": "strong_skew", "group_sizes": [20, 180, 600], "noise": "moderate"}
+      },
+      {
+        "id": "c7-dynamic-rare-group",
+        "label": "C7 · scMultiSim dynamic, rare-group 1:49:350 stress",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-rare-group",
+        "dimensions": {"cells": 800, "genes": 400, "transcription_factors": 40, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"regulation": "dynamic", "balance": "rare_group", "group_sizes": [2, 98, 700], "noise": "moderate"}
+      }
+    ],
+    "transfer_conditions": [
+      {
+        "id": "x0-transfer-smoke",
+        "label": "X0 · compact transfer contract check",
+        "simulator": "scale-stress",
+        "scenario": "dynamic-transfer-smoke",
+        "dimensions": {"cells": 300, "genes": 400, "transcription_factors": 40, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "near_real_transfer", "group_sizes": [3, 27, 270], "noise": "moderate"}
+      },
+      {
+        "id": "x1-transfer-high-dimensional",
+        "label": "X1 · high-dimensional transfer with 1:9:90 group skew",
+        "simulator": "scale-stress",
+        "scenario": "dynamic-transfer-high-dimensional",
+        "dimensions": {"cells": 2000, "genes": 5000, "transcription_factors": 500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "near_real_transfer", "group_sizes": [20, 180, 1800], "noise": "moderate"}
+      },
+      {
+        "id": "x2-transfer-near-real-scale",
+        "label": "X2 · near-real-scale transfer with rare-group stress",
+        "simulator": "scale-stress",
+        "scenario": "dynamic-transfer-near-real-scale",
+        "dimensions": {"cells": 5000, "genes": 15000, "transcription_factors": 1000, "groups": 3},
+        "capabilities": ["group_labels", "tf_list"],
+        "attributes": {"panel": "near_real_transfer", "group_sizes": [10, 490, 4500], "noise": "moderate"}
       }
     ],
     "parameter_domains": {
@@ -237,9 +307,15 @@
         "score_exact_prefixes": [25, 50, 100, 250],
         "dataset_split": "validation"
       },
+      "transfer": {
+        "fit_trees": 250,
+        "score_exact_prefixes": [25, 50, 100, 250],
+        "dataset_split": "transfer"
+      },
       "selection": {
         "primary_metric": "aupr",
         "practical_equivalence_fraction": 0.02,
+        "panel_weights": {"moderate_validation": 0.5, "near_real_transfer": 0.5},
         "tie_breakers": ["between_dataset_stability", "declared_tree_count"]
       }
     }
@@ -253,7 +329,7 @@
         "scenario": "linear-clean-test",
         "dimensions": {"cells": 300, "genes": 100, "transcription_factors": 10, "groups": 4},
         "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
-        "attributes": {"panel": "dynamic", "topology": "linear", "noise": "low"}
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "noise": "low"}
       },
       {
         "id": "t2-linear-noisy",
@@ -262,7 +338,7 @@
         "scenario": "linear-noisy-test",
         "dimensions": {"cells": 600, "genes": 400, "transcription_factors": 40, "groups": 4},
         "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
-        "attributes": {"panel": "dynamic", "topology": "linear", "noise": "high"}
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "noise": "high"}
       },
       {
         "id": "t3-branching-clean",
@@ -271,7 +347,7 @@
         "scenario": "branching-clean-test",
         "dimensions": {"cells": 600, "genes": 400, "transcription_factors": 40, "groups": 7},
         "capabilities": ["group_labels", "tf_list", "lineage_tree"],
-        "attributes": {"panel": "dynamic", "topology": "branching", "noise": "low"}
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "branching", "noise": "low"}
       },
       {
         "id": "t4-branching-noisy",
@@ -280,7 +356,7 @@
         "scenario": "branching-elevated-noise-test",
         "dimensions": {"cells": 800, "genes": 400, "transcription_factors": 40, "groups": 7},
         "capabilities": ["group_labels", "tf_list", "lineage_tree"],
-        "attributes": {"panel": "dynamic", "topology": "branching", "noise": "high"}
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "branching", "noise": "high"}
       },
       {
         "id": "t5-dynamic-balanced",
@@ -288,8 +364,8 @@
         "simulator": "scmultisim",
         "scenario": "dynamic-balanced-test",
         "dimensions": {"cells": 1000, "genes": 1000, "transcription_factors": 100, "groups": 3},
-        "capabilities": ["group_labels", "tf_list"],
-        "attributes": {"panel": "dynamic", "topology": "linear", "balance": "balanced"}
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "balance": "balanced"}
       },
       {
         "id": "t6-dynamic-large",
@@ -297,8 +373,44 @@
         "simulator": "scmultisim",
         "scenario": "dynamic-large-test",
         "dimensions": {"cells": 3000, "genes": 3000, "transcription_factors": 500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "scale": "large"}
+      },
+      {
+        "id": "t7-dynamic-strong-skew",
+        "label": "T7 · scMultiSim dynamic, held-out 1:9:30 group skew",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-strong-skew-test",
+        "dimensions": {"cells": 1000, "genes": 1000, "transcription_factors": 100, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "balance": "strong_skew", "group_sizes": [25, 225, 750]}
+      },
+      {
+        "id": "t8-dynamic-rare-group",
+        "label": "T8 · scMultiSim dynamic, held-out rare-group stress",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-rare-group-test",
+        "dimensions": {"cells": 1000, "genes": 1000, "transcription_factors": 100, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "dynamic", "comparison_panel": "primary_accuracy", "topology": "linear", "balance": "rare_group", "group_sizes": [5, 95, 900]}
+      },
+      {
+        "id": "d1-high-dimensional-imbalanced",
+        "label": "D1 · scMultiSim high-dimensional deployment transfer",
+        "simulator": "scmultisim",
+        "scenario": "dynamic-deployment-high-dimensional",
+        "dimensions": {"cells": 2000, "genes": 5000, "transcription_factors": 500, "groups": 3},
+        "capabilities": ["group_labels", "tf_list", "ordered_groups", "lineage_tree"],
+        "attributes": {"panel": "deployment", "comparison_panel": "deployment_transfer", "topology": "linear", "group_sizes": [20, 180, 1800]}
+      },
+      {
+        "id": "d2-near-real-scale",
+        "label": "D2 · near-real-scale deployment transfer",
+        "simulator": "scale-stress",
+        "scenario": "dynamic-deployment-near-real-scale",
+        "dimensions": {"cells": 5000, "genes": 15000, "transcription_factors": 1000, "groups": 3},
         "capabilities": ["group_labels", "tf_list"],
-        "attributes": {"panel": "dynamic", "topology": "linear", "scale": "large"}
+        "attributes": {"panel": "deployment", "comparison_panel": "deployment_transfer", "group_sizes": [10, 490, 4500]}
       },
       {
         "id": "i1-invariant-sergio",
@@ -307,7 +419,7 @@
         "scenario": "invariant-network-test",
         "dimensions": {"cells": 360, "genes": 100, "transcription_factors": 10, "groups": 9},
         "capabilities": ["group_labels", "tf_list"],
-        "attributes": {"panel": "invariant_control", "regulation": "invariant"}
+        "attributes": {"panel": "invariant_control", "comparison_panel": "primary_accuracy", "regulation": "invariant"}
       },
       {
         "id": "i2-invariant-boolode",
@@ -316,7 +428,7 @@
         "scenario": "invariant-network-test",
         "dimensions": {"cells": 300, "genes": 19, "transcription_factors": 18, "groups": 3},
         "capabilities": ["group_labels", "tf_list"],
-        "attributes": {"panel": "invariant_control", "regulation": "invariant"}
+        "attributes": {"panel": "invariant_control", "comparison_panel": "primary_accuracy", "regulation": "invariant"}
       }
     ],
     "routes": [
@@ -381,12 +493,14 @@
     },
     "statistics": {
       "primary_family": "a-information-matched",
+      "primary_panel": "primary_accuracy",
+      "descriptive_panel": "deployment_transfer",
       "metrics": ["aupr", "auroc", "f1"],
       "omnibus": "friedman",
       "post_hoc": "pairwise_wilcoxon_holm",
       "blocking_unit": "seeded_dataset",
       "estimand": {
-        "scenario_weighting": "equal_replicates_per_scenario",
+        "scenario_weighting": "equal_replicates_per_primary_scenario",
         "sampling_unit": "independent_seeded_dataset",
         "missing_data_rule": "complete_blocks_within_family_and_metric"
       },
