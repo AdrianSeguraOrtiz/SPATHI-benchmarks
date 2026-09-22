@@ -41,6 +41,7 @@ def _snapshot() -> dict[str, Any]:
                             "genes": 100,
                             "tf_count": 10,
                             "groups": 3,
+                            "group_sizes": [3, 27, 270],
                         }
                     ],
                 },
@@ -84,7 +85,48 @@ def _snapshot() -> dict[str, Any]:
                             "genes": 1_000,
                             "tf_count": 100,
                             "groups": 3,
+                            "group_sizes": {"pop_1": 25, "pop_2": 225, "pop_3": 750},
+                        },
+                        {
+                            "dataset_id": "deployment-1",
+                            "simulator": "scmultisim",
+                            "dataset_role": "test",
+                            "cells": 2_000,
+                            "genes": 5_000,
+                            "tf_count": 500,
+                            "groups": 3,
+                            "group_sizes": {"pop_1": 20, "pop_2": 180, "pop_3": 1_800},
                         }
+                    ],
+                    "execution_coverage": [
+                        {
+                            "dataset_id": "test-1",
+                            "method_id": "spathi",
+                            "family": "group_only_directed_tf",
+                            "comparison_panel": "primary_accuracy",
+                            "status": "completed",
+                        },
+                        {
+                            "dataset_id": "test-1",
+                            "method_id": "genie3",
+                            "family": "group_only_directed_tf",
+                            "comparison_panel": "primary_accuracy",
+                            "status": "completed",
+                        },
+                        {
+                            "dataset_id": "deployment-1",
+                            "method_id": "spathi",
+                            "family": "group_only_directed_tf",
+                            "comparison_panel": "deployment_transfer",
+                            "status": "completed",
+                        },
+                        {
+                            "dataset_id": "deployment-1",
+                            "method_id": "genie3",
+                            "family": "group_only_directed_tf",
+                            "comparison_panel": "deployment_transfer",
+                            "status": "timeout",
+                        },
                     ],
                     "stage_summaries": [
                         {
@@ -126,10 +168,12 @@ def _snapshot() -> dict[str, Any]:
                                 },
                             ],
                             "estimand": {
-                                "scenario_weighting": "equal_replicates_per_scenario",
+                                "scenario_weighting": "equal_replicates_per_primary_scenario",
                                 "sampling_unit": "independent_seeded_dataset",
                                 "missing_data_rule": ("complete_blocks_within_family_and_metric"),
                             },
+                            "primary_panel": "primary_accuracy",
+                            "descriptive_panel": "deployment_transfer",
                             "statistics": {
                                 "schema_version": "1.0",
                                 "design": "complete_paired_blocks",
@@ -226,6 +270,8 @@ def _snapshot() -> dict[str, Any]:
                         "metric": "aupr_directed",
                         "value": 0.47,
                         "status": "completed",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "primary_accuracy",
                     },
                     {
                         "dataset_id": "test-1",
@@ -234,6 +280,8 @@ def _snapshot() -> dict[str, Any]:
                         "metric": "aupr_directed",
                         "value": 0.39,
                         "status": "completed",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "primary_accuracy",
                     },
                     {
                         "dataset_id": "test-1",
@@ -242,10 +290,57 @@ def _snapshot() -> dict[str, Any]:
                         "metric": "aupr_directed",
                         "value": 0.43,
                         "status": "completed",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "primary_accuracy",
+                    },
+                    {
+                        "dataset_id": "test-1",
+                        "method_id": "spathi",
+                        "family": "group_only_directed_tf",
+                        "metric": "aupr_directed",
+                        "value": 0.33,
+                        "status": "completed",
+                        "metric_scope": "group_context",
+                        "comparison_panel": "primary_accuracy",
+                        "context": "group:pop_1",
+                        "group_size": 25,
+                        "group_fraction": 0.025,
+                        "group_size_class": "minority",
+                    },
+                    {
+                        "dataset_id": "deployment-1",
+                        "method_id": "spathi",
+                        "family": "group_only_directed_tf",
+                        "metric": "aupr_directed",
+                        "value": 0.36,
+                        "status": "completed",
+                        "metric_scope": "macro_groups",
+                        "comparison_panel": "deployment_transfer",
+                    },
+                    {
+                        "dataset_id": "deployment-1",
+                        "method_id": "spathi",
+                        "family": "group_only_directed_tf",
+                        "metric": "aupr_directed",
+                        "value": 0.22,
+                        "status": "completed",
+                        "metric_scope": "group_context",
+                        "comparison_panel": "deployment_transfer",
+                        "context": "group:pop_1",
+                        "group_size": 20,
+                        "group_fraction": 0.01,
+                        "group_size_class": "minority",
                     },
                 ],
                 "decisions": [{"decision": "primary_family", "selected": "group_only_directed_tf"}],
-                "failures": [],
+                "failures": [
+                    {
+                        "dataset_id": "deployment-1",
+                        "method_id": "genie3",
+                        "comparison_panel": "deployment_transfer",
+                        "status": "timeout",
+                    }
+                ],
                 "provenance": {"plan_sha256": "b" * 64},
             },
             "scalability": {
@@ -334,6 +429,12 @@ def _calibration_stage_snapshot() -> dict[str, Any]:
             "prefixes": [25, 50, 100, 250],
             "prefix_semantics": "one shared deterministic forest per candidate and seed",
         },
+        {
+            "physical_fits": 4,
+            "logical_results": 16,
+            "prefixes": [25, 50, 100, 250],
+            "prefix_semantics": "one shared deterministic forest per candidate and seed",
+        },
         {"primary_metric": "aupr", "evaluated_configurations": 16},
     ]
     calibration["rows"] = [
@@ -397,16 +498,30 @@ def _calibration_stage_snapshot() -> dict[str, Any]:
             "parameters": {**shared_parameters, "n_estimators": 50, "random_seed": 83},
         },
         {
+            "dataset_id": "transfer-1",
+            "dataset_role": "transfer",
+            "configuration_id": "candidate-01",
+            "metric": "aupr",
+            "value": 0.44,
+            "duration_seconds": None,
+            "n_estimators": 50,
+            "parameters": {**shared_parameters, "n_estimators": 50, "random_seed": 97},
+        },
+        {
             "configuration_id": "candidate-01",
             "n_estimators": 25,
             "mean_aupr": 0.43,
+            "moderate_validation_mean_aupr": 0.43,
+            "near_real_transfer_mean_aupr": 0.42,
             "stability_sd": 0.012,
             "parameters": shared_parameters,
         },
         {
             "configuration_id": "candidate-01",
             "n_estimators": 50,
-            "mean_aupr": 0.45,
+            "mean_aupr": 0.445,
+            "moderate_validation_mean_aupr": 0.45,
+            "near_real_transfer_mean_aupr": 0.44,
             "stability_sd": 0.009,
             "parameters": shared_parameters,
         },
@@ -421,6 +536,10 @@ def _calibration_stage_snapshot() -> dict[str, Any]:
             "selected": "candidate-01",
             "n_estimators": 50,
             "practical_equivalence_threshold": 0.441,
+            "panel_weights": {
+                "moderate_validation": 0.5,
+                "near_real_transfer": 0.5,
+            },
         },
     ]
     return snapshot
@@ -480,10 +599,15 @@ def test_csv_exports_are_complete_flat_and_not_html_dependencies(tmp_path: Path)
         outcomes = list(csv.DictReader(handle))
     assert {row["phase"] for row in outcomes} == {"comparison", "scalability"}
     assert {row["record_type"] for row in outcomes} == {
+        "execution_coverage",
         "execution_outcome",
         "failure",
     }
-    failure = next(row for row in outcomes if row["record_type"] == "failure")
+    failure = next(
+        row
+        for row in outcomes
+        if row["record_type"] == "failure" and row["phase"] == "scalability"
+    )
     assert failure["method_id"] == "simic"
     assert failure["status"] == "estimated_infeasible_time"
 
@@ -501,6 +625,8 @@ def test_calibration_report_separates_screening_validation_and_selection(
     assert "Finalist advancement" in html
     assert "Exact-prefix validation" in html
     assert "runtime is not assigned to individual prefix points" in html
+    assert "Near-real transfer confirmation" in html
+    assert "Transfer-panel convergence" in html
     assert 'title: "Exact tree prefix", type: "category"' in html
     assert "Final selection and practical-equivalence band" in html
     assert "not a statistical non-inferiority test" in html
@@ -508,6 +634,8 @@ def test_calibration_report_separates_screening_validation_and_selection(
     assert "distance_standardization" in html
     assert '"dataset_role":"development"' in html
     assert '"dataset_role":"validation"' in html
+    assert '"dataset_role":"transfer"' in html
+    assert '"group_sizes":[3,27,270]' in html
     assert '"practical_equivalence_threshold":0.441' in html
     assert "Candidate accuracy and cost" not in html
 
@@ -533,9 +661,12 @@ def test_comparison_report_renders_complete_symmetric_statistics(tmp_path: Path)
     assert "Friedman rankings and Wilcoxon–Holm comparisons" in html
     assert "No method is designated as a control" in html
     assert "Prospectively declared estimand" in html
-    assert "equal_replicates_per_scenario" in html
+    assert '"primary_panel":"primary_accuracy"' in html
+    assert '"descriptive_panel":"deployment_transfer"' in html
+    assert "equal_replicates_per_primary_scenario" in html
     assert "complete_blocks_within_family_and_metric" in html
     assert "All-pairs Wilcoxon tests with Holm correction" in html
+    assert "Formal inference uses only the predeclared primary-accuracy panel" in html
     assert "Complete blocks used" in html
     assert "Excluded blocks and reasons" in html
     assert "Analysis coverage" in html
@@ -557,6 +688,12 @@ def test_comparison_accuracy_views_separate_descriptive_available_cases_from_inf
     assert "Complete-block accuracy distributions (descriptive)" in html
     assert "Friedman and Wilcoxon–Holm inference is reported separately below" in html
     assert "function completeBlockRows(family, metric, rows)" in html
+    assert "Deployment transfer" in html
+    assert "Near-real-scale accuracy and feasibility" in html
+    assert "not inserted into Friedman–Holm inference" in html
+    assert "Transfer execution outcomes" in html
+    assert "Group-resolved accuracy" in html
+    assert "Accuracy against group prevalence" in html
 
 
 def test_comparison_report_reserves_resource_comparisons_for_scalability(
@@ -568,7 +705,10 @@ def test_comparison_report_reserves_resource_comparisons_for_scalability(
     assert "Runtime and memory comparisons are reported only in Scalability" in html
     assert "joint comparison telemetry can include scheduler waiting" in html
     assert "Runtime telemetry remains in the matching CSV for audit" in html
-    assert 'if (name !== "comparison") auditColumns.push("duration_seconds", "peak_memory_bytes")' in html
+    assert (
+        'if (name !== "comparison") auditColumns.push("duration_seconds", "peak_memory_bytes")'
+        in html
+    )
 
 
 def test_each_phase_places_dataset_context_before_result_plots(tmp_path: Path) -> None:

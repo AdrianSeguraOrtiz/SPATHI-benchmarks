@@ -130,9 +130,9 @@ and replication.
 
 | Profile | Calibration | Held-out comparison | Scalability | Intended use and qualitative duration |
 | --- | --- | --- | --- | --- |
-| `smoke` | C1 only; 1 development and 1 validation replicate; 31 fits | T1, 1 replicate | P-S; 1 ladder replicate; 1 and standard-thread points | Contract and installation check; minutes to a few hours, depending on image builds |
-| `reduced` | C1–C5; 1 development and 1 validation replicate; 155 fits | T1–T6, I1, I2; 1 replicate each | P-S through P-XL; 1 ladder replicate; P-M at 1, standard, and all threads; 1-hour task limit | Development-grade end-to-end evidence; normally hours to roughly a day on a capable many-core host |
-| `full` | C1–C5; 2 development and 2 validation replicates; 390 fits | 24 independent instances: three replicates of each T1–T6, I1, and I2 scenario | P-S through P-XL; 3 ladder and 3 P-M thread-scaling replicates; 4-hour task limit | Publication study; multiple days, with a target envelope of about one week on a large server |
+| `smoke` | C1 plus compact X0 transfer; 1 replicate and 1 algorithm seed per split; 35 fits | T1, 1 replicate | P-S; 1 ladder replicate; 1 and standard-thread points | Contract and installation check; minutes to a few hours, depending on image builds |
+| `reduced` | C1–C7 plus X1 transfer; 1 replicate and 1 algorithm seed per split; 221 fits | 10 primary scenarios plus D1 deployment transfer; 11 instances | P-S through P-XL; 1 ladder replicate; P-M at 1, standard, and all threads; 1-hour task limit | Development-grade end-to-end evidence; normally hours to roughly a day on a capable many-core host |
+| `full` | C1–C7 plus X1–X2 transfer; 2 moderate development/validation replicates, 3 validation seeds, and 1 transfer replicate/seed; 554 fits | 30 primary instances plus D1–D2 deployment transfer; 32 instances | P-S through P-XL; 3 ladder and 3 P-M thread-scaling replicates; 4-hour task limit | Publication study; multiple days, with a target envelope of about one week on a large server |
 
 Durations are planning ranges, not promises. They include simulator and container startup costs and
 depend on which external tools reach their time or memory boundaries. `plan` records the exact DAG
@@ -152,6 +152,8 @@ candidate receives protected treatment.
 | C3 | scMultiSim, dynamic and balanced | 300 | 100 | 10 | 3 |
 | C4 | scMultiSim, dynamic and imbalanced | 800 | 400 | 40 | 3 |
 | C5 | scMultiSim, 50% regulator fraction | 600 | 600 | 300 | 3 |
+| C6 | scMultiSim, dynamic, strong group skew (20/180/600 cells) | 800 | 400 | 40 | 3 |
+| C7 | scMultiSim, dynamic, rare-group stress (2/98/700 cells) | 800 | 400 | 40 | 3 |
 
 These are prospective design dimensions. scMultiSim, SERGIO, BoolODE and the benchmark-owned
 scale generator must reproduce their declared dimensions exactly. dyngen may add transcription
@@ -189,31 +191,52 @@ biologically meaningful annotation-confidence measurement.
 
 All 27 candidates first receive 50 trees on development data. The same declared primary metric and
 tie-breakers advance four candidates. Those four are fitted once to 250 trees on independent
-validation data and scored at exact 25/50/100/250-tree prefixes. The winner is chosen by directed
-AUPR, a predeclared 2% practical-equivalence band, then between-dataset stability and declared tree
-count. All four prefixes come from one shared 250-tree physical fit, so the workflow records that
-batch cost once and does not invent a per-prefix runtime. This is a deterministic selection rule,
-not a statistical non-inferiority test. Operational settings such as thread count and random seed
-are controlled by the study rather than tuned.
+moderate validation data and scored at exact 25/50/100/250-tree prefixes. They then receive the
+same treatment on a separate high-dimensional transfer panel:
+
+| Transfer condition | Purpose | Cells | Genes | TFs | Group cells |
+| --- | --- | ---: | ---: | ---: | --- |
+| X0 | Compact smoke-path check | 300 | 400 | 40 | 3 / 27 / 270 |
+| X1 | High-dimensional transfer | 2,000 | 5,000 | 500 | 20 / 180 / 1,800 |
+| X2 | Near-real-scale, rare-group transfer | 5,000 | 15,000 | 1,000 | 10 / 490 / 4,500 |
+
+X0 is used only by `smoke`, X1 by `reduced` and `full`, and X2 only by `full`. These are generic,
+deterministically seeded synthetic scale-stress models with known dynamic truth. They contain no
+application-cohort data, identifiers, annotations, or derived statistics.
+
+The winner is chosen from a predeclared score that gives equal weight to the moderate-validation
+panel and the near-real transfer panel; conditions are averaged before panel weighting so extra
+replicates cannot silently change the estimand. Directed AUPR defines a 2% practical-equivalence
+band, followed by between-condition stability and declared tree count. All four prefixes come from
+one shared 250-tree physical fit per candidate, dataset and seed. Stability uses the same panel
+weights as accuracy, so the larger moderate panel cannot dominate that tie-breaker either. The
+workflow therefore records each shared forest cost
+once and does not invent a per-prefix runtime. This is a deterministic selection rule, not a
+statistical non-inferiority test. Operational settings such as thread count and random seed are
+controlled by the study rather than tuned.
 
 The calibration report shows candidate score distributions, the accuracy–cost plane,
-dataset-level consistency, every parameter vector, the recorded advancement/selection decisions,
-and exceptions.
+dataset-level consistency, moderate exact-prefix convergence, transfer-panel convergence, the
+panel-balanced final ranking, every parameter vector, the recorded decisions, and exceptions.
 
 ## Phase 2 — held-out comparison
 
 The selected SPATHI policy is frozen before any comparison dataset is evaluated.
 
-| Dataset | Simulator and role | Cells | Genes | TFs | Groups |
-| --- | --- | ---: | ---: | ---: | ---: |
-| T1 | dyngen linear, clean | 300 | 100 | 10 | 4 |
-| T2 | dyngen linear, noisy | 600 | 400 | 40 | 4 |
-| T3 | dyngen branching, clean | 600 | 400 | 40 | 7 |
-| T4 | dyngen branching, elevated kinetic noise | 800 | 400 | 40 | 7 |
-| T5 | scMultiSim dynamic, balanced | 1,000 | 1,000 | 100 | 3 |
-| T6 | scMultiSim dynamic, larger | 3,000 | 3,000 | 500 | 3 |
-| I1 | SERGIO invariant-network control | 360 | 100 | 10 | 9 |
-| I2 | BoolODE invariant-network control | 300 | 19 | 18 | 3 |
+| Dataset | Panel | Simulator and role | Cells | Genes | TFs | Group cells |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| T1 | Primary accuracy | dyngen linear, clean | 300 | 100 | 10 | 4 occupied milestones |
+| T2 | Primary accuracy | dyngen linear, noisy | 600 | 400 | 40 | 4 occupied milestones |
+| T3 | Primary accuracy | dyngen branching, clean | 600 | 400 | 40 | 7 occupied milestones |
+| T4 | Primary accuracy | dyngen branching, elevated kinetic noise | 800 | 400 | 40 | 7 occupied milestones |
+| T5 | Primary accuracy | scMultiSim dynamic, balanced | 1,000 | 1,000 | 100 | 3 balanced groups |
+| T6 | Primary accuracy | scMultiSim dynamic, larger | 3,000 | 3,000 | 500 | 3 balanced groups |
+| T7 | Primary accuracy | scMultiSim dynamic, strong skew | 1,000 | 1,000 | 100 | 25 / 225 / 750 |
+| T8 | Primary accuracy | scMultiSim dynamic, rare-group stress | 1,000 | 1,000 | 100 | 5 / 95 / 900 |
+| I1 | Primary accuracy | SERGIO invariant-network control | 360 | 100 | 10 | 9 groups |
+| I2 | Primary accuracy | BoolODE invariant-network control | 300 | 19 | 18 | 3 groups |
+| D1 | Deployment transfer | scMultiSim dynamic, high-dimensional and imbalanced | 2,000 | 5,000 | 500 | 20 / 180 / 1,800 |
+| D2 | Deployment transfer | generic dynamic scale stress, near-real dimensions | 5,000 | 15,000 | 1,000 | 10 / 490 / 4,500 |
 
 Competitors use the defaults of their corresponding ANDREA catalog integrations. Only seeds,
 threads, delivery mode, and explicitly stated no-prior/information-contract switches are supplied;
@@ -233,11 +256,30 @@ different family is pooled into the primary ranking. The report offers family-sp
 accuracy distributions, paired-score heatmaps, execution coverage, complete audit tables, and all
 failures or exclusions.
 
-The publication estimand is declared prospectively as an equal mixture of the eight scenarios.
-`full` therefore contributes exactly three independently seeded datasets per scenario; every
-seeded dataset is one paired block, so cheap scenarios receive no extra statistical weight. Within
-each family and metric, only blocks completed by every eligible member enter Friedman and paired
-Wilcoxon–Holm inference. Available-case plots remain descriptive and are labelled as such.
+The publication estimand is declared prospectively as an equal mixture of the ten primary
+scenarios T1–T8, I1 and I2. `full` therefore contributes exactly three independently seeded
+datasets per primary scenario; every seeded dataset is one paired block, so cheap scenarios receive
+no extra statistical weight. Within each family and metric, only primary blocks completed by every
+eligible member enter Friedman and paired Wilcoxon–Holm inference. T7 and T8 make robustness to
+strong and extreme population imbalance part of that formal comparison instead of an anecdotal
+appendix.
+
+D1 and D2 answer a different question: whether each contract-eligible method remains accurate and
+computationally viable as the synthetic problem approaches deployment dimensions. Every eligible
+method is submitted under the same profile-level resource budget. ANDREA's empirical infeasibility,
+timeout, memory-limit and failure outcomes are retained, not silently discarded. These datasets are
+reported descriptively because forcing incompletely observed large-scale blocks into Friedman–Holm
+would change the estimand toward whichever methods happen to finish. D1 is present in `reduced` and
+`full`; D2 is publication-only. The report separates this transfer evidence from the primary panel
+and also exposes per-group accuracy against observed prevalence, including minority, intermediate
+and majority groups. Runtime and memory comparisons remain isolated in Phase 3, where their
+measurement contract is controlled.
+
+The scMultiSim datasets T5–T8 and D1 request both the simulator-derived ordered phenotypes and its
+lineage tree. SimiC and joint-lineage scMTNI therefore participate in the imbalanced and
+high-dimensional scenarios inside their respective information-richer families. D2 exposes only
+groups and a TF list, so those two routes are correctly ineligible there rather than being supplied
+with an invented order or lineage; independent/no-prior scMTNI remains eligible.
 
 ## Phase 3 — scalability
 

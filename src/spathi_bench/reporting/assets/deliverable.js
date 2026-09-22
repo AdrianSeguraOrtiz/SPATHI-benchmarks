@@ -164,6 +164,9 @@
     return expanded;
   }
 
+  function metricScope(row) { return String(row.metric_scope || "macro_groups"); }
+  function comparisonPanel(row) { return String(row.comparison_panel || "primary_accuracy"); }
+
   function outcomeGroup(status) {
     const value = String(status || "completed").toLowerCase();
     if (["complete", "completed", "completed_with_warnings", "success"].includes(value)) return "completed";
@@ -217,7 +220,7 @@
       "Synthetic evidence represented in this phase",
       "Simulator, scientific role, observed dimensions and seed are shown before any result plot. Any accepted simulator-specific difference from the prospective design is stated explicitly."
     ));
-    renderTable(section, datasetRows(phase), ["dataset_id", "simulator", "dataset_role", "cells", "genes", "tf_count", "groups", "dimension_contract", "seed"]);
+    renderTable(section, datasetRows(phase), ["dataset_id", "simulator", "dataset_role", "cells", "genes", "tf_count", "groups", "group_sizes", "dimension_contract", "seed"]);
     root.appendChild(section);
   }
 
@@ -243,20 +246,16 @@
     const winnerId = winnerDecision.selected === undefined ? null : String(winnerDecision.selected);
     const winnerTrees = number(winnerDecision.n_estimators);
     const threshold = number(winnerDecision.practical_equivalence_threshold);
-    const metrics = metricRows(phase.rows);
+    const metrics = metricRows(phase.rows).filter((row) => metricScope(row) === "macro_groups");
     const metric = chooseMetric(metrics, phase.summary);
     const primary = metrics.filter((row) => row.metric === metric);
     const explicitStage = (row) => String(first(row, ["calibration_stage", "stage", "dataset_role", "role"], "")).toLowerCase();
-    const isValidation = (row) => {
+    const validationRows = primary.filter((row) => explicitStage(row).includes("valid"));
+    const transferRows = primary.filter((row) => explicitStage(row).includes("transfer"));
+    const screeningRows = primary.filter((row) => {
       const stage = explicitStage(row);
-      if (stage.includes("valid")) return true;
-      if (stage.includes("develop") || stage.includes("screen")) return false;
-      const trees = treeCount(row);
-      const runtime = number(first(row, ["duration_seconds", "wall_seconds", "runtime_seconds"], NaN));
-      return finalists.includes(String(candidateId(row))) && validationPrefixes.includes(trees) && !Number.isFinite(runtime);
-    };
-    const validationRows = primary.filter(isValidation);
-    const screeningRows = primary.filter((row) => !isValidation(row));
+      return stage.includes("develop") || stage.includes("screen");
+    });
     const screeningTrees = unique(screeningRows.map(treeCount).filter(Number.isFinite)).sort((a, b) => a - b);
     const candidateIds = unique(screeningRows.map(candidateId)).sort();
 
@@ -365,15 +364,48 @@
     validation.appendChild(validationCard.card);
     root.appendChild(validation);
 
+    const transfer = el("section", { className: "section" });
+    transfer.appendChild(sectionHeading(
+      "Calibration stage 4",
+      "Near-real transfer confirmation",
+      "The same finalists and exact tree prefixes are evaluated on independent, high-dimensional synthetic conditions with pronounced group imbalance. These data contain no real cohort information."
+    ));
+    const transferCard = plotCard("Transfer-panel convergence", `${human(metric || "metric")} versus the exact categorical tree prefix on the high-dimensional transfer panel.`, true);
+    const transferCandidates = unique(transferRows.map(candidateId)).sort();
+    const transferPrefixes = unique([...validationPrefixes, ...transferRows.map(treeCount).filter(Number.isFinite)]).sort((a, b) => a - b);
+    if (transferRows.length && transferPrefixes.length) {
+      const traces = transferCandidates.map((candidate, index) => {
+        const points = transferPrefixes.map((trees) => {
+          const values = transferRows.filter((row) => candidateId(row) === candidate && treeCount(row) === trees).map((row) => row.value);
+          return { trees, mean: mean(values), sd: standardDeviation(values), observations: values.length };
+        }).filter((point) => Number.isFinite(point.mean));
+        return {
+          type: "scatter",
+          mode: "lines+markers",
+          name: candidate,
+          x: points.map((point) => String(point.trees)),
+          y: points.map((point) => point.mean),
+          error_y: { type: "data", array: points.map((point) => point.sd), visible: true },
+          customdata: points.map((point) => [point.sd, point.observations]),
+          hovertemplate: "Candidate: %{fullData.name}<br>Trees: %{x}<br>Mean score: %{y:.4f}<br>SD: %{customdata[0]:.4f}<br>Observations: %{customdata[1]}<extra></extra>",
+          marker: { color: COLORS[index % COLORS.length], size: 8 },
+          line: { color: COLORS[index % COLORS.length], width: 2.5 }
+        };
+      });
+      plot(transferCard.plot, traces, { xaxis: { title: "Exact tree prefix", type: "category", categoryorder: "array", categoryarray: transferPrefixes.map(String) }, yaxis: { title: `Mean transfer ${human(metric)}`, rangemode: "tozero" }, legend: { orientation: "h", y: -0.28 } });
+    } else transferCard.plot.appendChild(el("div", { className: "empty", text: "No near-real transfer observations are available." }));
+    transfer.appendChild(transferCard.card);
+    root.appendChild(transfer);
+
     const selection = el("section", { className: "section" });
     selection.appendChild(sectionHeading(
-      "Calibration stage 4",
+      "Calibration stage 5",
       "Final selection and practical-equivalence band",
-      "All finalist-prefix combinations remain candidates. The declared tolerance forms a practical-equivalence band; stability and then tree count break ties inside that band. This is a deterministic selection rule, not a statistical non-inferiority test."
+      "All finalist-prefix combinations remain candidates. Moderate validation and near-real transfer receive their declared equal panel weights before the practical-equivalence band is formed; stability and then tree count break ties inside that band. This is a deterministic selection rule, not a statistical non-inferiority test."
     ));
     const selectionRows = phase.rows.filter((row) => Number.isFinite(number(row.mean_aupr)) && Number.isFinite(number(row.n_estimators)) && !Object.prototype.hasOwnProperty.call(row, "mean_duration_seconds"));
     const orderedSelection = [...selectionRows].sort((left, right) => number(right.mean_aupr) - number(left.mean_aupr));
-    const selectionCard = plotCard("Validated candidate-prefix ranking", "Mean validation accuracy for every finalist and exact tree prefix. The shaded region marks the recorded practical-equivalence band.", true);
+    const selectionCard = plotCard("Weighted candidate-prefix ranking", "Panel-balanced accuracy for every finalist and exact tree prefix. The shaded region marks the recorded practical-equivalence band.", true);
     if (orderedSelection.length) {
       const labels = orderedSelection.map((row) => `${candidateId(row)} · ${compact(row.n_estimators)} trees`);
       const values = orderedSelection.map((row) => number(row.mean_aupr));
@@ -385,9 +417,9 @@
         x: labels,
         y: values,
         marker: { color: colors },
-        customdata: orderedSelection.map((row) => [row.stability_sd, Number.isFinite(threshold) && number(row.mean_aupr) >= threshold ? "yes" : "no", candidateId(row) === winnerId && number(row.n_estimators) === winnerTrees ? "selected" : "candidate"]),
-        hovertemplate: "%{x}<br>Mean validation score: %{y:.4f}<br>Stability SD: %{customdata[0]:.4f}<br>Inside practical band: %{customdata[1]}<br>Status: %{customdata[2]}<extra></extra>"
-      }], { xaxis: { title: "Candidate configuration and exact tree prefix", type: "category", tickangle: -40 }, yaxis: { title: `Mean validation ${human(metric)}`, rangemode: "tozero" }, shapes, showlegend: false });
+        customdata: orderedSelection.map((row) => [row.moderate_validation_mean_aupr, row.near_real_transfer_mean_aupr, row.stability_sd, Number.isFinite(threshold) && number(row.mean_aupr) >= threshold ? "yes" : "no", candidateId(row) === winnerId && number(row.n_estimators) === winnerTrees ? "selected" : "candidate"]),
+        hovertemplate: "%{x}<br>Panel-weighted score: %{y:.4f}<br>Moderate validation: %{customdata[0]:.4f}<br>Near-real transfer: %{customdata[1]:.4f}<br>Stability SD: %{customdata[2]:.4f}<br>Inside practical band: %{customdata[3]}<br>Status: %{customdata[4]}<extra></extra>"
+      }], { xaxis: { title: "Candidate configuration and exact tree prefix", type: "category", tickangle: -40 }, yaxis: { title: `Panel-weighted ${human(metric)}`, rangemode: "tozero" }, shapes, showlegend: false });
     } else selectionCard.plot.appendChild(el("div", { className: "empty", text: "The final candidate-prefix ranking is not yet available." }));
     selection.appendChild(selectionCard.card);
     const ranking = el("article", { className: "table-card" });
@@ -396,11 +428,13 @@
       validation_rank: index + 1,
       configuration_id: candidateId(row),
       n_estimators: row.n_estimators,
-      mean_aupr: row.mean_aupr,
+      panel_weighted_aupr: row.mean_aupr,
+      moderate_validation_mean_aupr: row.moderate_validation_mean_aupr,
+      near_real_transfer_mean_aupr: row.near_real_transfer_mean_aupr,
       stability_sd: row.stability_sd,
       within_practical_band: Number.isFinite(threshold) ? number(row.mean_aupr) >= threshold : null,
       selected: candidateId(row) === winnerId && number(row.n_estimators) === winnerTrees
-    })), ["validation_rank", "configuration_id", "n_estimators", "mean_aupr", "stability_sd", "within_practical_band", "selected"]);
+    })), ["validation_rank", "configuration_id", "n_estimators", "panel_weighted_aupr", "moderate_validation_mean_aupr", "near_real_transfer_mean_aupr", "stability_sd", "within_practical_band", "selected"]);
     selection.appendChild(ranking);
     root.appendChild(selection);
 
@@ -485,6 +519,7 @@
           dataset_id: dataset,
           method_id: method,
           family,
+          comparison_panel: comparisonPanel(row),
           status: row.status || "completed"
         }));
       });
@@ -525,20 +560,26 @@
       })), ["family_id", "label", "methods", "statistical_role", "rationale"]);
     }
     const summaries = Array.isArray(phase.summary.stage_summaries) ? phase.summary.stage_summaries : [];
-    const estimand = summaries.map((summary) => summary?.estimand).find((value) => value && typeof value === "object");
+    const statisticalSummary = summaries.find((summary) => summary?.estimand && typeof summary.estimand === "object");
+    const estimand = statisticalSummary && statisticalSummary.estimand;
     if (estimand) {
       append(section,
         el("h3", { text: "Prospectively declared estimand" }),
         el("p", { className: "muted", text: "This contract fixes how scenarios, independent synthetic realizations and missing executions enter the formal comparison." })
       );
-      renderTable(section, [estimand], ["scenario_weighting", "sampling_unit", "missing_data_rule"]);
+      renderTable(section, [{
+        primary_panel: statisticalSummary.primary_panel,
+        descriptive_panel: statisticalSummary.descriptive_panel,
+        ...estimand
+      }], ["primary_panel", "descriptive_panel", "scenario_weighting", "sampling_unit", "missing_data_rule"]);
     }
     root.appendChild(section);
   }
 
   function comparisonPlots(root, phase) {
-    const metrics = metricRows(phase.rows);
-    const executionCoverage = comparisonCoverageRows(phase);
+    const allMetrics = metricRows(phase.rows);
+    const metrics = allMetrics.filter((row) => metricScope(row) === "macro_groups" && comparisonPanel(row) === "primary_accuracy");
+    const executionCoverage = comparisonCoverageRows(phase).filter((row) => comparisonPanel(row) === "primary_accuracy");
     const section = el("section", { className: "section" });
     section.appendChild(sectionHeading("Accuracy evidence", "Methods within declared contract families", "Use family-specific blocks; information-asymmetric methods are not pooled into one ranking."));
     const families = unique([
@@ -634,6 +675,142 @@
       plot(heat.plot, [{ type: "heatmap", x: datasets, y: methods, z, colorscale: "Blues", colorbar: { title: human(selectedMetric) }, hoverongaps: false }], { xaxis: { title: "Held-out dataset", tickangle: -30 }, yaxis: { title: "Method", automargin: true } });
     });
     update();
+
+    const deploymentMetrics = allMetrics.filter((row) => metricScope(row) === "macro_groups" && comparisonPanel(row) === "deployment_transfer");
+    const deploymentCoverage = comparisonCoverageRows(phase).filter((row) => comparisonPanel(row) === "deployment_transfer");
+    if (deploymentMetrics.length || deploymentCoverage.length) {
+      const deployment = el("section", { className: "section" });
+      deployment.appendChild(sectionHeading(
+        "Deployment transfer",
+        "Near-real-scale accuracy and feasibility",
+        "Every contract-eligible method is attempted under the declared resource budget. Accuracy is descriptive because incomplete large-scale blocks are not inserted into Friedman–Holm inference."
+      ));
+      const controls = el("div", { className: "toolbar" });
+      const familyControl = el("label", { className: "control", text: "Competitor family" });
+      const familySelect = el("select");
+      const deploymentFamilies = unique([
+        ...deploymentMetrics.map((row) => first(row, ["family", "competitor_family"], "unclassified")),
+        ...deploymentCoverage.map((row) => row.family)
+      ]);
+      deploymentFamilies.forEach((family) => familySelect.appendChild(el("option", { text: comparisonFamilyLabel(phase, family), attrs: { value: family } })));
+      familyControl.appendChild(familySelect);
+      const metricControl = el("label", { className: "control", text: "Accuracy metric" });
+      const deploymentMetricSelect = el("select"); metricControl.appendChild(deploymentMetricSelect);
+      append(controls, familyControl, metricControl); deployment.appendChild(controls);
+      const deploymentGrid = el("div", { className: "grid" });
+      const deploymentAccuracy = plotCard("Completed-run transfer accuracy", "Macro-group score for completed methods only; missing methods remain visible in the feasibility panel.", true);
+      const deploymentHeat = plotCard("Transfer dataset scores", "Blank cells indicate that no valid accuracy result was produced.", false);
+      const deploymentOutcomes = plotCard("Transfer execution outcomes", "Unique method–dataset outcomes including empirical infeasibility, timeout, memory limit and runtime failure.", false);
+      append(deploymentGrid, deploymentAccuracy.card, deploymentHeat.card, deploymentOutcomes.card); deployment.appendChild(deploymentGrid); root.appendChild(deployment);
+
+      function updateDeployment() {
+        const family = familySelect.value || deploymentFamilies[0];
+        const familyRows = deploymentMetrics.filter((row) => first(row, ["family", "competitor_family"], "unclassified") === family);
+        const availableMetrics = unique(familyRows.map((row) => row.metric));
+        const previous = deploymentMetricSelect.value;
+        deploymentMetricSelect.textContent = "";
+        availableMetrics.forEach((metric) => deploymentMetricSelect.appendChild(el("option", { text: human(metric), attrs: { value: metric } })));
+        deploymentMetricSelect.value = availableMetrics.includes(previous) ? previous : (availableMetrics[0] || "");
+        const metric = deploymentMetricSelect.value;
+        const rows = familyRows.filter((row) => row.metric === metric);
+        const familyCoverage = deploymentCoverage.filter((row) => row.family === family);
+        const methods = unique([...rows.map((row) => first(row, ["method_id", "tool_id", "method"], "unknown")), ...familyCoverage.map((row) => row.method_id)]);
+        const datasets = unique([...rows.map((row) => first(row, ["dataset_id", "dataset"], "unknown")), ...familyCoverage.map((row) => row.dataset_id)]);
+        if (rows.length) {
+          plot(deploymentAccuracy.plot, methods.map((method, index) => ({ type: "box", name: method, y: rows.filter((row) => first(row, ["method_id", "tool_id", "method"], "unknown") === method).map((row) => row.value), boxpoints: "all", jitter: .25, marker: { color: COLORS[index % COLORS.length], size: 6 }, line: { color: COLORS[index % COLORS.length] } })), { yaxis: { title: human(metric), rangemode: "tozero" }, xaxis: { title: "Method", tickangle: -25 }, showlegend: false });
+          const z = methods.map((method) => datasets.map((dataset) => {
+            const values = rows.filter((row) => first(row, ["method_id", "tool_id", "method"], "unknown") === method && first(row, ["dataset_id", "dataset"], "unknown") === dataset).map((row) => row.value);
+            return values.length ? mean(values) : null;
+          }));
+          plot(deploymentHeat.plot, [{ type: "heatmap", x: datasets, y: methods, z, colorscale: "Blues", colorbar: { title: human(metric) }, hoverongaps: false }], { xaxis: { title: "Deployment-transfer dataset", tickangle: -30 }, yaxis: { title: "Method", automargin: true } });
+        } else {
+          [deploymentAccuracy.plot, deploymentHeat.plot].forEach((target) => {
+            Plotly.purge(target);
+            target.textContent = "";
+            target.appendChild(el("div", { className: "empty", text: "No completed accuracy result is available for this family; consult the execution outcomes." }));
+          });
+        }
+        const outcomeTones = ["completed", "stopped", "failed"];
+        plot(deploymentOutcomes.plot, outcomeTones.map((tone, index) => ({
+          type: "bar",
+          name: human(tone),
+          x: methods,
+          y: methods.map((method) => familyCoverage.filter((row) => row.method_id === method && outcomeGroup(row.status) === tone).length),
+          marker: { color: ["#15803d", "#b45309", "#be123c"][index] }
+        })), { barmode: "stack", xaxis: { title: "Method", tickangle: -25 }, yaxis: { title: "Unique deployment datasets", dtick: 1 } });
+      }
+      familySelect.addEventListener("change", updateDeployment);
+      deploymentMetricSelect.addEventListener("change", updateDeployment);
+      updateDeployment();
+    }
+
+    const contextualMetrics = allMetrics.filter((row) => metricScope(row) === "group_context");
+    if (contextualMetrics.length) {
+      const groups = el("section", { className: "section" });
+      groups.appendChild(sectionHeading(
+        "Group-resolved accuracy",
+        "Minority, intermediate and majority groups",
+        "Each point is an actual ANDREA group-context metric. Runtime is attached only to the corresponding macro run and is never duplicated across groups."
+      ));
+      const controls = el("div", { className: "toolbar" });
+      const panelControl = el("label", { className: "control", text: "Comparison panel" });
+      const panelSelect = el("select"); unique(contextualMetrics.map(comparisonPanel)).forEach((panel) => panelSelect.appendChild(el("option", { text: human(panel), attrs: { value: panel } }))); panelControl.appendChild(panelSelect);
+      const familyControl = el("label", { className: "control", text: "Competitor family" });
+      const groupFamilySelect = el("select"); familyControl.appendChild(groupFamilySelect);
+      const metricControl = el("label", { className: "control", text: "Accuracy metric" });
+      const groupMetricSelect = el("select"); metricControl.appendChild(groupMetricSelect);
+      append(controls, panelControl, familyControl, metricControl); groups.appendChild(controls);
+      const groupGrid = el("div", { className: "grid" });
+      const classPlot = plotCard("Accuracy by group-size class", "Scores are stratified by the observed cell-count rank within each synthetic dataset.", true);
+      const fractionPlot = plotCard("Accuracy against group prevalence", "Every point retains its dataset, exact group context, cell count and prevalence.", true);
+      append(groupGrid, classPlot.card, fractionPlot.card); groups.appendChild(groupGrid); root.appendChild(groups);
+
+      function updateGroups() {
+        const panel = panelSelect.value;
+        const panelRows = contextualMetrics.filter((row) => comparisonPanel(row) === panel);
+        const families = unique(panelRows.map((row) => first(row, ["family", "competitor_family"], "unclassified")));
+        const oldFamily = groupFamilySelect.value;
+        groupFamilySelect.textContent = "";
+        families.forEach((family) => groupFamilySelect.appendChild(el("option", { text: comparisonFamilyLabel(phase, family), attrs: { value: family } })));
+        groupFamilySelect.value = families.includes(oldFamily) ? oldFamily : (families[0] || "");
+        const familyRows = panelRows.filter((row) => first(row, ["family", "competitor_family"], "unclassified") === groupFamilySelect.value);
+        const availableMetrics = unique(familyRows.map((row) => row.metric));
+        const oldMetric = groupMetricSelect.value;
+        groupMetricSelect.textContent = "";
+        availableMetrics.forEach((metric) => groupMetricSelect.appendChild(el("option", { text: human(metric), attrs: { value: metric } })));
+        groupMetricSelect.value = availableMetrics.includes(oldMetric) ? oldMetric : (availableMetrics[0] || "");
+        const rows = familyRows.filter((row) => row.metric === groupMetricSelect.value);
+        const methods = unique(rows.map((row) => first(row, ["method_id", "tool_id", "method"], "unknown")));
+        const classes = ["minority", "intermediate", "majority", "balanced"].filter((groupClass) => rows.some((row) => row.group_size_class === groupClass));
+        plot(classPlot.plot, methods.map((method, index) => ({
+          type: "box",
+          name: method,
+          x: rows.filter((row) => first(row, ["method_id", "tool_id", "method"], "unknown") === method).map((row) => human(row.group_size_class)),
+          y: rows.filter((row) => first(row, ["method_id", "tool_id", "method"], "unknown") === method).map((row) => row.value),
+          boxpoints: "all",
+          jitter: .22,
+          marker: { color: COLORS[index % COLORS.length], size: 5 },
+          line: { color: COLORS[index % COLORS.length] }
+        })), { xaxis: { title: "Observed group-size class", categoryorder: "array", categoryarray: classes.map(human) }, yaxis: { title: human(groupMetricSelect.value), rangemode: "tozero" }, legend: { orientation: "h", y: -0.28 } });
+        plot(fractionPlot.plot, methods.map((method, index) => {
+          const selected = rows.filter((row) => first(row, ["method_id", "tool_id", "method"], "unknown") === method);
+          return {
+            type: "scatter",
+            mode: "markers",
+            name: method,
+            x: selected.map((row) => row.group_fraction),
+            y: selected.map((row) => row.value),
+            customdata: selected.map((row) => [row.dataset_id, row.context, row.group_size, human(row.group_size_class)]),
+            marker: { color: COLORS[index % COLORS.length], size: 8, opacity: .75 },
+            hovertemplate: "Method: %{fullData.name}<br>Dataset: %{customdata[0]}<br>Context: %{customdata[1]}<br>Cells: %{customdata[2]}<br>Class: %{customdata[3]}<br>Prevalence: %{x:.3%}<br>Score: %{y:.4f}<extra></extra>"
+          };
+        }), { xaxis: { title: "Observed group prevalence", type: "log", tickformat: ".1%" }, yaxis: { title: human(groupMetricSelect.value), rangemode: "tozero" }, legend: { orientation: "h", y: -0.28 } });
+      }
+      panelSelect.addEventListener("change", updateGroups);
+      groupFamilySelect.addEventListener("change", updateGroups);
+      groupMetricSelect.addEventListener("change", updateGroups);
+      updateGroups();
+    }
   }
 
   function statisticsAnalyses(phase) {
@@ -647,7 +824,7 @@
   function comparisonStatistics(root, phase) {
     const analyses = statisticsAnalyses(phase);
     const section = el("section", { className: "section" });
-    section.appendChild(sectionHeading("Paired inference", "Friedman rankings and Wilcoxon–Holm comparisons", "Each family–metric analysis uses one explicit set of complete paired blocks. No method is designated as a control: every unordered method pair is tested and corrected together."));
+    section.appendChild(sectionHeading("Paired inference", "Friedman rankings and Wilcoxon–Holm comparisons", "Formal inference uses only the predeclared primary-accuracy panel. Each family–metric analysis uses one explicit set of complete paired blocks. Deployment-transfer outcomes remain descriptive. No method is designated as a control: every unordered method pair is tested and corrected together."));
     if (!analyses.length) {
       section.appendChild(el("div", { className: "empty card", text: "Paired statistical results are not available yet." }));
       root.appendChild(section);
