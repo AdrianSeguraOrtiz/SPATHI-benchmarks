@@ -111,7 +111,12 @@ ceilings make a run coexist with other jobs:
 
 Parallel-safe calibration and comparison tasks share the declared capacity. Formal scalability
 measurements run in isolation so wall time and peak memory remain attributable. Each tool receives
-its declared thread budget; the scheduler never oversubscribes the frozen study capacity.
+its declared thread budget; the scheduler never oversubscribes the frozen study capacity. When a
+comparison matrix lies beyond every measured ANDREA cost-profile size, the small profiling
+container limit is not extrapolated as a memory model. Instead, ANDREA assigns one conservative
+machine-relative memory slot per standard eight-thread worker and lets its wave planner reduce
+concurrency to remain within the frozen host budget. Explicit per-run memory requests remain
+authoritative.
 External simulator generation uses the largest CPU/RAM tier measured by ANDREA that fits the host
 (RAM: 8, 16, or 32 GiB; parallel simulator CPUs: 1, 2, 4, or 8). Hosts with less than 8 GiB of
 available benchmark memory are rejected before launching a simulator. The chunked in-repository

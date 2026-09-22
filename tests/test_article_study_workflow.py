@@ -120,6 +120,15 @@ def test_comparison_batches_methods_but_scalability_isolates_them() -> None:
     comparison = [task for task in tasks if task["kind"] == "comparison_dataset"]
     assert len(comparison) == 8
     assert all(len(task["spec"]["routes"]) > 1 for task in comparison)
+    assert all(
+        task["executor_contract"].endswith(":machine-relative-memory-slots")
+        for task in comparison
+    )
+    assert all(
+        not task["executor_contract"].endswith(":machine-relative-memory-slots")
+        for task in tasks
+        if task["kind"] != "comparison_dataset"
+    )
 
     measurements = [task for task in tasks if task["kind"] == "scalability_measurement"]
     assert measurements

@@ -35,6 +35,7 @@ from .design import (
 from .executor import (
     DATASET_MATERIALIZATION_CONTRACT,
     EXECUTOR_CONTRACT,
+    INFERENCE_RESOURCE_CONTRACT,
     AndreaExecutor,
     effective_route_threads,
 )
@@ -267,7 +268,14 @@ def _task(
         "stage": stage,
         "kind": kind,
         "scientific_digest": canonical_json_sha256(request),
-        "executor_contract": f"{EXECUTOR_CONTRACT}:{WORKFLOW_CONTRACT}:{kind}",
+        "executor_contract": (
+            f"{EXECUTOR_CONTRACT}:{WORKFLOW_CONTRACT}:{kind}"
+            + (
+                f":{INFERENCE_RESOURCE_CONTRACT}"
+                if kind == "comparison_dataset"
+                else ""
+            )
+        ),
         "spec": request,
         "dependencies": list(dependencies),
     }

@@ -697,6 +697,36 @@ def test_inference_image_provenance_covers_catalog_and_custom_tools(
     assert identities["custom_s1"]["origin"] == "custom"
 
 
+def test_inference_artifact_identity_includes_resource_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _executor(tmp_path)
+    captured: dict[str, Any] = {}
+
+    class CapturedSpec(RuntimeError):
+        pass
+
+    def capture(kind: str, spec: dict[str, Any]) -> Any:
+        captured["kind"] = kind
+        captured["spec"] = spec
+        raise CapturedSpec
+
+    monkeypatch.setattr(executor, "_inference_image_identities", lambda *_args: {})
+    monkeypatch.setattr(executor.store, "key_for", capture)
+
+    with pytest.raises(CapturedSpec):
+        executor.infer(
+            dataset_manifest="/unused/dataset-manifest.json",
+            tools_params={"runs": []},
+            custom_tools=None,
+            resources={"cpu_threads": 8, "memory_bytes": 16 * 1024**3},
+            purpose="comparison",
+        )
+
+    assert captured["kind"] == "inference"
+    assert captured["spec"]["resource_contract"] == "machine-relative-memory-slots"
+
+
 def test_generation_identity_covers_catalog_simulator_and_host_generator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -37,6 +37,7 @@ from .study_store import TaskRecord
 from .synthetic import GENERATOR_CONTRACT, generate_scale_dataset
 
 EXECUTOR_CONTRACT = "article-study-executor-v1"
+INFERENCE_RESOURCE_CONTRACT = "machine-relative-memory-slots"
 DATASET_MATERIALIZATION_CONTRACT = "requested-observed-dataset-v1"
 _BASE_IMAGE = (
     "python:3.13-slim@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f"
@@ -1342,6 +1343,7 @@ class AndreaExecutor:
         image_identities = self._inference_image_identities(tools_params, custom_tools)
         spec = {
             "contract": EXECUTOR_CONTRACT,
+            "resource_contract": INFERENCE_RESOURCE_CONTRACT,
             "dataset_manifest": dataset_manifest,
             "tools_params": dict(tools_params),
             "custom_tools": dict(custom_tools) if custom_tools else None,
@@ -3250,6 +3252,7 @@ class AndreaExecutor:
 
 __all__ = [
     "EXECUTOR_CONTRACT",
+    "INFERENCE_RESOURCE_CONTRACT",
     "AndreaExecutor",
     "artifact_reference",
     "effective_route_threads",
