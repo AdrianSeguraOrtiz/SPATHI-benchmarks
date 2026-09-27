@@ -15,6 +15,7 @@ from spathi_bench.executor import (
     _candidate_space_evidence,
     _candidate_space_identity,
     _dataset_materialization_contract,
+    _filter_inference_request,
     _fingerprint_dataset,
     _materialize_generated_inputs,
     _neutralize_lineage_information,
@@ -733,6 +734,120 @@ def test_inference_artifact_identity_includes_resource_contract(
 
     assert captured["kind"] == "inference"
     assert captured["spec"]["resource_contract"] == "machine-relative-memory-slots"
+
+
+def test_inference_projects_preflight_exclusions_before_planning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _executor(tmp_path)
+    observed_plan_runs: list[str] = []
+
+    def command(arguments: list[str], **_kwargs: Any) -> None:
+        action = arguments[:2]
+        if action == ["infer-network", "preflight"]:
+            output = Path(arguments[arguments.index("--output-json") + 1])
+            output.write_text(
+                json.dumps(
+                    {
+                        "runs": {
+                            "selected": ["eligible"],
+                            "skipped": {"incompatible": "dimension contract"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return
+        if action == ["infer-network", "plan"]:
+            tools = json.loads(Path(arguments[arguments.index("--tools-params") + 1]).read_text())
+            observed_plan_runs.extend(run["run_id"] for run in tools["runs"])
+            output = Path(arguments[arguments.index("--output-dir") + 1])
+            output.mkdir()
+            (output / "plan.json").write_text(
+                json.dumps(
+                    {
+                        "runs": [
+                            {
+                                "run_id": "eligible",
+                                "resource_decision": _logical_resource_decision(
+                                    _physical_resource_decision()
+                                ),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return
+        if action == ["infer-network", "run"]:
+            output = Path(arguments[arguments.index("--run-dir") + 1])
+            (output / "run_report.json").write_text(
+                json.dumps(
+                    {
+                        "tools": {
+                            "completed": ["eligible"],
+                            "resource_outcomes": {
+                                "eligible": {
+                                    "status": "completed",
+                                    "reason": "execution_completed",
+                                }
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(executor, "_inference_image_identities", lambda *_args: {})
+    monkeypatch.setattr("spathi_bench.executor.andrea_command", command)
+    result = executor.infer(
+        dataset_manifest="/unused/dataset-manifest.json",
+        tools_params={
+            "runs": [
+                {"run_id": "eligible", "tool_id": "first"},
+                {"run_id": "incompatible", "tool_id": "second"},
+            ]
+        },
+        custom_tools=None,
+        resources={"cpu_threads": 8, "memory_bytes": 16 * 1024**3},
+        purpose="comparison",
+    )
+
+    assert observed_plan_runs == ["eligible"]
+    artifact = Path(result["path"])
+    decision = json.loads((artifact / result["members"]["decision"]).read_text())
+    assert decision["status"] == "completed_with_omissions"
+    assert decision["contract_ineligible_runs"] == ["incompatible"]
+    assert json.loads((artifact / "request/tools-params.json").read_text())["runs"] == [
+        {"run_id": "eligible", "tool_id": "first"},
+        {"run_id": "incompatible", "tool_id": "second"},
+    ]
+    assert json.loads((artifact / "request/preflight-admitted-tools-params.json").read_text())[
+        "runs"
+    ] == [{"run_id": "eligible", "tool_id": "first"}]
+
+
+def test_filter_inference_request_keeps_only_matching_custom_definitions() -> None:
+    tools, custom = _filter_inference_request(
+        {
+            "runs": [
+                {"run_id": "first", "tool_id": "custom_first"},
+                {"run_id": "second", "tool_id": "custom_second"},
+            ]
+        },
+        {
+            "tools": [
+                {"run_id": "first", "docker_image": "first:1"},
+                {"run_id": "second", "docker_image": "second:1"},
+            ]
+        },
+        ["second"],
+    )
+
+    assert [run["run_id"] for run in tools["runs"]] == ["second"]
+    assert custom == {"tools": [{"run_id": "second", "docker_image": "second:1"}]}
 
 
 def test_generation_identity_covers_catalog_simulator_and_host_generator(

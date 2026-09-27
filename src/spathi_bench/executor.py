@@ -241,6 +241,67 @@ def _planning_resource_decisions(
     return decisions
 
 
+def _filter_inference_request(
+    tools_params: Mapping[str, Any],
+    custom_tools: Mapping[str, Any] | None,
+    admitted_run_ids: Sequence[str],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Materialize the exact run subset admitted by an ANDREA boundary.
+
+    Preflight and resource planning are evidence-producing admission boundaries.
+    Their exclusions must remain in the decision record, while only admitted
+    runs may cross into the next boundary.  Keeping this projection generic
+    prevents one incompatible catalog tool from aborting every otherwise valid
+    run in a joint comparison.
+    """
+
+    admitted = list(admitted_run_ids)
+    if any(not isinstance(run_id, str) or not run_id for run_id in admitted):
+        raise BenchmarkConfigError("Admitted inference run IDs are invalid")
+    if len(admitted) != len(set(admitted)):
+        raise BenchmarkConfigError("Admitted inference run IDs contain duplicates")
+
+    raw_runs = tools_params.get("runs")
+    if not isinstance(raw_runs, list):
+        raise BenchmarkConfigError("Inference tools parameters must contain a runs array")
+    runs_by_id: dict[str, Mapping[str, Any]] = {}
+    for index, raw in enumerate(raw_runs):
+        if not isinstance(raw, Mapping):
+            raise BenchmarkConfigError(f"Inference request run {index} must be an object")
+        run_id = raw.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise BenchmarkConfigError(f"Inference request run {index} has no valid run_id")
+        if run_id in runs_by_id:
+            raise BenchmarkConfigError(f"Inference request contains duplicate run_id {run_id!r}")
+        runs_by_id[run_id] = raw
+    missing = sorted(set(admitted).difference(runs_by_id))
+    if missing:
+        raise BenchmarkConfigError(
+            "Inference admission references undeclared runs: " + ", ".join(missing)
+        )
+
+    filtered_tools = {
+        **dict(tools_params),
+        "runs": [dict(runs_by_id[run_id]) for run_id in admitted],
+    }
+    if custom_tools is None:
+        return filtered_tools, None
+
+    raw_custom = custom_tools.get("tools")
+    if not isinstance(raw_custom, list):
+        raise BenchmarkConfigError("Custom inference tools must contain a tools array")
+    admitted_set = set(admitted)
+    filtered_custom = [
+        dict(item)
+        for item in raw_custom
+        if isinstance(item, Mapping) and item.get("run_id") in admitted_set
+    ]
+    return (
+        filtered_tools,
+        ({**dict(custom_tools), "tools": filtered_custom} if filtered_custom else None),
+    )
+
+
 def _relative(artifact: Artifact, path: Path) -> str:
     try:
         return path.resolve().relative_to(artifact.path.resolve()).as_posix()
@@ -1414,11 +1475,21 @@ class AndreaExecutor:
                 raise BenchmarkConfigError("Inference preflight has invalid selected-run IDs")
             if len(selected) != len(set(selected)):
                 raise BenchmarkConfigError("Inference preflight has duplicate selected-run IDs")
+            admitted_tools, admitted_custom = _filter_inference_request(
+                tools_params,
+                custom_tools,
+                selected,
+            )
+            requested_run_ids = [str(run["run_id"]) for run in tools_params["runs"]]
+            contract_ineligible = sorted(set(requested_run_ids).difference(selected))
             if not selected:
                 atomic_write_json(
                     staging / "decision.json",
                     {
                         "status": "no_contract_eligible_runs",
+                        "contract_ineligible_runs": contract_ineligible,
+                        "infeasible_runs": [],
+                        "resource_decisions": {},
                         "preflight": preflight_payload,
                         "image_identities": image_identities,
                     },
@@ -1430,6 +1501,27 @@ class AndreaExecutor:
                 )
                 return self._inference_reference(artifact)
 
+            # Preserve the complete request as provenance, but never send a
+            # preflight-excluded run into ANDREA's stricter planner boundary.
+            # The original preflight report remains the canonical exclusion
+            # evidence consumed by comparison coverage and reports.
+            admitted_tools_path = request / "preflight-admitted-tools-params.json"
+            atomic_write_json(
+                admitted_tools_path,
+                admitted_tools,
+                "Preflight-admitted tools",
+                boundary=staging,
+            )
+            admitted_custom_path: Path | None = None
+            if admitted_custom is not None:
+                admitted_custom_path = request / "preflight-admitted-custom-tools.json"
+                atomic_write_json(
+                    admitted_custom_path,
+                    admitted_custom,
+                    "Preflight-admitted custom tools",
+                    boundary=staging,
+                )
+
             output = staging / "output"
             cores = int(resources["cpu_threads"])
             memory_gb = _andrea_ram_gb(resources)
@@ -1439,7 +1531,7 @@ class AndreaExecutor:
                 "--dataset-manifest",
                 dataset_manifest,
                 "--tools-params",
-                str(tools_path),
+                str(admitted_tools_path),
                 "--output-dir",
                 str(output),
                 "--max-cores",
@@ -1451,8 +1543,8 @@ class AndreaExecutor:
                 "--planner-time-limit-seconds",
                 "300",
             ]
-            if custom_path:
-                command.extend(["--custom-tools", str(custom_path)])
+            if admitted_custom_path:
+                command.extend(["--custom-tools", str(admitted_custom_path)])
             andrea_command(
                 command,
                 repo_root=self.repo_root,
@@ -1468,19 +1560,18 @@ class AndreaExecutor:
                 if value.get("status") == "estimated_infeasible_time"
             )
             if respect_resource_decision and infeasible:
-                requested_runs = list(tools_params.get("runs", []))
-                eligible_runs = [
-                    dict(run)
-                    for run in requested_runs
-                    if isinstance(run, Mapping)
-                    and run.get("run_id") in selected
-                    and run.get("run_id") not in infeasible
-                ]
-                if not eligible_runs:
+                eligible_ids = [run_id for run_id in selected if run_id not in infeasible]
+                eligible_tools, eligible_custom = _filter_inference_request(
+                    admitted_tools,
+                    admitted_custom,
+                    eligible_ids,
+                )
+                if not eligible_ids:
                     atomic_write_json(
                         staging / "decision.json",
                         {
                             "status": "estimated_infeasible_time",
+                            "contract_ineligible_runs": contract_ineligible,
                             "infeasible_runs": infeasible,
                             "resource_decisions": resource_decisions,
                             "preflight": preflight_payload,
@@ -1498,25 +1589,22 @@ class AndreaExecutor:
                 # then build a second executable plan containing only admitted
                 # runs; an infeasible competitor is never silently executed.
                 shutil.copyfile(plan_path, request / "admission-plan.json")
+                resource_tools_path = request / "resource-admitted-tools-params.json"
                 atomic_write_json(
-                    tools_path, {"runs": eligible_runs}, "Admitted tools", boundary=staging
+                    resource_tools_path,
+                    eligible_tools,
+                    "Resource-admitted tools",
+                    boundary=staging,
                 )
-                if custom_path is not None and custom_tools is not None:
-                    eligible_ids = {str(run["run_id"]) for run in eligible_runs}
-                    admitted_custom = [
-                        dict(item)
-                        for item in custom_tools.get("tools", [])
-                        if isinstance(item, Mapping) and item.get("run_id") in eligible_ids
-                    ]
-                    if admitted_custom:
-                        atomic_write_json(
-                            custom_path,
-                            {"tools": admitted_custom},
-                            "Admitted custom tools",
-                            boundary=staging,
-                        )
-                    else:
-                        custom_path = None
+                resource_custom_path: Path | None = None
+                if eligible_custom is not None:
+                    resource_custom_path = request / "resource-admitted-custom-tools.json"
+                    atomic_write_json(
+                        resource_custom_path,
+                        eligible_custom,
+                        "Resource-admitted custom tools",
+                        boundary=staging,
+                    )
                 shutil.rmtree(output)
                 command = [
                     "infer-network",
@@ -1524,7 +1612,7 @@ class AndreaExecutor:
                     "--dataset-manifest",
                     dataset_manifest,
                     "--tools-params",
-                    str(tools_path),
+                    str(resource_tools_path),
                     "--output-dir",
                     str(output),
                     "--max-cores",
@@ -1536,8 +1624,8 @@ class AndreaExecutor:
                     "--planner-time-limit-seconds",
                     "300",
                 ]
-                if custom_path:
-                    command.extend(["--custom-tools", str(custom_path)])
+                if resource_custom_path:
+                    command.extend(["--custom-tools", str(resource_custom_path)])
                 andrea_command(
                     command,
                     repo_root=self.repo_root,
@@ -1546,8 +1634,7 @@ class AndreaExecutor:
                 )
                 plan_path = _unique_file(output, "plan.json")
                 admitted_plan = _json_file(plan_path, "admitted inference plan")
-                admitted_ids = [str(run["run_id"]) for run in eligible_runs]
-                admitted_decisions = _planning_resource_decisions(admitted_plan, admitted_ids)
+                admitted_decisions = _planning_resource_decisions(admitted_plan, eligible_ids)
                 newly_infeasible = sorted(
                     run_id
                     for run_id, value in admitted_decisions.items()
@@ -1582,8 +1669,13 @@ class AndreaExecutor:
                     "status": (
                         "completed_with_failures"
                         if failed is not None
-                        else ("completed_with_omissions" if infeasible else "completed")
+                        else (
+                            "completed_with_omissions"
+                            if contract_ineligible or infeasible
+                            else "completed"
+                        )
                     ),
+                    "contract_ineligible_runs": contract_ineligible,
                     "infeasible_runs": infeasible,
                     "resource_decisions": resource_decisions,
                     "resource_outcomes": outcomes,
