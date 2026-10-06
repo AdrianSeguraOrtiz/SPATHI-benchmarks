@@ -1,0 +1,60 @@
+{
+  "title": "SPATHI-benchmarks (FULL)",
+  "subtitle": "From parameter search to fair held-out evaluation and scalability testing",
+  "title_note": ["Planned workflow for the", "full synthetic study profile"],
+  "summary": [
+    ["74", "seeded synthetic datasets"],
+    ["554", "calibration fits"],
+    ["32", "held-out dataset instances"],
+    ["16", "routes in 5 comparison families"]
+  ],
+  "calibration": {
+    "title": "Calibration", "tagline": ["Find a robust SPATHI policy", "on development data"],
+    "a_title": "7 training scenarios × 2 development replicates",
+    "a_desc": ["14 synthetic datasets with variation in topology,", "noise and group balance"],
+    "a_labels": ["Different topologies", "Varying noise levels", "Different group balance"],
+    "b_title": "27 candidate parameter sets", "b_desc": "Pilot fit with a 50-tree forest",
+    "b_grid": "27 parameter sets", "b_forest": "50 trees per fit", "b_count": ["378", "total fits", "(screening)"],
+    "c_title": "Advance 4 finalists", "c_desc": "Evaluate exact forest sizes: 25, 50, 100, 250 trees",
+    "c_bracket": ["Reuse one 250-tree forest", "with exact prefixes"],
+    "c_counts": [["168", "validation fits"], ["8", "transfer fits"]],
+    "d_title": "Pick one frozen SPATHI policy",
+    "d_desc": "Score = 50% moderate validation + 50% transfer robustness",
+    "d_notes": ["2% equivalence band", "Break ties by stability,", "then smaller forest"],
+    "d_freeze": "Frozen policy", "d_freeze_desc": ["Used for all held-out and", "scalability experiments"]
+  },
+  "comparison": {
+    "title": "Held-out comparison", "tagline": ["Evaluate fairly across", "diverse test datasets"],
+    "a_title": "30 primary test datasets + 2 deployment-scale",
+    "a_desc": "32 held-out dataset instances (unseen in calibration)",
+    "a_primary": "30 × Primary test datasets", "a_deployment": "2 × Deployment-scale",
+    "b_title": ["Each dataset is sent through", "every eligible method"],
+    "b_desc": "Run the frozen policy and comparison methods",
+    "b_methods": ["SPATHI (frozen policy)", "Comparison method 1", "Comparison method 2", "Comparison method …"],
+    "c_title": "5 fair comparison families", "c_desc": "Methods grouped by information and assumptions",
+    "c_families": [["Matched", "information", "(primary)"], ["Ordered", "states"], ["Lineage-", "aware"], ["All-gene", "fitting"], ["Topology", "only"]],
+    "c_requests": "492 eligible route × dataset requests",
+    "d_title": "Shared metrics and paired statistics", "d_desc": "Same metrics for all methods, paired by dataset",
+    "d_stats": ["Complete paired", "primary blocks", "Friedman + all-pairs", "Wilcoxon-Holm"]
+  },
+  "scalability": {
+    "title": "Scalability", "tagline": ["Test computational limits", "and practical feasibility"],
+    "a_title": "4 size scales", "a_desc": ["small → medium → large → extra-large", "(4 scales × 3 replicates × 16 routes = 192 measurements)"],
+    "a_sizes": ["Small", "Medium", "Large", "Extra-large"],
+    "a_count": "192 planned ladder measurements",
+    "b_title": "Isolated, resource-controlled runs", "b_desc": "One method at a time with fixed resources",
+    "c_title": "Thread scaling on the medium dataset", "c_desc": "1 CPU, standard CPUs, and all CPUs",
+    "c_cpu": [["1 CPU"], ["Standard CPUs", "(e.g. 4, 8, …)"], ["All CPUs", "(max)"]],
+    "c_reuse": ["Reuse the medium", "baseline when the", "effective thread", "count matches."],
+    "d_title": "Measure runtime, memory, and feasibility frontier", "d_desc": "Track performance and stop when infeasible",
+    "d_status": [["Runtime", "(up to 4 h)"], ["Memory", "usage"], ["Success"], ["Failed", "(stop larger sizes)"], ["Not attempted", "(blocked runs)"]],
+    "d_limit": ["4 h timeout per", "physical scalability task"],
+    "d_stop": ["If a route fails at one size,", "stop that route at larger sizes.", "Later blocked runs are marked not attempted."]
+  },
+  "footer": {
+    "repro_title": "Reproducible execution", "repro_text": "Semantic seed 734921 · fixed CPU/RAM plan · SQLite journal · atomic artifacts",
+    "output_title": "Portable outputs", "output_text": "HTML reports + CSV tables + provenance files",
+    "note": "Synthetic data only · counts are planned protocol quantities, not measured results.",
+    "signature": "SPATHI-benchmarks (FULL)"
+  }
+}

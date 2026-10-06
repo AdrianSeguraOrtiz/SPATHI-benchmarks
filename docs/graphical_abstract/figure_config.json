@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "canvas": {
+    "width": 1448,
+    "height": 1086,
+    "physical_width_mm": 360
+  },
+  "font_family": "DejaVu Sans Condensed",
+  "font_files": {
+    "regular": "DejaVuSansCondensed.ttf",
+    "bold": "DejaVuSansCondensed-Bold.ttf"
+  },
+  "palette": {
+    "ink": "#102F4C",
+    "muted": "#476482",
+    "line": "#C6D9E5",
+    "white": "#FFFFFF",
+    "teal": "#008B9B",
+    "teal_dark": "#007B8E",
+    "teal_light": "#EBF7F8",
+    "orange": "#CA661B",
+    "orange_dark": "#B95612",
+    "orange_light": "#FCF4EC",
+    "purple": "#8258AF",
+    "purple_dark": "#7046A0",
+    "purple_light": "#F4F0F9",
+    "blue": "#076ABB",
+    "green": "#38976F",
+    "red": "#D54556",
+    "gray": "#7B8794"
+  },
+  "panels": {
+    "calibration": {
+      "x": 18,
+      "y": 229,
+      "width": 470,
+      "height": 779
+    },
+    "comparison": {
+      "x": 501,
+      "y": 229,
+      "width": 447,
+      "height": 779
+    },
+    "scalability": {
+      "x": 963,
+      "y": 229,
+      "width": 467,
+      "height": 779
+    }
+  },
+  "repository": "AdrianSeguraOrtiz/SPATHI-benchmarks",
+  "protocol_commit": "9baa6bb8efb8e5b96b74bd9c9702a2c45de1ab75",
+  "output_basename": "SPATHI_benchmarks_graphical_abstract",
+  "provenance": "Manual programmatic vector reconstruction of the AI-generated reference; not the original source of that raster image. All icons and text are redrawn; the reference PNG is never read by the builder."
+}

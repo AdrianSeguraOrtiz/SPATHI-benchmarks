@@ -1,0 +1,3 @@
+# Tested versions. Python >= 3.10.
+reportlab==4.4.9
+PyMuPDF==1.26.7

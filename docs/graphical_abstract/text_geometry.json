@@ -1,0 +1,1692 @@
+[
+  {
+    "text": "1",
+    "x": 48.29736328125,
+    "y": 247.447265625,
+    "width": 19.4052734375,
+    "height": 31.0,
+    "size": 31,
+    "horizontal_scale": 1.0,
+    "region": null
+  },
+  {
+    "text": "Calibration",
+    "x": 97.0,
+    "y": 251.005859375,
+    "width": 139.3798828125,
+    "height": 25.0,
+    "size": 25,
+    "horizontal_scale": 1.0,
+    "region": "calibration-header"
+  },
+  {
+    "text": "Find a robust SPATHI policy",
+    "x": 296.0,
+    "y": 245.819140625,
+    "width": 165.5501953125,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 1.0,
+    "region": "calibration-header"
+  },
+  {
+    "text": "on development data",
+    "x": 296.0,
+    "y": 262.119140625,
+    "width": 129.36103515625,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 1.0,
+    "region": "calibration-header"
+  },
+  {
+    "text": "A",
+    "x": 48.037109375,
+    "y": 316.9046875,
+    "width": 13.92578125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "7 training scenarios × 2 development replicates",
+    "x": 89.0,
+    "y": 310.4515625,
+    "width": 371.026953125,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "14 synthetic datasets with variation in topology,",
+    "x": 89.0,
+    "y": 331.8951171875,
+    "width": 289.85947265625003,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "noise and group balance",
+    "x": 89.0,
+    "y": 347.8951171875,
+    "width": 147.87158203125,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Dataset 1",
+    "x": 50.978125000000006,
+    "y": 385.250390625,
+    "width": 50.043749999999996,
+    "height": 10.2,
+    "size": 10.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Dataset 2",
+    "x": 123.978125,
+    "y": 385.250390625,
+    "width": 50.043749999999996,
+    "height": 10.2,
+    "size": 10.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Dataset …",
+    "x": 195.581103515625,
+    "y": 385.250390625,
+    "width": 52.837792968749994,
+    "height": 10.2,
+    "size": 10.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "…",
+    "x": 261.350830078125,
+    "y": 408.083984375,
+    "width": 15.298339843750002,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Different topologies",
+    "x": 340.0,
+    "y": 382.8828125,
+    "width": 107.15625,
+    "height": 12.0,
+    "size": 12.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Varying noise levels",
+    "x": 340.0,
+    "y": 412.8828125,
+    "width": 108.392578125,
+    "height": 12.0,
+    "size": 12.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "Different group balance",
+    "x": 340.0,
+    "y": 442.8828125,
+    "width": 128.666015625,
+    "height": 12.0,
+    "size": 12.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-a"
+  },
+  {
+    "text": "B",
+    "x": 48.14453125,
+    "y": 504.9046875,
+    "width": 13.7109375,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "27 candidate parameter sets",
+    "x": 89.0,
+    "y": 498.4515625,
+    "width": 222.84921875,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "Pilot fit with a 50-tree forest",
+    "x": 89.0,
+    "y": 519.8951171875,
+    "width": 168.412548828125,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "…",
+    "x": 163.450927734375,
+    "y": 562.564453125,
+    "width": 17.09814453125,
+    "height": 19.0,
+    "size": 19,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "27 parameter sets",
+    "x": 62.0682373046875,
+    "y": 612.5029296875,
+    "width": 103.863525390625,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "50 trees per fit",
+    "x": 244.0413818359375,
+    "y": 611.5029296875,
+    "width": 83.917236328125,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "378",
+    "x": 403.91552734375,
+    "y": 558.603515625,
+    "width": 28.1689453125,
+    "height": 15.0,
+    "size": 15,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "total fits",
+    "x": 393.755126953125,
+    "y": 576.123046875,
+    "width": 48.48974609375001,
+    "height": 13.0,
+    "size": 13,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "(screening)",
+    "x": 384.82080078125,
+    "y": 592.123046875,
+    "width": 66.3583984375,
+    "height": 13.0,
+    "size": 13,
+    "horizontal_scale": 1.0,
+    "region": "calibration-b"
+  },
+  {
+    "text": "C",
+    "x": 48.3984375,
+    "y": 671.9046875,
+    "width": 13.203125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Advance 4 finalists",
+    "x": 89.0,
+    "y": 665.4515625,
+    "width": 146.441015625,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Evaluate exact forest sizes: 25, 50, 100, 250 trees",
+    "x": 89.0,
+    "y": 687.275,
+    "width": 290.625,
+    "height": 12.8,
+    "size": 12.8,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Finalist 1",
+    "x": 112.0,
+    "y": 728.2626953125,
+    "width": 46.7861328125,
+    "height": 11.5,
+    "size": 11.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Finalist 2",
+    "x": 112.0,
+    "y": 748.2626953125,
+    "width": 46.7861328125,
+    "height": 11.5,
+    "size": 11.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Finalist 3",
+    "x": 112.0,
+    "y": 768.2626953125,
+    "width": 46.7861328125,
+    "height": 11.5,
+    "size": 11.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Finalist 4",
+    "x": 112.0,
+    "y": 788.2626953125,
+    "width": 46.7861328125,
+    "height": 11.5,
+    "size": 11.5,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "25",
+    "x": 203.1134765625,
+    "y": 768.034765625,
+    "width": 14.773046875000002,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "50",
+    "x": 246.1134765625,
+    "y": 768.034765625,
+    "width": 14.773046875000002,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "100",
+    "x": 285.42021484375,
+    "y": 768.034765625,
+    "width": 22.1595703125,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "250",
+    "x": 328.42021484375,
+    "y": 768.034765625,
+    "width": 22.1595703125,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "Reuse one 250-tree forest",
+    "x": 208.003125,
+    "y": 802.490625,
+    "width": 131.99375,
+    "height": 11.2,
+    "size": 11.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "with exact prefixes",
+    "x": 225.9515625,
+    "y": 816.790625,
+    "width": 96.096875,
+    "height": 11.2,
+    "size": 11.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "168",
+    "x": 406.821630859375,
+    "y": 719.5275390625,
+    "width": 28.356738281250003,
+    "height": 15.1,
+    "size": 15.1,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "validation fits",
+    "x": 382.55400390625,
+    "y": 737.426953125,
+    "width": 76.8919921875,
+    "height": 12.6,
+    "size": 12.6,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "8",
+    "x": 416.273876953125,
+    "y": 779.5275390625,
+    "width": 9.45224609375,
+    "height": 15.1,
+    "size": 15.1,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "transfer fits",
+    "x": 388.07880859375,
+    "y": 797.426953125,
+    "width": 65.8423828125,
+    "height": 12.6,
+    "size": 12.6,
+    "horizontal_scale": 1.0,
+    "region": "calibration-c"
+  },
+  {
+    "text": "D",
+    "x": 47.529296875,
+    "y": 870.9046875,
+    "width": 14.94140625,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "Pick one frozen SPATHI policy",
+    "x": 89.0,
+    "y": 864.4515625,
+    "width": 230.278515625,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "Score = 50% moderate validation + 50% transfer robustness",
+    "x": 89.0,
+    "y": 886.8068359375,
+    "width": 334.398388671875,
+    "height": 12.1,
+    "size": 12.1,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "·",
+    "x": 108.0,
+    "y": 929.123046875,
+    "width": 4.443359375,
+    "height": 13.0,
+    "size": 13,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "2% equivalence band",
+    "x": 124.0,
+    "y": 930.642578125,
+    "width": 106.8525390625,
+    "height": 11.0,
+    "size": 11.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "·",
+    "x": 108.0,
+    "y": 947.123046875,
+    "width": 4.443359375,
+    "height": 13.0,
+    "size": 13,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "Break ties by stability,",
+    "x": 124.0,
+    "y": 948.642578125,
+    "width": 110.6875,
+    "height": 11.0,
+    "size": 11.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "then smaller forest",
+    "x": 124.0,
+    "y": 962.642578125,
+    "width": 94.04248046875,
+    "height": 11.0,
+    "size": 11.0,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "Frozen policy",
+    "x": 338.0,
+    "y": 926.819140625,
+    "width": 90.61357421875,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "Used for all held-out and",
+    "x": 338.0,
+    "y": 947.8705078125,
+    "width": 117.0,
+    "height": 10.7,
+    "size": 10.7,
+    "horizontal_scale": 0.9834446748754463,
+    "region": "calibration-d"
+  },
+  {
+    "text": "scalability experiments",
+    "x": 338.0,
+    "y": 961.8705078125,
+    "width": 111.92158203125,
+    "height": 10.7,
+    "size": 10.7,
+    "horizontal_scale": 1.0,
+    "region": "calibration-d"
+  },
+  {
+    "text": "2",
+    "x": 531.29736328125,
+    "y": 247.447265625,
+    "width": 19.4052734375,
+    "height": 31.0,
+    "size": 31,
+    "horizontal_scale": 1.0,
+    "region": null
+  },
+  {
+    "text": "Held-out comparison",
+    "x": 580.0,
+    "y": 251.005859375,
+    "width": 215.0,
+    "height": 25.0,
+    "size": 25,
+    "horizontal_scale": 0.8130735850798634,
+    "region": "comparison-header"
+  },
+  {
+    "text": "Evaluate fairly across",
+    "x": 806.0,
+    "y": 245.819140625,
+    "width": 126.0,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 0.9720024950956906,
+    "region": "comparison-header"
+  },
+  {
+    "text": "diverse test datasets",
+    "x": 806.0,
+    "y": 262.119140625,
+    "width": 126.0,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 0.9931057414695384,
+    "region": "comparison-header"
+  },
+  {
+    "text": "A",
+    "x": 530.037109375,
+    "y": 316.9046875,
+    "width": 13.92578125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "comparison-a"
+  },
+  {
+    "text": "30 primary test datasets + 2 deployment-scale",
+    "x": 571.0,
+    "y": 310.4515625,
+    "width": 357.0,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 0.9833599638470601,
+    "region": "comparison-a"
+  },
+  {
+    "text": "32 held-out dataset instances (unseen in calibration)",
+    "x": 571.0,
+    "y": 332.123046875,
+    "width": 310.10205078125,
+    "height": 13.0,
+    "size": 13.0,
+    "horizontal_scale": 1.0,
+    "region": "comparison-a"
+  },
+  {
+    "text": "30 × Primary test datasets",
+    "x": 552.195556640625,
+    "y": 367.338671875,
+    "width": 155.60888671875,
+    "height": 11.4,
+    "size": 11.4,
+    "horizontal_scale": 1.0,
+    "region": "comparison-a"
+  },
+  {
+    "text": "2 × Deployment-scale",
+    "x": 775.69326171875,
+    "y": 367.338671875,
+    "width": 126.61347656250001,
+    "height": 11.4,
+    "size": 11.4,
+    "horizontal_scale": 1.0,
+    "region": "comparison-a"
+  },
+  {
+    "text": "…",
+    "x": 708.80078125,
+    "y": 413.84375,
+    "width": 14.3984375,
+    "height": 16.0,
+    "size": 16,
+    "horizontal_scale": 1.0,
+    "region": "comparison-a"
+  },
+  {
+    "text": "B",
+    "x": 530.14453125,
+    "y": 504.9046875,
+    "width": 13.7109375,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Each dataset is sent through",
+    "x": 571.0,
+    "y": 498.4515625,
+    "width": 222.381640625,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "every eligible method",
+    "x": 571.0,
+    "y": 516.4515625,
+    "width": 168.498828125,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Run the frozen policy and comparison methods",
+    "x": 571.0,
+    "y": 537.8951171875,
+    "width": 283.6380859375,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Test",
+    "x": 572.331298828125,
+    "y": 584.250390625,
+    "width": 22.337402343749996,
+    "height": 10.2,
+    "size": 10.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "dataset",
+    "x": 563.79228515625,
+    "y": 595.050390625,
+    "width": 39.415429687499994,
+    "height": 10.2,
+    "size": 10.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "SPATHI (frozen policy)",
+    "x": 752.3497802734375,
+    "y": 565.5666015625,
+    "width": 126.30043945312501,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Comparison method 1",
+    "x": 753.6397216796875,
+    "y": 591.5666015625,
+    "width": 123.720556640625,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Comparison method 2",
+    "x": 753.6397216796875,
+    "y": 617.5666015625,
+    "width": 123.720556640625,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "Comparison method …",
+    "x": 752.11943359375,
+    "y": 643.5666015625,
+    "width": 126.76113281250001,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "…",
+    "x": 671.350830078125,
+    "y": 652.083984375,
+    "width": 15.298339843750002,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "comparison-b"
+  },
+  {
+    "text": "C",
+    "x": 530.3984375,
+    "y": 708.9046875,
+    "width": 13.203125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "5 fair comparison families",
+    "x": 571.0,
+    "y": 702.4515625,
+    "width": 200.746875,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "Methods grouped by information and assumptions",
+    "x": 571.0,
+    "y": 724.275,
+    "width": 290.96875,
+    "height": 12.8,
+    "size": 12.8,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "Matched",
+    "x": 535.8612548828125,
+    "y": 786.4146484375,
+    "width": 49.277490234375,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "information",
+    "x": 526.92001953125,
+    "y": 798.6146484375,
+    "width": 67.1599609375,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "(primary)",
+    "x": 533.4197265625,
+    "y": 810.8146484375,
+    "width": 54.160546875,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "Ordered",
+    "x": 617.989599609375,
+    "y": 786.4146484375,
+    "width": 47.02080078125,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "states",
+    "x": 623.7085693359375,
+    "y": 798.6146484375,
+    "width": 35.582861328125006,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "Lineage-",
+    "x": 697.825390625,
+    "y": 786.4146484375,
+    "width": 49.349218750000006,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "aware",
+    "x": 704.9899658203125,
+    "y": 798.6146484375,
+    "width": 35.020068359375,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "All-gene",
+    "x": 779.8185546875,
+    "y": 786.4146484375,
+    "width": 47.362890625000006,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "fitting",
+    "x": 785.6892578125,
+    "y": 798.6146484375,
+    "width": 35.621484375,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "Topology",
+    "x": 858.2225341796875,
+    "y": 786.4146484375,
+    "width": 52.55493164062501,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "only",
+    "x": 872.333740234375,
+    "y": 798.6146484375,
+    "width": 24.332519531250004,
+    "height": 11.3,
+    "size": 11.3,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "492 eligible route × dataset requests",
+    "x": 608.623828125,
+    "y": 838.730859375,
+    "width": 231.75234375,
+    "height": 12.2,
+    "size": 12.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-c"
+  },
+  {
+    "text": "D",
+    "x": 529.529296875,
+    "y": 888.9046875,
+    "width": 14.94140625,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "Shared metrics and paired statistics",
+    "x": 571.0,
+    "y": 882.4515625,
+    "width": 280.3984375,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "Same metrics for all methods, paired by dataset",
+    "x": 571.0,
+    "y": 904.3509765625,
+    "width": 276.9443359375,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "AUPR",
+    "x": 540.6324462890625,
+    "y": 968.5029296875,
+    "width": 34.735107421875,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "AUROC",
+    "x": 614.087841796875,
+    "y": 970.034765625,
+    "width": 41.824316406250006,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "F1 at",
+    "x": 708.9732421875,
+    "y": 963.18671875,
+    "width": 30.053515625,
+    "height": 11.6,
+    "size": 11.6,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "truth count",
+    "x": 690.58486328125,
+    "y": 976.18671875,
+    "width": 66.8302734375,
+    "height": 11.6,
+    "size": 11.6,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "Complete paired",
+    "x": 829.0,
+    "y": 930.5666015625,
+    "width": 83.13076171875001,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "primary blocks",
+    "x": 829.0,
+    "y": 945.5666015625,
+    "width": 73.9494140625,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "Friedman + all-pairs",
+    "x": 829.0,
+    "y": 960.5666015625,
+    "width": 101.813232421875,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "Wilcoxon-Holm",
+    "x": 829.0,
+    "y": 975.5666015625,
+    "width": 75.0984375,
+    "height": 11.100000000000001,
+    "size": 11.1,
+    "horizontal_scale": 1.0,
+    "region": "comparison-d"
+  },
+  {
+    "text": "3",
+    "x": 993.29736328125,
+    "y": 247.447265625,
+    "width": 19.4052734375,
+    "height": 31.0,
+    "size": 31,
+    "horizontal_scale": 1.0,
+    "region": null
+  },
+  {
+    "text": "Scalability",
+    "x": 1042.0,
+    "y": 251.005859375,
+    "width": 132.2021484375,
+    "height": 25.0,
+    "size": 25,
+    "horizontal_scale": 1.0,
+    "region": "scalability-header"
+  },
+  {
+    "text": "Test computational limits",
+    "x": 1241.0,
+    "y": 245.819140625,
+    "width": 153.2232421875,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-header"
+  },
+  {
+    "text": "and practical feasibility",
+    "x": 1241.0,
+    "y": 262.119140625,
+    "width": 140.64111328125,
+    "height": 13.4,
+    "size": 13.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-header"
+  },
+  {
+    "text": "A",
+    "x": 992.037109375,
+    "y": 316.9046875,
+    "width": 13.92578125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "4 size scales",
+    "x": 1033.0,
+    "y": 310.4515625,
+    "width": 96.6625,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "small → medium → large → extra-large",
+    "x": 1033.0,
+    "y": 331.515234375,
+    "width": 239.37744140625003,
+    "height": 13.8,
+    "size": 13.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "(4 scales × 3 replicates × 16 routes = 192 measurements)",
+    "x": 1033.0,
+    "y": 347.515234375,
+    "width": 367.90341796875003,
+    "height": 13.8,
+    "size": 13.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "Small",
+    "x": 1003.381103515625,
+    "y": 446.5029296875,
+    "width": 31.23779296875,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "Medium",
+    "x": 1106.5115966796875,
+    "y": 446.5029296875,
+    "width": 44.976806640625,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "Large",
+    "x": 1230.58203125,
+    "y": 446.5029296875,
+    "width": 31.8359375,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "Extra-large",
+    "x": 1333.7835693359375,
+    "y": 446.5029296875,
+    "width": 62.432861328125,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "192 planned ladder measurements",
+    "x": 1087.978173828125,
+    "y": 477.730859375,
+    "width": 216.04365234374998,
+    "height": 12.2,
+    "size": 12.2,
+    "horizontal_scale": 1.0,
+    "region": "scalability-a"
+  },
+  {
+    "text": "B",
+    "x": 992.14453125,
+    "y": 529.9046875,
+    "width": 13.7109375,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "Isolated, resource-controlled runs",
+    "x": 1033.0,
+    "y": 523.4515625,
+    "width": 262.667578125,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "One method at a time with fixed resources",
+    "x": 1033.0,
+    "y": 544.8951171875,
+    "width": 257.03159179687503,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "CPU",
+    "x": 1118.0,
+    "y": 578.5029296875,
+    "width": 22.869873046875,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "(controlled)",
+    "x": 1118.0,
+    "y": 593.5029296875,
+    "width": 65.185546875,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "RAM",
+    "x": 1291.0,
+    "y": 578.5029296875,
+    "width": 25.20751953125,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "(controlled)",
+    "x": 1291.0,
+    "y": 593.5029296875,
+    "width": 65.185546875,
+    "height": 12.5,
+    "size": 12.5,
+    "horizontal_scale": 1.0,
+    "region": "scalability-b"
+  },
+  {
+    "text": "C",
+    "x": 992.3984375,
+    "y": 656.9046875,
+    "width": 13.203125,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "Thread scaling on the medium dataset",
+    "x": 1033.0,
+    "y": 650.4515625,
+    "width": 297.669140625,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "1 CPU, standard CPUs, and all CPUs",
+    "x": 1033.0,
+    "y": 671.8951171875,
+    "width": 213.25458984375,
+    "height": 13.3,
+    "size": 13.3,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "Medium",
+    "x": 997.69150390625,
+    "y": 760.57890625,
+    "width": 44.6169921875,
+    "height": 12.399999999999999,
+    "size": 12.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "dataset",
+    "x": 998.9115234375,
+    "y": 775.57890625,
+    "width": 42.176953125000004,
+    "height": 12.399999999999999,
+    "size": 12.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "1 CPU",
+    "x": 1177.0,
+    "y": 702.3509765625,
+    "width": 34.13125,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "Standard CPUs",
+    "x": 1177.0,
+    "y": 733.3509765625,
+    "width": 84.999462890625,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "(e.g. 4, 8, …)",
+    "x": 1177.0,
+    "y": 747.3509765625,
+    "width": 74.562890625,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "All CPUs",
+    "x": 1177.0,
+    "y": 768.3509765625,
+    "width": 46.980078125,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "(max)",
+    "x": 1177.0,
+    "y": 782.3509765625,
+    "width": 33.8087890625,
+    "height": 12.7,
+    "size": 12.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "Reuse the medium",
+    "x": 1295.7462890625,
+    "y": 709.034765625,
+    "width": 100.507421875,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "baseline when the",
+    "x": 1297.34228515625,
+    "y": 725.034765625,
+    "width": 97.31542968750001,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "effective thread",
+    "x": 1303.6513671875,
+    "y": 741.034765625,
+    "width": 84.69726562500001,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "count matches.",
+    "x": 1304.835400390625,
+    "y": 757.034765625,
+    "width": 82.32919921875,
+    "height": 11.8,
+    "size": 11.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-c"
+  },
+  {
+    "text": "D",
+    "x": 991.529296875,
+    "y": 831.9046875,
+    "width": 14.94140625,
+    "height": 20.0,
+    "size": 20,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Measure runtime, memory, and feasibility frontier",
+    "x": 1033.0,
+    "y": 825.4515625,
+    "width": 376.0,
+    "height": 15.2,
+    "size": 15.2,
+    "horizontal_scale": 0.9681072545686785,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Track performance and stop when infeasible",
+    "x": 1033.0,
+    "y": 847.0470703125,
+    "width": 263.21533203125,
+    "height": 13.1,
+    "size": 13.1,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Runtime",
+    "x": 1000.7797119140625,
+    "y": 908.1107421875,
+    "width": 44.440576171875,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "(up to 4 h)",
+    "x": 995.2353515625,
+    "y": 922.1107421875,
+    "width": 55.529296875,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Memory",
+    "x": 1076.5966552734376,
+    "y": 908.1107421875,
+    "width": 42.806689453125,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "usage",
+    "x": 1082.1153076171875,
+    "y": 922.1107421875,
+    "width": 31.769384765625002,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Success",
+    "x": 1165.810888671875,
+    "y": 908.1107421875,
+    "width": 42.37822265625,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Failed",
+    "x": 1248.2409912109374,
+    "y": 908.1107421875,
+    "width": 31.518017578125,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "(stop larger sizes)",
+    "x": 1221.5,
+    "y": 922.1107421875,
+    "width": 85.0,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 0.8974384750969586,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Not attempted",
+    "x": 1316.409423828125,
+    "y": 908.1107421875,
+    "width": 77.18115234375,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "(blocked runs)",
+    "x": 1317.0978271484375,
+    "y": 922.1107421875,
+    "width": 75.80434570312501,
+    "height": 11.7,
+    "size": 11.7,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "4 h timeout per",
+    "x": 1022.0,
+    "y": 956.79453125,
+    "width": 75.60000000000001,
+    "height": 10.8,
+    "size": 10.8,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "physical scalability task",
+    "x": 1022.0,
+    "y": 970.79453125,
+    "width": 108.0,
+    "height": 10.8,
+    "size": 10.8,
+    "horizontal_scale": 0.9367424415679457,
+    "region": "scalability-d"
+  },
+  {
+    "text": "If a route fails at one size,",
+    "x": 1177.0,
+    "y": 955.0984375,
+    "width": 121.55507812500001,
+    "height": 10.4,
+    "size": 10.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "stop that route at larger sizes.",
+    "x": 1177.0,
+    "y": 966.5984375,
+    "width": 142.091015625,
+    "height": 10.4,
+    "size": 10.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "Later blocked runs are marked not attempted.",
+    "x": 1177.0,
+    "y": 978.0984375,
+    "width": 217.83125000000004,
+    "height": 10.4,
+    "size": 10.4,
+    "horizontal_scale": 1.0,
+    "region": "scalability-d"
+  },
+  {
+    "text": "SPATHI-benchmarks (FULL)",
+    "x": 30.0,
+    "y": 18.2744140625,
+    "width": 854.603759765625,
+    "height": 61.5,
+    "size": 61.5,
+    "horizontal_scale": 1.0,
+    "region": "title"
+  },
+  {
+    "text": "From parameter search to fair held-out evaluation and scalability testing",
+    "x": 38.0,
+    "y": 84.765625,
+    "width": 893.34375,
+    "height": 24.0,
+    "size": 24.0,
+    "horizontal_scale": 1.0,
+    "region": "title"
+  },
+  {
+    "text": "Planned workflow for the",
+    "x": 1037.0,
+    "y": 46.4125,
+    "width": 215.20312499999997,
+    "height": 19.2,
+    "size": 19.2,
+    "horizontal_scale": 1.0,
+    "region": "title"
+  },
+  {
+    "text": "full synthetic study profile",
+    "x": 1037.0,
+    "y": 70.4125,
+    "width": 225.50625,
+    "height": 19.2,
+    "size": 19.2,
+    "horizontal_scale": 1.0,
+    "region": "title"
+  },
+  {
+    "text": "S P A T H I",
+    "x": 1326.7359375,
+    "y": 99.2359375,
+    "width": 88.52812500000002,
+    "height": 16.8,
+    "size": 16.8,
+    "horizontal_scale": 1.0,
+    "region": "title"
+  },
+  {
+    "text": "74",
+    "x": 114.0,
+    "y": 138.53125,
+    "width": 60.09375,
+    "height": 48.0,
+    "size": 48,
+    "horizontal_scale": 1.0,
+    "region": "summary-0"
+  },
+  {
+    "text": "seeded synthetic datasets",
+    "x": 116.0,
+    "y": 186.083984375,
+    "width": 201.60107421875003,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "summary-0"
+  },
+  {
+    "text": "554",
+    "x": 476.0,
+    "y": 138.53125,
+    "width": 90.140625,
+    "height": 48.0,
+    "size": 48,
+    "horizontal_scale": 1.0,
+    "region": "summary-1"
+  },
+  {
+    "text": "calibration fits",
+    "x": 478.0,
+    "y": 186.083984375,
+    "width": 109.38769531250001,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "summary-1"
+  },
+  {
+    "text": "32",
+    "x": 825.0,
+    "y": 138.53125,
+    "width": 60.09375,
+    "height": 48.0,
+    "size": 48,
+    "horizontal_scale": 1.0,
+    "region": "summary-2"
+  },
+  {
+    "text": "held-out dataset instances",
+    "x": 827.0,
+    "y": 186.083984375,
+    "width": 203.93359375000003,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "summary-2"
+  },
+  {
+    "text": "16",
+    "x": 1174.0,
+    "y": 138.53125,
+    "width": 60.09375,
+    "height": 48.0,
+    "size": 48,
+    "horizontal_scale": 1.0,
+    "region": "summary-3"
+  },
+  {
+    "text": "routes in 5 comparison families",
+    "x": 1176.0,
+    "y": 186.083984375,
+    "width": 240.88867187500003,
+    "height": 17.0,
+    "size": 17,
+    "horizontal_scale": 1.0,
+    "region": "summary-3"
+  },
+  {
+    "text": "Reproducible execution",
+    "x": 229.0,
+    "y": 1028.9833984375,
+    "width": 173.7451171875,
+    "height": 14.5,
+    "size": 14.5,
+    "horizontal_scale": 1.0,
+    "region": "footer"
+  },
+  {
+    "text": "Semantic seed 734921 · fixed CPU/RAM plan · SQLite journal · atomic artifacts",
+    "x": 229.0,
+    "y": 1047.946484375,
+    "width": 373.463671875,
+    "height": 10.6,
+    "size": 10.6,
+    "horizontal_scale": 1.0,
+    "region": "footer"
+  },
+  {
+    "text": "Portable outputs",
+    "x": 889.0,
+    "y": 1028.9833984375,
+    "width": 124.31201171875,
+    "height": 14.5,
+    "size": 14.5,
+    "horizontal_scale": 1.0,
+    "region": "footer"
+  },
+  {
+    "text": "HTML reports + CSV tables + provenance files",
+    "x": 889.0,
+    "y": 1047.8705078125,
+    "width": 224.32905273437498,
+    "height": 10.7,
+    "size": 10.7,
+    "horizontal_scale": 1.0,
+    "region": "footer"
+  },
+  {
+    "text": "Synthetic data only · counts are planned protocol quantities, not measured results.",
+    "x": 20.0,
+    "y": 1073.5419921875,
+    "width": 318.72509765625,
+    "height": 8.5,
+    "size": 8.5,
+    "horizontal_scale": 1.0,
+    "region": null
+  },
+  {
+    "text": "SPATHI-benchmarks (FULL)",
+    "x": 1319.804443359375,
+    "y": 1073.5419921875,
+    "width": 104.19555664062501,
+    "height": 8.5,
+    "size": 8.5,
+    "horizontal_scale": 1.0,
+    "region": null
+  }
+]

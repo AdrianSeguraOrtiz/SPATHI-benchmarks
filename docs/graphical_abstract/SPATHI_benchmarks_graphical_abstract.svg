@@ -1,0 +1,956 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1448" height="1086" viewBox="0 0 1448 1086">
+<title>SPATHI-benchmarks (FULL)</title>
+<desc>Manual programmatic vector reconstruction of the AI-generated reference; not the original source of that raster image. All icons and text are redrawn; the reference PNG is never read by the builder.</desc>
+<defs><linearGradient id="gradient-0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00808F"/><stop offset="1" stop-color="#1293A2"/></linearGradient><linearGradient id="gradient-1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1F9FA"/><stop offset="1" stop-color="#F9FCFC"/></linearGradient><linearGradient id="gradient-2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1F9FA"/><stop offset="1" stop-color="#F9FCFC"/></linearGradient><linearGradient id="gradient-6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-7" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-8" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-9" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-10" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-11" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-12" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-13" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-14" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-15" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-16" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-17" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DBEFF1"/><stop offset="1" stop-color="#B2DCE1"/></linearGradient><linearGradient id="gradient-18" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1F9FA"/><stop offset="1" stop-color="#F9FCFC"/></linearGradient><linearGradient id="gradient-19" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E8F5F6"/><stop offset="1" stop-color="#F5FAFB"/></linearGradient><linearGradient id="gradient-20" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E8F5F6"/><stop offset="1" stop-color="#F5FAFB"/></linearGradient><linearGradient id="gradient-21" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1F9FA"/><stop offset="1" stop-color="#F9FCFC"/></linearGradient><linearGradient id="gradient-22" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EBF7FF"/><stop offset="1" stop-color="#F6FBFF"/></linearGradient><linearGradient id="gradient-23" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#BA5E19"/><stop offset="1" stop-color="#CE712B"/></linearGradient><linearGradient id="gradient-24" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FCF7F2"/><stop offset="1" stop-color="#FEFBF9"/></linearGradient><linearGradient id="gradient-25" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-26" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-27" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-28" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-29" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-30" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FCF7F2"/><stop offset="1" stop-color="#FEFBF9"/></linearGradient><linearGradient id="gradient-31" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#F8FCFD"/></linearGradient><linearGradient id="gradient-32" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EDF7F8"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-33" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBF4EF"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-34" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EEF5FA"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-35" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F6F3F9"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-36" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FCF7F2"/><stop offset="1" stop-color="#FEFBF9"/></linearGradient><linearGradient id="gradient-37" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F6FBFA"/><stop offset="1" stop-color="#EDF7F6"/></linearGradient><linearGradient id="gradient-38" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FDFAF7"/><stop offset="1" stop-color="#FBF4EF"/></linearGradient><linearGradient id="gradient-39" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F6FAFD"/><stop offset="1" stop-color="#EEF5FA"/></linearGradient><linearGradient id="gradient-40" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBF9FC"/><stop offset="1" stop-color="#F6F3F9"/></linearGradient><linearGradient id="gradient-41" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FDF7F9"/><stop offset="1" stop-color="#FBF0F2"/></linearGradient><linearGradient id="gradient-42" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FCF7F2"/><stop offset="1" stop-color="#FEFBF9"/></linearGradient><linearGradient id="gradient-43" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0F8F7"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-44" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0F6FB"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-45" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8F5FA"/><stop offset="1" stop-color="#FFFFFF"/></linearGradient><linearGradient id="gradient-46" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7851A1"/><stop offset="1" stop-color="#8B64B5"/></linearGradient><linearGradient id="gradient-47" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8F6FB"/><stop offset="1" stop-color="#FCFBFD"/></linearGradient><linearGradient id="gradient-48" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8F6FB"/><stop offset="1" stop-color="#FCFBFD"/></linearGradient><linearGradient id="gradient-49" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8F6FB"/><stop offset="1" stop-color="#FCFBFD"/></linearGradient><linearGradient id="gradient-50" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8F6FB"/><stop offset="1" stop-color="#FCFBFD"/></linearGradient><linearGradient id="gradient-51" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EBF6F7"/><stop offset="1" stop-color="#F5FAFB"/></linearGradient><linearGradient id="gradient-52" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EBF6F7"/><stop offset="1" stop-color="#F5FAFB"/></linearGradient><linearGradient id="gradient-53" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBF3ED"/><stop offset="1" stop-color="#FDF9F6"/></linearGradient><linearGradient id="gradient-54" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F5F2F9"/><stop offset="1" stop-color="#FAF8FC"/></linearGradient></defs>
+<rect x="0" y="0" width="1448" height="1086" rx="0" fill="#FFFFFF" stroke-width="1"/>
+<rect x="18" y="229" width="470" height="779" rx="6" fill="#FFFFFF" stroke="#008B9B" stroke-width="2.2"/>
+<rect x="19" y="230" width="468" height="66" rx="4" fill="url(#gradient-0)" stroke-width="1"/>
+<rect x="19" y="289" width="468" height="7" rx="0" fill="#008B9B" stroke-width="1"/>
+<circle cx="58" cy="260" r="25" fill="#FFFFFF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(48.2974,271) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="31" font-weight="bold" fill="#008B9B" xml:space="preserve">1</text>
+<g id="calibration-header" transform="translate(0,0)">
+<text x="0" y="0" transform="translate(97,270) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="25" font-weight="bold" fill="#FFFFFF" xml:space="preserve">Calibration</text>
+<text x="0" y="0" transform="translate(296,256) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">Find a robust SPATHI policy</text>
+<text x="0" y="0" transform="translate(296,272.3) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">on development data</text>
+</g>
+<g id="calibration-a" transform="translate(32,302)">
+<rect x="0" y="0" width="443" height="168" rx="6" fill="url(#gradient-1)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#CCE8EB" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.0371,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">A</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">7 training scenarios × 2 development replicates</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">14 synthetic datasets with variation in topology,</text>
+<text x="0" y="0" transform="translate(57,56) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">noise and group balance</text>
+<rect x="13" y="75" width="62" height="78" rx="4" fill="url(#gradient-2)" stroke="#C6D9E5" stroke-width="1"/>
+<text x="0" y="0" transform="translate(18.9781,91) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Dataset 1</text>
+<circle cx="31.119999999999997" cy="116.78" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="38.019999999999996" cy="109.56" r="2.8" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="45.84" cy="113.74" r="2.8" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="52.739999999999995" cy="119.82" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="42.16" cy="123.24" r="2.8" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="33.88" cy="128.18" r="2.8" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="50.900000000000006" cy="131.22" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="39.400000000000006" cy="136.54" r="2.8" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="58.260000000000005" cy="129.7" r="2.8" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="28.82" cy="136.54" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="58.72" cy="111.46000000000001" r="2.8" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="48.599999999999994" cy="140.34" r="2.8" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="86" y="75" width="62" height="78" rx="4" fill="url(#gradient-3)" stroke="#C6D9E5" stroke-width="1"/>
+<text x="0" y="0" transform="translate(91.9781,91) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Dataset 2</text>
+<circle cx="111.02" cy="109.56" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="118.84" cy="113.74" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="125.74" cy="119.82" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="115.16" cy="123.24" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="106.88" cy="128.18" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="123.9" cy="131.22" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="112.4" cy="136.54" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="131.26" cy="129.7" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="101.82" cy="136.54" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="131.72" cy="111.46000000000001" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="121.6" cy="140.34" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="104.12" cy="116.78" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="159" y="75" width="62" height="78" rx="4" fill="url(#gradient-4)" stroke="#C6D9E5" stroke-width="1"/>
+<text x="0" y="0" transform="translate(163.581,91) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Dataset …</text>
+<circle cx="191.84" cy="113.74" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="198.74" cy="119.82" r="2.8" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="188.16" cy="123.24" r="2.8" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="179.88" cy="128.18" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="196.9" cy="131.22" r="2.8" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="185.4" cy="136.54" r="2.8" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="204.26" cy="129.7" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="174.82" cy="136.54" r="2.8" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="204.72" cy="111.46000000000001" r="2.8" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="194.6" cy="140.34" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="177.12" cy="116.78" r="2.8" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="184.02" cy="109.56" r="2.8" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<text x="0" y="0" transform="translate(229.351,119) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="bold" fill="#476482" xml:space="preserve">…</text>
+<path d="M 258 72 L 258 158" stroke="#C6D9E5" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 283 76.25 L 277.0 84.5" stroke="#285D77" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 283 76.25 L 288.75 84.5" stroke="#285D77" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.0 84.5 L 272.0 95.0" stroke="#285D77" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.0 84.5 L 280.75 94.5" stroke="#285D77" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 288.75 84.5 L 293.0 94.5" stroke="#285D77" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="283" cy="76.25" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<circle cx="277.0" cy="84.5" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<circle cx="288.75" cy="84.5" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<circle cx="272.0" cy="95.0" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<circle cx="280.75" cy="94.5" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<circle cx="293.0" cy="94.5" r="2.75" fill="#285D77" stroke="#537D92" stroke-width="0.6"/>
+<rect x="274.0" y="118.8" width="4.8" height="9.200000000000001" rx="0.7" fill="#578195" stroke-width="1"/>
+<rect x="280.8" y="112.59" width="4.8" height="15.41" rx="0.7" fill="#48758B" stroke-width="1"/>
+<rect x="287.6" y="105" width="4.8" height="23" rx="0.7" fill="#396A82" stroke-width="1"/>
+<circle cx="278.2" cy="139.33" r="4.0600000000000005" fill="#285D77" stroke-width="1"/>
+<path d="M 272.97999999999996 154.7 Q 272.4 144.55 278.2 144.84 Q 284.0 144.55 283.42 154.7 Z" stroke-width="0" fill="#285D77" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="289.8" cy="139.33" r="4.0600000000000005" fill="#285D77" stroke-width="1"/>
+<path d="M 284.58 154.7 Q 284.0 144.55 289.8 144.84 Q 295.6 144.55 295.02000000000004 154.7 Z" stroke-width="0" fill="#285D77" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(308,90) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.0" font-weight="normal" fill="#476482" xml:space="preserve">Different topologies</text>
+<text x="0" y="0" transform="translate(308,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.0" font-weight="normal" fill="#476482" xml:space="preserve">Varying noise levels</text>
+<text x="0" y="0" transform="translate(308,150) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.0" font-weight="normal" fill="#476482" xml:space="preserve">Different group balance</text>
+</g>
+<path d="M 243 472 L 243.0 483.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 243 489 L 239.52 483 L 246.48 483 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="calibration-b" transform="translate(32,490)">
+<rect x="0" y="0" width="443" height="147" rx="6" fill="url(#gradient-5)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#CCE8EB" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.1445,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">B</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">27 candidate parameter sets</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">Pilot fit with a 50-tree forest</text>
+<rect x="7" y="53" width="324" height="85" rx="5" fill="#FFFFFF" stroke-width="1"/>
+<rect x="337" y="53" width="99" height="79" rx="5" fill="#F0F8F9" stroke-width="1"/>
+<rect x="23" y="62" width="21" height="15" rx="2" fill="url(#gradient-6)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="49" y="62" width="21" height="15" rx="2" fill="url(#gradient-7)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="75" y="62" width="21" height="15" rx="2" fill="url(#gradient-8)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="101" y="62" width="21" height="15" rx="2" fill="url(#gradient-9)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="23" y="81" width="21" height="15" rx="2" fill="url(#gradient-10)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="49" y="81" width="21" height="15" rx="2" fill="url(#gradient-11)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="75" y="81" width="21" height="15" rx="2" fill="url(#gradient-12)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="101" y="81" width="21" height="15" rx="2" fill="url(#gradient-13)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="23" y="100" width="21" height="15" rx="2" fill="url(#gradient-14)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="49" y="100" width="21" height="15" rx="2" fill="url(#gradient-15)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="75" y="100" width="21" height="15" rx="2" fill="url(#gradient-16)" stroke="#7AC3CB" stroke-width="0.8"/>
+<rect x="101" y="100" width="21" height="15" rx="2" fill="url(#gradient-17)" stroke="#7AC3CB" stroke-width="0.8"/>
+<text x="0" y="0" transform="translate(131.451,87) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="19" font-weight="bold" fill="#476482" xml:space="preserve">…</text>
+<path d="M 155 91 L 169.0 91.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 176 91 L 169 95.06 L 169 86.94 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 202.5 74 L 198.75 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 202.5 74 L 206.25 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 198.75 85.33333333333333 L 191.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 198.75 85.33333333333333 L 198.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 206.25 85.33333333333333 L 206.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 206.25 85.33333333333333 L 213.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 191.25 96.66666666666667 L 182.8125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 191.25 96.66666666666667 L 188.4375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 198.75 96.66666666666667 L 194.0625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 198.75 96.66666666666667 L 199.6875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 206.25 96.66666666666667 L 205.3125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 206.25 96.66666666666667 L 210.9375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 213.75 96.66666666666667 L 216.5625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 213.75 96.66666666666667 L 222.1875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="202.5" cy="74" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="198.75" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="206.25" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="191.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="198.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="206.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="213.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="182.8125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="188.4375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="194.0625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="199.6875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="205.3125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="210.9375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="216.5625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="222.1875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<path d="M 250.5 74 L 246.75 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 250.5 74 L 254.25 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 246.75 85.33333333333333 L 239.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 246.75 85.33333333333333 L 246.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 254.25 85.33333333333333 L 254.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 254.25 85.33333333333333 L 261.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 239.25 96.66666666666667 L 230.8125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 239.25 96.66666666666667 L 236.4375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 246.75 96.66666666666667 L 242.0625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 246.75 96.66666666666667 L 247.6875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 254.25 96.66666666666667 L 253.3125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 254.25 96.66666666666667 L 258.9375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 261.75 96.66666666666667 L 264.5625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 261.75 96.66666666666667 L 270.1875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="250.5" cy="74" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="246.75" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="254.25" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="239.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="246.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="254.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="261.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="230.8125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="236.4375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="242.0625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="247.6875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="253.3125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="258.9375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="264.5625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="270.1875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<path d="M 298.5 74 L 294.75 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 298.5 74 L 302.25 85.33333333333333" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 294.75 85.33333333333333 L 287.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 294.75 85.33333333333333 L 294.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 302.25 85.33333333333333 L 302.25 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 302.25 85.33333333333333 L 309.75 96.66666666666667" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 287.25 96.66666666666667 L 278.8125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 287.25 96.66666666666667 L 284.4375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 294.75 96.66666666666667 L 290.0625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 294.75 96.66666666666667 L 295.6875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 302.25 96.66666666666667 L 301.3125 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 302.25 96.66666666666667 L 306.9375 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.75 96.66666666666667 L 312.5625 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.75 96.66666666666667 L 318.1875 108.0" stroke="#008B9B" stroke-width="1.40625" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="298.5" cy="74" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="294.75" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="302.25" cy="85.33333333333333" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="287.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="294.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="302.25" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="309.75" cy="96.66666666666667" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="278.8125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="284.4375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="290.0625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="295.6875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="301.3125" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="306.9375" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="312.5625" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<circle cx="318.1875" cy="108.0" r="2.8" fill="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(30.0682,132) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">27 parameter sets</text>
+<text x="0" y="0" transform="translate(212.041,131) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">50 trees per fit</text>
+<text x="0" y="0" transform="translate(371.916,80) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15" font-weight="bold" fill="#008B9B" xml:space="preserve">378</text>
+<text x="0" y="0" transform="translate(361.755,96) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13" font-weight="normal" fill="#476482" xml:space="preserve">total fits</text>
+<text x="0" y="0" transform="translate(352.821,112) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13" font-weight="normal" fill="#476482" xml:space="preserve">(screening)</text>
+</g>
+<path d="M 243 639 L 243.0 650.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 243 656 L 239.52 650 L 246.48 650 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="calibration-c" transform="translate(32,657)">
+<rect x="0" y="0" width="443" height="185" rx="6" fill="url(#gradient-18)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#CCE8EB" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.3984,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">C</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Advance 4 finalists</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.8" font-weight="normal" fill="#476482" xml:space="preserve">Evaluate exact forest sizes: 25, 50, 100, 250 trees</text>
+<rect x="5" y="53" width="330" height="125" rx="5" fill="#FFFFFF" stroke-width="1"/>
+<rect x="52" y="61" width="87" height="91" rx="4" fill="#F1F9FA" stroke-width="1"/>
+<path d="M 19.64 94.35 L 38.36 94.35 L 36.8 109.56 Q 29 120.09 21.2 109.56 Z" stroke="#DB8907" stroke-width="1.2" fill="#DE921B" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 19.64 96.69 L 14.18 96.69 Q 13.399999999999999 109.95 21.59 109.56" stroke="#DB8907" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 38.36 96.69 L 43.82 96.69 Q 44.6 109.95 36.41 109.56" stroke="#DB8907" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 29 112.68 L 29 122.43" stroke="#DB8907" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="21.2" y="121.65" width="15.600000000000001" height="3.51" rx="1" fill="#DB8907" stroke-width="1"/>
+<path d="M 63.2 76 L 65.44 78.24 L 69.04 73.44" stroke="#102F4C" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(80,80) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.5" font-weight="normal" fill="#476482" xml:space="preserve">Finalist 1</text>
+<path d="M 63.2 96 L 65.44 98.24 L 69.04 93.44" stroke="#102F4C" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(80,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.5" font-weight="normal" fill="#476482" xml:space="preserve">Finalist 2</text>
+<path d="M 63.2 116 L 65.44 118.24 L 69.04 113.44" stroke="#102F4C" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(80,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.5" font-weight="normal" fill="#476482" xml:space="preserve">Finalist 3</text>
+<path d="M 63.2 136 L 65.44 138.24 L 69.04 133.44" stroke="#102F4C" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(80,140) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.5" font-weight="normal" fill="#476482" xml:space="preserve">Finalist 4</text>
+<path d="M 154 55 L 154 167" stroke="#C6D9E5" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 178.5 87 L 172.25 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 178.5 87 L 184.75 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="178.5" cy="87" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="172.25" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="184.75" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(171.113,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="bold" fill="#476482" xml:space="preserve">25</text>
+<path d="M 221.5 78 L 218.375 89.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 221.5 78 L 224.625 89.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 218.375 89.0 L 212.125 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 218.375 89.0 L 218.375 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 224.625 89.0 L 224.625 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 224.625 89.0 L 230.875 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="221.5" cy="78" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="218.375" cy="89.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="224.625" cy="89.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="212.125" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="218.375" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="224.625" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="230.875" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(214.113,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="bold" fill="#476482" xml:space="preserve">50</text>
+<path d="M 264.5 68 L 262.41666666666663 78.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 264.5 68 L 266.5833333333333 78.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 262.41666666666663 78.66666666666667 L 258.25 89.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 262.41666666666663 78.66666666666667 L 262.4166666666667 89.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 266.5833333333333 78.66666666666667 L 266.58333333333337 89.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 266.5833333333333 78.66666666666667 L 270.75 89.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 258.25 89.33333333333333 L 253.5625 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 258.25 89.33333333333333 L 256.6875 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 262.4166666666667 89.33333333333333 L 259.8125 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 262.4166666666667 89.33333333333333 L 262.9375 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 266.58333333333337 89.33333333333333 L 266.0625 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 266.58333333333337 89.33333333333333 L 269.1875 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 270.75 89.33333333333333 L 272.3125 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 270.75 89.33333333333333 L 275.4375 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="264.5" cy="68" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="262.41666666666663" cy="78.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="266.5833333333333" cy="78.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="258.25" cy="89.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="262.4166666666667" cy="89.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="266.58333333333337" cy="89.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="270.75" cy="89.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="253.5625" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="256.6875" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="259.8125" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="262.9375" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="266.0625" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="269.1875" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="272.3125" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="275.4375" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(253.42,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="bold" fill="#476482" xml:space="preserve">100</text>
+<path d="M 307.5 60 L 305.41666666666663 73.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 307.5 60 L 309.5833333333333 73.33333333333333" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 305.41666666666663 73.33333333333333 L 301.25 86.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 305.41666666666663 73.33333333333333 L 305.4166666666667 86.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.5833333333333 73.33333333333333 L 309.58333333333337 86.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.5833333333333 73.33333333333333 L 313.75 86.66666666666667" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 301.25 86.66666666666667 L 296.5625 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 301.25 86.66666666666667 L 299.6875 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 305.4166666666667 86.66666666666667 L 302.8125 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 305.4166666666667 86.66666666666667 L 305.9375 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.58333333333337 86.66666666666667 L 309.0625 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 309.58333333333337 86.66666666666667 L 312.1875 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 313.75 86.66666666666667 L 315.3125 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 313.75 86.66666666666667 L 318.4375 100.0" stroke="#008B9B" stroke-width="0.85" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="307.5" cy="60" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="305.41666666666663" cy="73.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="309.5833333333333" cy="73.33333333333333" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="301.25" cy="86.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="305.4166666666667" cy="86.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="309.58333333333337" cy="86.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="313.75" cy="86.66666666666667" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="296.5625" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="299.6875" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="302.8125" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="305.9375" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="309.0625" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="312.1875" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="315.3125" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<circle cx="318.4375" cy="100.0" r="2.0833333333333335" fill="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(296.42,120) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="bold" fill="#476482" xml:space="preserve">250</text>
+<path d="M 168 130 L 168 135 L 316 135 L 316 130" stroke="#476482" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(176.003,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.2" font-weight="normal" fill="#476482" xml:space="preserve">Reuse one 250-tree forest</text>
+<text x="0" y="0" transform="translate(193.952,168.3) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.2" font-weight="normal" fill="#476482" xml:space="preserve">with exact prefixes</text>
+<rect x="342" y="54" width="94" height="55" rx="5" fill="url(#gradient-19)" stroke-width="1"/>
+<text x="0" y="0" transform="translate(374.822,74) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.1" font-weight="bold" fill="#008B9B" xml:space="preserve">168</text>
+<text x="0" y="0" transform="translate(350.554,90) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.6" font-weight="normal" fill="#476482" xml:space="preserve">validation fits</text>
+<rect x="342" y="114" width="94" height="55" rx="5" fill="url(#gradient-20)" stroke-width="1"/>
+<text x="0" y="0" transform="translate(384.274,134) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.1" font-weight="bold" fill="#008B9B" xml:space="preserve">8</text>
+<text x="0" y="0" transform="translate(356.079,150) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.6" font-weight="normal" fill="#476482" xml:space="preserve">transfer fits</text>
+</g>
+<path d="M 243 844 L 243.0 849.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 243 855 L 239.52 849 L 246.48 849 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="calibration-d" transform="translate(32,856)">
+<rect x="0" y="0" width="443" height="139" rx="6" fill="url(#gradient-21)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#CCE8EB" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(15.5293,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">D</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Pick one frozen SPATHI policy</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.1" font-weight="normal" fill="#476482" xml:space="preserve">Score = 50% moderate validation + 50% transfer robustness</text>
+<rect x="6" y="56" width="222" height="76" rx="5" fill="#FFFFFF" stroke-width="1"/>
+<path d="M 25 72 L 48.7 72 L 61 82.58 L 61 114 Q 61 118 57 118 L 24 118 Q 20 118 20 114 L 20 76 Q 20 72 25 72 Z" stroke="#375B72" stroke-width="2.4" fill="#FFFFFF" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 48.7 72 L 48.7 83.03999999999999 L 61 83.03999999999999" stroke="#375B72" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 30.25 92.7 L 48.7 92.7" stroke="#375B72" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 30.25 100.52 L 48.7 100.52" stroke="#375B72" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 30.25 108.34 L 48.7 108.34" stroke="#375B72" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(76,83) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13" font-weight="bold" fill="#476482" xml:space="preserve">·</text>
+<text x="0" y="0" transform="translate(92,83) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.0" font-weight="normal" fill="#476482" xml:space="preserve">2% equivalence band</text>
+<text x="0" y="0" transform="translate(76,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13" font-weight="bold" fill="#476482" xml:space="preserve">·</text>
+<text x="0" y="0" transform="translate(92,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.0" font-weight="normal" fill="#476482" xml:space="preserve">Break ties by stability,</text>
+<text x="0" y="0" transform="translate(92,115) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.0" font-weight="normal" fill="#476482" xml:space="preserve">then smaller forest</text>
+<rect x="241" y="53" width="195" height="79" rx="8" fill="#FFFFFF" stroke="#8CCAF0" stroke-width="1"/>
+<rect x="249" y="61" width="179" height="63" rx="4" fill="url(#gradient-22)" stroke-width="1"/>
+<path d="M 273 86 L 288.18 86.0" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 282.57 86.0 L 284.88 81.99896263451589" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 282.57 86.0 L 284.88 90.00103736548411" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 273 86 L 280.59 99.14626562944778" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.785 94.28786311421707 L 282.40500000000003 94.28786311421707" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.785 94.28786311421707 L 275.475 98.28890047970118" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 273 86 L 265.41 99.14626562944778" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 268.215 94.28786311421707 L 270.525 98.28890047970118" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 268.215 94.28786311421707 L 263.59499999999997 94.28786311421707" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 273 86 L 257.82 86.0" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 263.43 86.0 L 261.12 90.00103736548411" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 263.43 86.0 L 261.12 81.99896263451589" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 273 86 L 265.40999999999997 72.85373437055222" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 268.215 77.71213688578293 L 263.59499999999997 77.71213688578293" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 268.215 77.71213688578293 L 270.525 73.71109952029882" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 273 86 L 280.59 72.85373437055222" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.785 77.71213688578293 L 275.475 73.71109952029882" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.785 77.71213688578293 L 282.40500000000003 77.71213688578293" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(306,81) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="bold" fill="#102F4C" xml:space="preserve">Frozen policy</text>
+<text x="0" y="0" transform="translate(306,100) scale(0.98344467,1)" font-family="DejaVu Sans Condensed" font-size="10.7" font-weight="normal" fill="#476482" xml:space="preserve">Used for all held-out and</text>
+<text x="0" y="0" transform="translate(306,114) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.7" font-weight="normal" fill="#476482" xml:space="preserve">scalability experiments</text>
+</g>
+<rect x="501" y="229" width="447" height="779" rx="6" fill="#FFFFFF" stroke="#CA661B" stroke-width="2.2"/>
+<rect x="502" y="230" width="445" height="66" rx="4" fill="url(#gradient-23)" stroke-width="1"/>
+<rect x="502" y="289" width="445" height="7" rx="0" fill="#CA661B" stroke-width="1"/>
+<circle cx="541" cy="260" r="25" fill="#FFFFFF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(531.297,271) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="31" font-weight="bold" fill="#CA661B" xml:space="preserve">2</text>
+<g id="comparison-header" transform="translate(0,0)">
+<text x="0" y="0" transform="translate(580,270) scale(0.81307359,1)" font-family="DejaVu Sans Condensed" font-size="25" font-weight="bold" fill="#FFFFFF" xml:space="preserve">Held-out comparison</text>
+<text x="0" y="0" transform="translate(806,256) scale(0.97200250,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">Evaluate fairly across</text>
+<text x="0" y="0" transform="translate(806,272.3) scale(0.99310574,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">diverse test datasets</text>
+</g>
+<g id="comparison-a" transform="translate(514,302)">
+<rect x="0" y="0" width="421" height="168" rx="6" fill="url(#gradient-24)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#F4E0D1" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#CA661B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.0371,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">A</text>
+<text x="0" y="0" transform="translate(57,20) scale(0.98335996,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">30 primary test datasets + 2 deployment-scale</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.0" font-weight="normal" fill="#476482" xml:space="preserve">32 held-out dataset instances (unseen in calibration)</text>
+<rect x="12" y="57" width="208" height="100" rx="4" fill="#FFFFFF" stroke-width="1"/>
+<rect x="241" y="57" width="168" height="100" rx="4" fill="#FFFFFF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(38.1956,74) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.4" font-weight="bold" fill="#102F4C" xml:space="preserve">30 × Primary test datasets</text>
+<text x="0" y="0" transform="translate(261.693,74) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.4" font-weight="bold" fill="#102F4C" xml:space="preserve">2 × Deployment-scale</text>
+<rect x="24" y="89" width="44" height="56" rx="4" fill="url(#gradient-25)" stroke="#C6D9E5" stroke-width="1"/>
+<circle cx="38.16" cy="110.16" r="2.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="42.36" cy="103.32" r="2.4" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="47.120000000000005" cy="107.28" r="2.4" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="51.32" cy="113.04" r="2.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="44.88" cy="116.28" r="2.4" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="39.84" cy="120.96000000000001" r="2.4" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="50.2" cy="123.84" r="2.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="43.2" cy="128.88" r="2.4" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="54.68" cy="122.4" r="2.4" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="36.76" cy="128.88" r="2.4" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="54.959999999999994" cy="105.12" r="2.4" fill="#219AA8" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="48.8" cy="132.48000000000002" r="2.4" fill="#42A9B5" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="19" y="84" width="44" height="56" rx="4" fill="none" stroke="#C6D9E5" stroke-width="0.7"/>
+<rect x="73" y="89" width="44" height="56" rx="4" fill="url(#gradient-26)" stroke="#C6D9E5" stroke-width="1"/>
+<circle cx="91.36" cy="103.32" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="96.12" cy="107.28" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="100.32" cy="113.04" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="93.88" cy="116.28" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="88.84" cy="120.96000000000001" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="99.2" cy="123.84" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="92.2" cy="128.88" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="103.68" cy="122.4" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="85.76" cy="128.88" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="103.96" cy="105.12" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="97.8" cy="132.48000000000002" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="87.16" cy="110.16" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="68" y="84" width="44" height="56" rx="4" fill="none" stroke="#C6D9E5" stroke-width="0.7"/>
+<rect x="122" y="89" width="44" height="56" rx="4" fill="url(#gradient-27)" stroke="#C6D9E5" stroke-width="1"/>
+<circle cx="145.12" cy="107.28" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="149.32" cy="113.04" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="142.88" cy="116.28" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="137.84" cy="120.96000000000001" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="148.2" cy="123.84" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="141.2" cy="128.88" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="152.68" cy="122.4" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="134.76" cy="128.88" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="152.96" cy="105.12" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="146.8" cy="132.48000000000002" r="2.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="136.16" cy="110.16" r="2.4" fill="#926EB9" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="140.36" cy="103.32" r="2.4" fill="#A283C4" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="117" y="84" width="44" height="56" rx="4" fill="none" stroke="#C6D9E5" stroke-width="0.7"/>
+<text x="0" y="0" transform="translate(194.801,124) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="16" font-weight="bold" fill="#102F4C" xml:space="preserve">…</text>
+<rect x="247" y="83" width="66" height="56" rx="4" fill="none" stroke="#C6D9E5" stroke-width="0.7"/>
+<rect x="254" y="91" width="66" height="58" rx="4" fill="url(#gradient-28)" stroke="#C6D9E5" stroke-width="1"/>
+<circle cx="289.0" cy="109.74" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="296.5" cy="115.82" r="2.8" fill="#D17A39" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="285.0" cy="119.24" r="2.8" fill="#D88E56" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="276.0" cy="124.18" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="294.5" cy="127.22" r="2.8" fill="#D17A39" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="282.0" cy="132.54" r="2.8" fill="#D88E56" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="302.5" cy="125.7" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="270.5" cy="132.54" r="2.8" fill="#D17A39" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="303.0" cy="107.46000000000001" r="2.8" fill="#D88E56" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="292.0" cy="136.34" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="273.0" cy="112.78" r="2.8" fill="#D17A39" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="280.5" cy="105.56" r="2.8" fill="#D88E56" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="325" y="83" width="66" height="56" rx="4" fill="none" stroke="#C6D9E5" stroke-width="0.7"/>
+<rect x="332" y="91" width="66" height="58" rx="4" fill="url(#gradient-29)" stroke="#C6D9E5" stroke-width="1"/>
+<circle cx="374.5" cy="115.82" r="2.8" fill="#167CE7" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="363.0" cy="119.24" r="2.8" fill="#348DEA" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="354.0" cy="124.18" r="2.8" fill="#539EED" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="372.5" cy="127.22" r="2.8" fill="#167CE7" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="360.0" cy="132.54" r="2.8" fill="#348DEA" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="380.5" cy="125.7" r="2.8" fill="#539EED" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="348.5" cy="132.54" r="2.8" fill="#167CE7" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="381.0" cy="107.46000000000001" r="2.8" fill="#348DEA" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="370.0" cy="136.34" r="2.8" fill="#539EED" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="351.0" cy="112.78" r="2.8" fill="#167CE7" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="358.5" cy="105.56" r="2.8" fill="#348DEA" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="367.0" cy="109.74" r="2.8" fill="#539EED" stroke="#FFFFFF" stroke-width="0.45"/>
+</g>
+<path d="M 718 472 L 718.0 483.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 718 489 L 714.52 483 L 721.48 483 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="comparison-b" transform="translate(514,490)">
+<rect x="0" y="0" width="421" height="185" rx="6" fill="url(#gradient-30)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#F4E0D1" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#CA661B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.1445,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">B</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Each dataset is sent through</text>
+<text x="0" y="0" transform="translate(57,38) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">every eligible method</text>
+<text x="0" y="0" transform="translate(57,58) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">Run the frozen policy and comparison methods</text>
+<rect x="26" y="86" width="87" height="82" rx="4" fill="url(#gradient-31)" stroke="#C6D9E5" stroke-width="1"/>
+<text x="0" y="0" transform="translate(58.3313,102) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Test</text>
+<text x="0" y="0" transform="translate(49.7923,112.8) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.2" font-weight="bold" fill="#102F4C" xml:space="preserve">dataset</text>
+<circle cx="60.269999999999996" cy="123.68" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="72.34" cy="127.97" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="82.99" cy="134.21" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="66.66" cy="137.72" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="53.88" cy="142.79" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="80.15" cy="145.91" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="62.400000000000006" cy="151.37" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="91.51" cy="144.35" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="46.07" cy="151.37" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="92.22" cy="125.63" r="2.8" fill="#008B9B" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="76.6" cy="155.27" r="2.8" fill="#8258AF" stroke="#FFFFFF" stroke-width="0.45"/>
+<circle cx="49.62" cy="131.09" r="2.8" fill="#CA661B" stroke="#FFFFFF" stroke-width="0.45"/>
+<rect x="221" y="69" width="161" height="22" rx="4" fill="url(#gradient-32)" stroke="#008B9B" stroke-width="0.85"/>
+<text x="0" y="0" transform="translate(238.35,84) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="bold" fill="#008B9B" xml:space="preserve">SPATHI (frozen policy)</text>
+<path d="M 124 108 L 168 80 L 207 80" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 204 80 L 209.0 80.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 214 80 L 209 82.9 L 209 77.1 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="221" y="95" width="161" height="22" rx="4" fill="url(#gradient-33)" stroke="#CA661B" stroke-width="0.85"/>
+<text x="0" y="0" transform="translate(239.64,110) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="bold" fill="#CA661B" xml:space="preserve">Comparison method 1</text>
+<path d="M 124 117 L 168 106 L 207 106" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 204 106 L 209.0 106.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 214 106 L 209 108.9 L 209 103.1 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="221" y="121" width="161" height="22" rx="4" fill="url(#gradient-34)" stroke="#076ABB" stroke-width="0.85"/>
+<text x="0" y="0" transform="translate(239.64,136) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="bold" fill="#076ABB" xml:space="preserve">Comparison method 2</text>
+<path d="M 124 126 L 168 132 L 207 132" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 204 132 L 209.0 132.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 214 132 L 209 134.9 L 209 129.1 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="221" y="147" width="161" height="22" rx="4" fill="url(#gradient-35)" stroke="#8258AF" stroke-width="0.85"/>
+<text x="0" y="0" transform="translate(238.119,162) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="bold" fill="#8258AF" xml:space="preserve">Comparison method …</text>
+<path d="M 124 135 L 168 158 L 207 158" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 204 158 L 209.0 158.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 214 158 L 209 160.9 L 209 155.1 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(157.351,175) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="bold" fill="#476482" xml:space="preserve">…</text>
+</g>
+<path d="M 718 677 L 718.0 686.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 718 692 L 714.52 686 L 721.48 686 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="comparison-c" transform="translate(514,694)">
+<rect x="0" y="0" width="421" height="164" rx="6" fill="url(#gradient-36)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#F4E0D1" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#CA661B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.3984,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">C</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">5 fair comparison families</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.8" font-weight="normal" fill="#476482" xml:space="preserve">Methods grouped by information and assumptions</text>
+<rect x="9" y="50" width="75" height="82" rx="5" fill="url(#gradient-37)" stroke="#B2DCD7" stroke-width="0.9"/>
+<path d="M 43.5 60 L 49.7 60 L 54.5 65.29 L 54.5 79 Q 54.5 83 50.5 83 L 42.5 83 Q 38.5 83 38.5 79 L 38.5 64 Q 38.5 60 43.5 60 Z" stroke="#008A7A" stroke-width="2.4" fill="#FFFFFF" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 49.7 60 L 49.7 65.52 L 54.5 65.52" stroke="#008A7A" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 42.5 70.35 L 49.7 70.35" stroke="#008A7A" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 42.5 74.26 L 49.7 74.26" stroke="#008A7A" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 42.5 78.17 L 49.7 78.17" stroke="#008A7A" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(21.8613,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#008A7A" xml:space="preserve">Matched</text>
+<text x="0" y="0" transform="translate(12.92,113.2) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#008A7A" xml:space="preserve">information</text>
+<text x="0" y="0" transform="translate(19.4197,125.4) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#008A7A" xml:space="preserve">(primary)</text>
+<rect x="90" y="50" width="75" height="82" rx="5" fill="url(#gradient-38)" stroke="#EFD1BB" stroke-width="0.9"/>
+<path d="M 126.1 67.8 L 131.98 61.92 C 138.14 55.760000000000005 145.7 63.6 139.54 69.76 L 133.1 75.64" stroke="#CA661B" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 128.06 75.92 L 122.74 81.52 C 116.58 87.68 109.86 80.12 116.02 73.68 L 122.46 67.52" stroke="#CA661B" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 123.3 76.76 L 132.54 67.24" stroke="#CA661B" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(103.99,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#CA661B" xml:space="preserve">Ordered</text>
+<text x="0" y="0" transform="translate(109.709,113.2) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#CA661B" xml:space="preserve">states</text>
+<rect x="171" y="50" width="75" height="82" rx="5" fill="url(#gradient-39)" stroke="#B5D2EB" stroke-width="0.9"/>
+<path d="M 208.5 59.129999999999995 L 200.58 70.02" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 208.5 59.129999999999995 L 216.09 70.02" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 200.58 70.02 L 193.98 83.88" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 200.58 70.02 L 205.53 83.22" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 216.09 70.02 L 221.7 83.22" stroke="#076ABB" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="208.5" cy="59.129999999999995" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<circle cx="200.58" cy="70.02" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<circle cx="216.09" cy="70.02" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<circle cx="193.98" cy="83.88" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<circle cx="205.53" cy="83.22" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<circle cx="221.7" cy="83.22" r="3.63" fill="#076ABB" stroke="#3988C9" stroke-width="0.6"/>
+<text x="0" y="0" transform="translate(183.825,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#076ABB" xml:space="preserve">Lineage-</text>
+<text x="0" y="0" transform="translate(190.99,113.2) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#076ABB" xml:space="preserve">aware</text>
+<rect x="252" y="50" width="75" height="82" rx="5" fill="url(#gradient-40)" stroke="#DACDE7" stroke-width="0.9"/>
+<path d="M 281.82 57.6 C 280.54 70.4 297.5 70.4 297.18 85.76" stroke="#8258AF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 297.18 57.6 C 298.46 70.4 281.5 70.4 281.82 85.76" stroke="#8258AF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 283.1300175506392 61.76 L 295.8699824493608 61.76" stroke="#8258AF" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 283.1300175506392 66.24 L 295.8699824493608 66.24" stroke="#8258AF" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 288.6176540357073 72.64 L 290.3823459642927 72.64" stroke="#8258AF" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 282.9543735393467 78.08 L 296.0456264606533 78.08" stroke="#8258AF" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 283.1300175506392 82.24 L 295.8699824493608 82.24" stroke="#8258AF" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(265.819,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#8258AF" xml:space="preserve">All-gene</text>
+<text x="0" y="0" transform="translate(271.689,113.2) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#8258AF" xml:space="preserve">fitting</text>
+<rect x="333" y="50" width="75" height="82" rx="5" fill="url(#gradient-41)" stroke="#EEBEC8" stroke-width="0.9"/>
+<circle cx="370.5" cy="64" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<path d="M 370.5 64 L 360.5 75" stroke="#E9A8B5" stroke-width="0.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="360.5" cy="75" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<path d="M 370.5 64 L 380.5 75" stroke="#E9A8B5" stroke-width="0.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="380.5" cy="75" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<path d="M 370.5 64 L 352.5 84" stroke="#E9A8B5" stroke-width="0.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="352.5" cy="84" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<path d="M 370.5 64 L 370.5 84" stroke="#E9A8B5" stroke-width="0.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="370.5" cy="84" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<path d="M 370.5 64 L 388.5 84" stroke="#E9A8B5" stroke-width="0.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="388.5" cy="84" r="3.3" fill="#C72546" stroke="#FFFFFF" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(344.223,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#C72546" xml:space="preserve">Topology</text>
+<text x="0" y="0" transform="translate(358.334,113.2) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.3" font-weight="bold" fill="#C72546" xml:space="preserve">only</text>
+<rect x="5" y="139" width="411" height="22" rx="5" fill="#ECE6F3" stroke-width="1"/>
+<text x="0" y="0" transform="translate(94.6238,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.2" font-weight="bold" fill="#7046A0" xml:space="preserve">492 eligible route × dataset requests</text>
+</g>
+<path d="M 718 860 L 718.0 866.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 718 872 L 714.52 866 L 721.48 866 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="comparison-d" transform="translate(514,874)">
+<rect x="0" y="0" width="421" height="121" rx="6" fill="url(#gradient-42)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#F4E0D1" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#CA661B" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(15.5293,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">D</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Shared metrics and paired statistics</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">Same metrics for all methods, paired by dataset</text>
+<rect x="11" y="51" width="66" height="64" rx="5" fill="url(#gradient-43)" stroke="#66B6AC" stroke-width="0.9"/>
+<rect x="86" y="51" width="70" height="64" rx="5" fill="url(#gradient-44)" stroke="#6AA6D6" stroke-width="0.9"/>
+<rect x="165" y="51" width="90" height="64" rx="5" fill="url(#gradient-45)" stroke="#B49BCF" stroke-width="0.9"/>
+<rect x="31.0" y="76.0" width="6.24" height="10.0" rx="0.7" fill="#38A093" stroke-width="1"/>
+<rect x="39.84" y="69.25" width="6.24" height="16.75" rx="0.7" fill="#26978A" stroke-width="1"/>
+<rect x="48.68" y="61" width="6.24" height="25" rx="0.7" fill="#148F80" stroke-width="1"/>
+<text x="0" y="0" transform="translate(26.6324,104) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="bold" fill="#008575" xml:space="preserve">AUPR</text>
+<path d="M 102 61 L 102 89 L 141 89" stroke="#076ABB" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 104 85 C 109 71 114 62 140 62" stroke="#076ABB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(100.088,105) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="bold" fill="#076ABB" xml:space="preserve">AUROC</text>
+<circle cx="211" cy="70" r="10.4" fill="none" stroke="#8258AF" stroke-width="2"/>
+<circle cx="211" cy="70" r="6.76" fill="none" stroke="#8258AF" stroke-width="2"/>
+<circle cx="211" cy="70" r="3.12" fill="none" stroke="#8258AF" stroke-width="2"/>
+<path d="M 211 70 L 218.11910642537606 61.81302761081752" stroke="#8258AF" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 221.4 58.04 L 220.307 63.7159 L 215.931 59.9101 Z" stroke-width="0" fill="#8258AF" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(194.973,98) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.6" font-weight="bold" fill="#8258AF" xml:space="preserve">F1 at</text>
+<text x="0" y="0" transform="translate(176.585,111) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.6" font-weight="bold" fill="#8258AF" xml:space="preserve">truth count</text>
+<path d="M 266 54 L 266 116" stroke="#C6D9E5" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="278.0" y="73.0" width="5.52" height="10.0" rx="0.7" fill="#6F90A6" stroke-width="1"/>
+<rect x="285.82" y="66.25" width="5.52" height="16.75" rx="0.7" fill="#63869E" stroke-width="1"/>
+<rect x="293.64" y="58" width="5.52" height="25" rx="0.7" fill="#567C96" stroke-width="1"/>
+<text x="0" y="0" transform="translate(315,65) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="normal" fill="#476482" xml:space="preserve">Complete paired</text>
+<text x="0" y="0" transform="translate(315,80) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="normal" fill="#476482" xml:space="preserve">primary blocks</text>
+<text x="0" y="0" transform="translate(315,95) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="normal" fill="#476482" xml:space="preserve">Friedman + all-pairs</text>
+<text x="0" y="0" transform="translate(315,110) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.1" font-weight="normal" fill="#476482" xml:space="preserve">Wilcoxon-Holm</text>
+</g>
+<rect x="963" y="229" width="467" height="779" rx="6" fill="#FFFFFF" stroke="#8258AF" stroke-width="2.2"/>
+<rect x="964" y="230" width="465" height="66" rx="4" fill="url(#gradient-46)" stroke-width="1"/>
+<rect x="964" y="289" width="465" height="7" rx="0" fill="#8258AF" stroke-width="1"/>
+<circle cx="1003" cy="260" r="25" fill="#FFFFFF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(993.297,271) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="31" font-weight="bold" fill="#8258AF" xml:space="preserve">3</text>
+<g id="scalability-header" transform="translate(0,0)">
+<text x="0" y="0" transform="translate(1042,270) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="25" font-weight="bold" fill="#FFFFFF" xml:space="preserve">Scalability</text>
+<text x="0" y="0" transform="translate(1241,256) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">Test computational limits</text>
+<text x="0" y="0" transform="translate(1241,272.3) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.4" font-weight="normal" fill="#FFFFFF" xml:space="preserve">and practical feasibility</text>
+</g>
+<g id="scalability-a" transform="translate(976,302)">
+<rect x="0" y="0" width="440" height="198" rx="6" fill="url(#gradient-47)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#E6DEEF" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.0371,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">A</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">4 size scales</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.8" font-weight="normal" fill="#476482" xml:space="preserve">small → medium → large → extra-large</text>
+<text x="0" y="0" transform="translate(57,56) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.8" font-weight="normal" fill="#476482" xml:space="preserve">(4 scales × 3 replicates × 16 routes = 192 measurements)</text>
+<rect x="19" y="102" width="10.6" height="10.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="31" y="102" width="10.6" height="10.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="43" y="102" width="10.6" height="10.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="55" y="102" width="10.6" height="10.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="19" y="114" width="10.6" height="10.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="31" y="114" width="10.6" height="10.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="43" y="114" width="10.6" height="10.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="55" y="114" width="10.6" height="10.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="19" y="126" width="10.6" height="10.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="31" y="126" width="10.6" height="10.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="43" y="126" width="10.6" height="10.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="55" y="126" width="10.6" height="10.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(27.3811,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">Small</text>
+<path d="M 84 119 L 100.0 119.0" stroke="#476482" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 107 119 L 100 123.06 L 100 114.94 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="127" y="86" width="11.6" height="11.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="140" y="86" width="11.6" height="11.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="153" y="86" width="11.6" height="11.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="166" y="86" width="11.6" height="11.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="127" y="99" width="11.6" height="11.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="140" y="99" width="11.6" height="11.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="153" y="99" width="11.6" height="11.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="166" y="99" width="11.6" height="11.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="127" y="112" width="11.6" height="11.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="140" y="112" width="11.6" height="11.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="153" y="112" width="11.6" height="11.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="166" y="112" width="11.6" height="11.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="127" y="125" width="11.6" height="11.6" rx="0.6" fill="#C7D2E5" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="140" y="125" width="11.6" height="11.6" rx="0.6" fill="#BAC8DF" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="153" y="125" width="11.6" height="11.6" rx="0.6" fill="#AEBFD9" stroke="#D0DAE9" stroke-width="0.5"/>
+<rect x="166" y="125" width="11.6" height="11.6" rx="0.6" fill="#D3DCEB" stroke="#D0DAE9" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(130.512,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">Medium</text>
+<path d="M 196 119 L 212.0 119.0" stroke="#476482" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 219 119 L 212 123.06 L 212 114.94 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="238" y="86" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="251" y="86" width="11.6" height="11.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="264" y="86" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="277" y="86" width="11.6" height="11.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="290" y="86" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="238" y="99" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="251" y="99" width="11.6" height="11.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="264" y="99" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="277" y="99" width="11.6" height="11.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="290" y="99" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="238" y="112" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="251" y="112" width="11.6" height="11.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="264" y="112" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="277" y="112" width="11.6" height="11.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="290" y="112" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="238" y="125" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="251" y="125" width="11.6" height="11.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="264" y="125" width="11.6" height="11.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="277" y="125" width="11.6" height="11.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="290" y="125" width="11.6" height="11.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(254.582,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">Large</text>
+<path d="M 320 119 L 336.0 119.0" stroke="#476482" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 343 119 L 336 123.06 L 336 114.94 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="354" y="68" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="368" y="68" width="12.6" height="12.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="382" y="68" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="396" y="68" width="12.6" height="12.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="410" y="68" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="354" y="82" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="368" y="82" width="12.6" height="12.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="382" y="82" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="396" y="82" width="12.6" height="12.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="410" y="82" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="354" y="96" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="368" y="96" width="12.6" height="12.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="382" y="96" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="396" y="96" width="12.6" height="12.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="410" y="96" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="354" y="110" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="368" y="110" width="12.6" height="12.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="382" y="110" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="396" y="110" width="12.6" height="12.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="410" y="110" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="354" y="124" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="368" y="124" width="12.6" height="12.6" rx="0.6" fill="#AC91CA" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="382" y="124" width="12.6" height="12.6" rx="0.6" fill="#A283C4" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="396" y="124" width="12.6" height="12.6" rx="0.6" fill="#9876BD" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="410" y="124" width="12.6" height="12.6" rx="0.6" fill="#8E69B7" stroke="#DACDE7" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(357.784,154) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">Extra-large</text>
+<rect x="6" y="167" width="428" height="26" rx="6" fill="#EEE8F4" stroke-width="1"/>
+<text x="0" y="0" transform="translate(111.978,185) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.2" font-weight="bold" fill="#8258AF" xml:space="preserve">192 planned ladder measurements</text>
+</g>
+<path d="M 1194 502 L 1194.0 508.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1194 514 L 1190.52 508 L 1197.48 508 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="scalability-b" transform="translate(976,515)">
+<rect x="0" y="0" width="440" height="110" rx="6" fill="url(#gradient-48)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#E6DEEF" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.1445,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">B</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Isolated, resource-controlled runs</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">One method at a time with fixed resources</text>
+<rect x="96.05" y="63.05" width="27.9" height="27.9" rx="2" fill="#386780" stroke-width="1"/>
+<rect x="100.55" y="67.55" width="18.9" height="18.9" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="103.25" y="70.25" width="13.5" height="13.5" rx="1" fill="#386780" stroke-width="1"/>
+<path d="M 99.2 62.6 L 99.2 56.3" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 95.6 66.2 L 89.3 66.2" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 99.2 91.4 L 99.2 97.7" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 124.4 66.2 L 130.7 66.2" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 106.4 62.6 L 106.4 56.3" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 95.6 73.4 L 89.3 73.4" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 106.4 91.4 L 106.4 97.7" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 124.4 73.4 L 130.7 73.4" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 113.6 62.6 L 113.6 56.3" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 95.6 80.6 L 89.3 80.6" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 113.6 91.4 L 113.6 97.7" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 124.4 80.6 L 130.7 80.6" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 120.8 62.6 L 120.8 56.3" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 95.6 87.8 L 89.3 87.8" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 120.8 91.4 L 120.8 97.7" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 124.4 87.8 L 130.7 87.8" stroke="#386780" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(142,73) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">CPU</text>
+<text x="0" y="0" transform="translate(142,88) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">(controlled)</text>
+<path d="M 228 54 L 228 99" stroke="#A8B9D2" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="254" y="61" width="47" height="26" rx="3" fill="#205B70" stroke-width="1"/>
+<rect x="260.58" y="67.5" width="4.7" height="11.700000000000001" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="269.98" y="67.5" width="4.7" height="11.700000000000001" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="279.38" y="67.5" width="4.7" height="11.700000000000001" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="288.78000000000003" y="67.5" width="4.7" height="11.700000000000001" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<path d="M 257.76 86 L 257.76 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 264.34 86 L 264.34 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 270.92 86 L 270.92 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 277.5 86 L 277.5 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 284.08 86 L 284.08 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 290.66 86 L 290.66 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 297.24 86 L 297.24 90" stroke="#205B70" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(315,73) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">RAM</text>
+<text x="0" y="0" transform="translate(315,88) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.5" font-weight="normal" fill="#476482" xml:space="preserve">(controlled)</text>
+</g>
+<path d="M 1194 627 L 1194.0 634.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1194 640 L 1190.52 634 L 1197.48 634 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="scalability-c" transform="translate(976,642)">
+<rect x="0" y="0" width="440" height="158" rx="6" fill="url(#gradient-49)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#E6DEEF" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(16.3984,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">C</text>
+<text x="0" y="0" transform="translate(57,20) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Thread scaling on the medium dataset</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.3" font-weight="normal" fill="#476482" xml:space="preserve">1 CPU, standard CPUs, and all CPUs</text>
+<rect x="9" y="61" width="71" height="50" rx="4" fill="#FFFFFF" stroke="#C6D9E5" stroke-width="1"/>
+<rect x="20" y="70" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="29" y="70" width="7.6" height="7.6" rx="0.6" fill="#DCD0E9" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="38" y="70" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="47" y="70" width="7.6" height="7.6" rx="0.6" fill="#C8B6DC" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="56" y="70" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="20" y="79" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="29" y="79" width="7.6" height="7.6" rx="0.6" fill="#C8B6DC" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="38" y="79" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="47" y="79" width="7.6" height="7.6" rx="0.6" fill="#DCD0E9" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="56" y="79" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="20" y="88" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="29" y="88" width="7.6" height="7.6" rx="0.6" fill="#DCD0E9" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="38" y="88" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="47" y="88" width="7.6" height="7.6" rx="0.6" fill="#C8B6DC" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="56" y="88" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="20" y="97" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="29" y="97" width="7.6" height="7.6" rx="0.6" fill="#C8B6DC" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="38" y="97" width="7.6" height="7.6" rx="0.6" fill="#BEA8D5" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="47" y="97" width="7.6" height="7.6" rx="0.6" fill="#DCD0E9" stroke="#DACDE7" stroke-width="0.5"/>
+<rect x="56" y="97" width="7.6" height="7.6" rx="0.6" fill="#D2C3E2" stroke="#DACDE7" stroke-width="0.5"/>
+<text x="0" y="0" transform="translate(21.6915,128) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.4" font-weight="normal" fill="#476482" xml:space="preserve">Medium</text>
+<text x="0" y="0" transform="translate(22.9115,143) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.4" font-weight="normal" fill="#476482" xml:space="preserve">dataset</text>
+<path d="M 92 89 L 151.37142115516366 67.07824449655496" stroke="#008B9B" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 157 65 L 152.577 70.3428 L 150.166 63.8137 Z" stroke-width="0" fill="#008B9B" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="175" cy="65" r="11.3" fill="#8FCCD3" stroke="#008B9B" stroke-width="1"/>
+<text x="0" y="0" transform="translate(201,70) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">1 CPU</text>
+<path d="M 92 99 L 151.0063803409079 96.27662859965041" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 157 96 L 151.167 99.7529 L 150.846 92.8003 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="175" cy="96" r="11.3" fill="#F8D39C" stroke="#F09A1E" stroke-width="1"/>
+<text x="0" y="0" transform="translate(201,101) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">Standard CPUs</text>
+<text x="0" y="0" transform="translate(201,115) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">(e.g. 4, 8, …)</text>
+<path d="M 92 109 L 151.31670418256434 129.0764229540987" stroke="#476482" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 157 131 L 150.201 132.373 L 152.432 125.78 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="175" cy="131" r="11.3" fill="#C8B6DC" stroke="#8258AF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(201,136) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">All CPUs</text>
+<text x="0" y="0" transform="translate(201,150) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="12.7" font-weight="normal" fill="#476482" xml:space="preserve">(max)</text>
+<rect x="311" y="51" width="118" height="92" rx="6" fill="#FFFFFF" stroke="#B8A0D1" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="0" y="0" transform="translate(319.746,76) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="normal" fill="#476482" xml:space="preserve">Reuse the medium</text>
+<text x="0" y="0" transform="translate(321.342,92) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="normal" fill="#476482" xml:space="preserve">baseline when the</text>
+<text x="0" y="0" transform="translate(327.651,108) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="normal" fill="#476482" xml:space="preserve">effective thread</text>
+<text x="0" y="0" transform="translate(328.835,124) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.8" font-weight="normal" fill="#476482" xml:space="preserve">count matches.</text>
+</g>
+<path d="M 1194 802 L 1194.0 810.0" stroke="#476482" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1194 816 L 1190.52 810 L 1197.48 810 Z" stroke-width="0" fill="#476482" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="scalability-d" transform="translate(976,817)">
+<rect x="0" y="0" width="440" height="178" rx="6" fill="url(#gradient-50)" stroke-width="1"/>
+<circle cx="23" cy="24" r="21" fill="#E6DEEF" stroke-width="1"/>
+<circle cx="23" cy="24" r="16.4" fill="#8258AF" stroke="#FFFFFF" stroke-width="1.2"/>
+<text x="0" y="0" transform="translate(15.5293,30.1) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="20" font-weight="bold" fill="#FFFFFF" xml:space="preserve">D</text>
+<text x="0" y="0" transform="translate(57,20) scale(0.96810725,1)" font-family="DejaVu Sans Condensed" font-size="15.2" font-weight="bold" fill="#102F4C" xml:space="preserve">Measure runtime, memory, and feasibility frontier</text>
+<text x="0" y="0" transform="translate(57,40) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="13.1" font-weight="normal" fill="#476482" xml:space="preserve">Track performance and stop when infeasible</text>
+<rect x="7" y="49" width="426" height="79" rx="6" fill="#FFFFFF" stroke-width="1"/>
+<circle cx="47" cy="72" r="9.6" fill="#FFFFFF" stroke="#007B8E" stroke-width="3"/>
+<path d="M 47 72 L 47 66.0" stroke="#007B8E" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 47 72 L 51.2 74.4" stroke="#007B8E" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="43.4" y="56.4" width="7.199999999999999" height="2.6999999999999997" rx="1" fill="#007B8E" stroke-width="1"/>
+<path d="M 47 59.1 L 47 62.4" stroke="#007B8E" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 55.4 63.3 L 57.2 61.5" stroke="#007B8E" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="104" y="65" width="36" height="16" rx="3" fill="#7046A0" stroke-width="1"/>
+<rect x="109.04" y="69.0" width="3.6" height="7.2" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="116.24" y="69.0" width="3.6" height="7.2" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="123.44" y="69.0" width="3.6" height="7.2" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<rect x="130.64000000000001" y="69.0" width="3.6" height="7.2" rx="1" fill="#FFFFFF" stroke-width="1"/>
+<path d="M 106.88 80 L 106.88 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 111.92 80 L 111.92 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 116.96000000000001 80 L 116.96000000000001 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 122.0 80 L 122.0 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 127.03999999999999 80 L 127.03999999999999 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 132.08 80 L 132.08 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 137.12 80 L 137.12 84" stroke="#7046A0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="211" cy="71" r="14.5" fill="#38976F" stroke-width="1"/>
+<path d="M 205.05 71 L 209.81 75.76 L 217.46 65.56" stroke="#FFFFFF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="288" cy="71" r="14.5" fill="#D54556" stroke-width="1"/>
+<path d="M 283 66 L 293 76" stroke="#FFFFFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 293 66 L 283 76" stroke="#FFFFFF" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="379" cy="71" r="14" fill="none" stroke="#7B8794" stroke-width="2" stroke-dasharray="4 3"/>
+<path d="M 372 79 L 386 63" stroke="#7B8794" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(24.7797,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">Runtime</text>
+<text x="0" y="0" transform="translate(19.2354,114) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">(up to 4 h)</text>
+<text x="0" y="0" transform="translate(100.597,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">Memory</text>
+<text x="0" y="0" transform="translate(106.115,114) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">usage</text>
+<text x="0" y="0" transform="translate(189.811,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">Success</text>
+<text x="0" y="0" transform="translate(272.241,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">Failed</text>
+<text x="0" y="0" transform="translate(245.5,114) scale(0.89743848,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">(stop larger sizes)</text>
+<text x="0" y="0" transform="translate(340.409,100) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">Not attempted</text>
+<text x="0" y="0" transform="translate(341.098,114) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="11.7" font-weight="normal" fill="#476482" xml:space="preserve">(blocked runs)</text>
+<rect x="7" y="133" width="153" height="40" rx="5" fill="#F0EBF5" stroke-width="1"/>
+<path d="M 18.25 140.85 L 31.75 140.85" stroke="#8258AF" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 18.25 165.15 L 31.75 165.15" stroke="#8258AF" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 19.6 141.66 Q 19.6 149.49 25 153 Q 19.6 156.51 19.6 164.34 L 30.4 164.34 Q 30.4 156.51 25 153 Q 30.4 149.49 30.4 141.66 Z" stroke="#8258AF" stroke-width="1.6" fill="#EFE9F5" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(46,148) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.8" font-weight="normal" fill="#8258AF" xml:space="preserve">4 h timeout per</text>
+<text x="0" y="0" transform="translate(46,162) scale(0.93674244,1)" font-family="DejaVu Sans Condensed" font-size="10.8" font-weight="normal" fill="#8258AF" xml:space="preserve">physical scalability task</text>
+<rect x="165" y="133" width="268" height="40" rx="5" fill="#F0EBF5" stroke-width="1"/>
+<circle cx="181" cy="153" r="12" fill="#8258AF" stroke-width="1"/>
+<path d="M 175 153 L 187 153" stroke="#FFFFFF" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(201,146) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.4" font-weight="normal" fill="#8258AF" xml:space="preserve">If a route fails at one size,</text>
+<text x="0" y="0" transform="translate(201,157.5) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.4" font-weight="normal" fill="#8258AF" xml:space="preserve">stop that route at larger sizes.</text>
+<text x="0" y="0" transform="translate(201,169) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.4" font-weight="normal" fill="#8258AF" xml:space="preserve">Later blocked runs are marked not attempted.</text>
+</g>
+<g id="title" transform="translate(0,0)">
+<text x="0" y="0" transform="translate(30,65) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="61.5" font-weight="bold" fill="#102F4C" xml:space="preserve">SPATHI-benchmarks (FULL)</text>
+<text x="0" y="0" transform="translate(38,103) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="24.0" font-weight="bold" fill="#476482" xml:space="preserve">From parameter search to fair held-out evaluation and scalability testing</text>
+<path d="M 1007 30 L 1007 100" stroke="#ABBBD0" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(1037,61) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="19.2" font-weight="normal" fill="#476482" xml:space="preserve">Planned workflow for the</text>
+<text x="0" y="0" transform="translate(1037,85) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="19.2" font-weight="normal" fill="#476482" xml:space="preserve">full synthetic study profile</text>
+<path d="M 1360 27 L 1341 55" stroke="#37617A" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1360 27 L 1378 55" stroke="#37617A" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1341 55 L 1325 80" stroke="#37617A" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1341 55 L 1355 80" stroke="#37617A" stroke-width="1.9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1360" cy="27" r="8.8" fill="#008B9B" stroke="#E3F3F7" stroke-width="0.9"/>
+<circle cx="1341" cy="55" r="7.6" fill="#4F7D93" stroke="#E3F3F7" stroke-width="0.9"/>
+<circle cx="1378" cy="55" r="7.6" fill="#4F7D93" stroke="#E3F3F7" stroke-width="0.9"/>
+<circle cx="1325" cy="80" r="7.6" fill="#4F7D93" stroke="#E3F3F7" stroke-width="0.9"/>
+<circle cx="1355" cy="80" r="7.6" fill="#4F7D93" stroke="#E3F3F7" stroke-width="0.9"/>
+<rect x="1378.0" y="70.4" width="9.6" height="15.600000000000001" rx="0.7" fill="#54B2BF" stroke-width="1"/>
+<rect x="1391.6" y="59.87" width="9.6" height="26.130000000000003" rx="0.7" fill="#45ABB9" stroke-width="1"/>
+<rect x="1405.2" y="47" width="9.6" height="39" rx="0.7" fill="#36A4B4" stroke-width="1"/>
+<text x="0" y="0" transform="translate(1326.74,112) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="16.8" font-weight="bold" fill="#102F4C" xml:space="preserve">S P A T H I</text>
+</g>
+<g id="summary-0" transform="translate(0,0)">
+<rect x="20" y="125" width="350" height="90" rx="8" fill="url(#gradient-51)" stroke-width="1"/>
+<rect x="47.1" y="154.25" width="41.8" height="44.0" rx="3.8500000000000005" fill="#008B9B" stroke-width="1"/>
+<ellipse cx="68" cy="195.5" rx="21.45" ry="7.975" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="47.375" y="184.5" width="41.25" height="8.8" rx="0" fill="#008B9B" stroke-width="1"/>
+<ellipse cx="68" cy="180.65" rx="21.45" ry="7.975" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="47.375" y="169.65" width="41.25" height="8.8" rx="0" fill="#008B9B" stroke-width="1"/>
+<ellipse cx="68" cy="166.35" rx="21.45" ry="7.975" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="47.375" y="155.35" width="41.25" height="8.8" rx="0" fill="#008B9B" stroke-width="1"/>
+<ellipse cx="68" cy="152.05" rx="21.45" ry="7.975" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.5"/>
+<ellipse cx="68" cy="152.05" rx="21.45" ry="7.975" fill="#008B9B" stroke="#FFFFFF" stroke-width="1.5"/>
+<text x="0" y="0" transform="translate(114,175) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="48" font-weight="bold" fill="#008B9B" xml:space="preserve">74</text>
+<text x="0" y="0" transform="translate(116,199) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="normal" fill="#476482" xml:space="preserve">seeded synthetic datasets</text>
+</g>
+<g id="summary-1" transform="translate(0,0)">
+<rect x="382" y="125" width="337" height="90" rx="8" fill="url(#gradient-52)" stroke-width="1"/>
+<path d="M 448.458 165.077 L 454.682 165.091 L 454.682 172.909 L 448.458 172.923 L 447.946 174.831 L 453.33 177.956 L 449.421 184.727 L 444.023 181.626 L 442.626 183.023 L 445.727 188.421 L 438.956 192.33 L 435.831 186.946 L 433.923 187.458 L 433.909 193.682 L 426.091 193.682 L 426.077 187.458 L 424.169 186.946 L 421.044 192.33 L 414.273 188.421 L 417.374 183.023 L 415.977 181.626 L 410.579 184.727 L 406.67 177.956 L 412.054 174.831 L 411.542 172.923 L 405.318 172.909 L 405.318 165.091 L 411.542 165.077 L 412.054 163.169 L 406.67 160.044 L 410.579 153.273 L 415.977 156.374 L 417.374 154.977 L 414.273 149.579 L 421.044 145.67 L 424.169 151.054 L 426.077 150.542 L 426.091 144.318 L 433.909 144.318 L 433.923 150.542 L 435.831 151.054 L 438.956 145.67 L 445.727 149.579 L 442.626 154.977 L 444.023 156.374 L 449.421 153.273 L 453.33 160.044 L 447.946 163.169 Z" stroke="#008B9B" stroke-width="0.5" fill="#008B9B" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="430" cy="169" r="9.69" fill="#FFFFFF" stroke-width="1"/>
+<text x="0" y="0" transform="translate(476,175) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="48" font-weight="bold" fill="#008B9B" xml:space="preserve">554</text>
+<text x="0" y="0" transform="translate(478,199) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="normal" fill="#476482" xml:space="preserve">calibration fits</text>
+</g>
+<g id="summary-2" transform="translate(0,0)">
+<rect x="731" y="125" width="337" height="90" rx="8" fill="url(#gradient-53)" stroke-width="1"/>
+<path d="M 763 146 L 786.7 146 L 799 157.73 L 799 193 Q 799 197 795 197 L 762 197 Q 758 197 758 193 L 758 150 Q 758 146 763 146 Z" stroke="#CA661B" stroke-width="2.4" fill="#FFFFFF" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 786.7 146 L 786.7 158.24 L 799 158.24" stroke="#CA661B" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 768.25 168.95 L 786.7 168.95" stroke="#CA661B" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 768.25 177.62 L 786.7 177.62" stroke="#CA661B" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 768.25 186.29 L 786.7 186.29" stroke="#CA661B" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(825,175) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="48" font-weight="bold" fill="#CA661B" xml:space="preserve">32</text>
+<text x="0" y="0" transform="translate(827,199) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="normal" fill="#476482" xml:space="preserve">held-out dataset instances</text>
+</g>
+<g id="summary-3" transform="translate(0,0)">
+<rect x="1080" y="125" width="350" height="90" rx="8" fill="url(#gradient-54)" stroke-width="1"/>
+<path d="M 1135.72 152.18 L 1110.88 171.08" stroke="#8258AF" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1110.88 171.08 L 1135.72 189.98" stroke="#8258AF" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 1135.72 189.98 L 1135.72 152.18" stroke="#8258AF" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1135.72" cy="152.18" r="5.94" fill="#8258AF" stroke="#9B79BF" stroke-width="0.6"/>
+<circle cx="1110.88" cy="171.08" r="5.94" fill="#8258AF" stroke="#9B79BF" stroke-width="0.6"/>
+<circle cx="1135.72" cy="189.98" r="5.94" fill="#8258AF" stroke="#9B79BF" stroke-width="0.6"/>
+<text x="0" y="0" transform="translate(1174,175) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="48" font-weight="bold" fill="#8258AF" xml:space="preserve">16</text>
+<text x="0" y="0" transform="translate(1176,199) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="17" font-weight="normal" fill="#476482" xml:space="preserve">routes in 5 comparison families</text>
+</g>
+<path d="M 480 588 L 495 588 L 495 581 L 508 594 L 495 607 L 495 600 L 480 600 Z" stroke-width="0" fill="#245F7C" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 943 588 L 958 588 L 958 581 L 971 594 L 958 607 L 958 600 L 943 600 Z" stroke-width="0" fill="#245F7C" stroke-linecap="round" stroke-linejoin="round"/>
+<g id="footer" transform="translate(0,0)">
+<rect x="20" y="1020" width="1410" height="45" rx="6" fill="#FFFFFF" stroke="#C6D9E5" stroke-width="1.1"/>
+<rect x="184.84" y="1034.0" width="24.32" height="25.6" rx="2.24" fill="#3D6C89" stroke-width="1"/>
+<ellipse cx="197" cy="1058.0" rx="12.48" ry="4.64" fill="#3D6C89" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="185.0" y="1051.6" width="24.0" height="5.12" rx="0" fill="#3D6C89" stroke-width="1"/>
+<ellipse cx="197" cy="1049.36" rx="12.48" ry="4.64" fill="#3D6C89" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="185.0" y="1042.96" width="24.0" height="5.12" rx="0" fill="#3D6C89" stroke-width="1"/>
+<ellipse cx="197" cy="1041.04" rx="12.48" ry="4.64" fill="#3D6C89" stroke="#FFFFFF" stroke-width="1.5"/>
+<rect x="185.0" y="1034.64" width="24.0" height="5.12" rx="0" fill="#3D6C89" stroke-width="1"/>
+<ellipse cx="197" cy="1032.72" rx="12.48" ry="4.64" fill="#3D6C89" stroke="#FFFFFF" stroke-width="1.5"/>
+<ellipse cx="197" cy="1032.72" rx="12.48" ry="4.64" fill="#3D6C89" stroke="#FFFFFF" stroke-width="1.5"/>
+<text x="0" y="0" transform="translate(229,1040) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="14.5" font-weight="bold" fill="#102F4C" xml:space="preserve">Reproducible execution</text>
+<text x="0" y="0" transform="translate(229,1056) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.6" font-weight="normal" fill="#476482" xml:space="preserve">Semantic seed 734921 · fixed CPU/RAM plan · SQLite journal · atomic artifacts</text>
+<path d="M 728 1029 L 728 1056" stroke="#C6D9E5" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 844 1029 L 852.3 1029 L 858 1035.44 L 858 1053 Q 858 1057 854 1057 L 843 1057 Q 839 1057 839 1053 L 839 1033 Q 839 1029 844 1029 Z" stroke="#416F8D" stroke-width="2.4" fill="#FFFFFF" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 852.3 1029 L 852.3 1035.72 L 858 1035.72" stroke="#416F8D" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 843.75 1041.6 L 852.3 1041.6" stroke="#416F8D" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 843.75 1046.36 L 852.3 1046.36" stroke="#416F8D" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 843.75 1051.12 L 852.3 1051.12" stroke="#416F8D" stroke-width="2.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="0" y="0" transform="translate(889,1040) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="14.5" font-weight="bold" fill="#102F4C" xml:space="preserve">Portable outputs</text>
+<text x="0" y="0" transform="translate(889,1056) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="10.7" font-weight="normal" fill="#476482" xml:space="preserve">HTML reports + CSV tables + provenance files</text>
+</g>
+<text x="0" y="0" transform="translate(20,1080) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="8.5" font-weight="normal" fill="#476482" xml:space="preserve">Synthetic data only · counts are planned protocol quantities, not measured results.</text>
+<text x="0" y="0" transform="translate(1319.8,1080) scale(1.00000000,1)" font-family="DejaVu Sans Condensed" font-size="8.5" font-weight="normal" fill="#476482" xml:space="preserve">SPATHI-benchmarks (FULL)</text>
+</svg>

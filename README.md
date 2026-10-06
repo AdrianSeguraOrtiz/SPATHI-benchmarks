@@ -6,6 +6,16 @@ computational scalability. SPATHI contains the method itself; ANDREA provides th
 inference, evaluation, and resource-outcome contracts; this repository owns the experimental
 design, orchestration, statistical analysis, and portable reports.
 
+<p align="center">
+  <a href="docs/graphical_abstract/SPATHI_benchmarks_graphical_abstract.svg">
+    <img
+      src="docs/graphical_abstract/SPATHI_benchmarks_graphical_abstract.svg"
+      alt="SPATHI-benchmarks FULL graphical abstract: calibration selects a frozen SPATHI policy, held-out comparison evaluates eligible methods in fair families, and scalability measures resource use and feasibility"
+      width="100%"
+    >
+  </a>
+</p>
+
 There is one workflow and exactly three scientific phases:
 
 1. **Calibration** selects one SPATHI configuration without privileging a reference candidate.

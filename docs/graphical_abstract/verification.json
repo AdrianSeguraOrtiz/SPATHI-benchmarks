@@ -1,0 +1,39 @@
+{
+  "outputs": {
+    "SPATHI_benchmarks_graphical_abstract.svg": {
+      "sha256": "bc60eb77f2e9f8c27bc51296c9034cd0d94e1ea01e23330eb83dcd97136c6abb",
+      "raster_images": 0,
+      "external_resource_links": 0,
+      "font_dependency": "DejaVu Sans Condensed"
+    },
+    "SPATHI_benchmarks_graphical_abstract.pdf": {
+      "sha256": "ce7e55a1fa400d5b9c70143d4cdb9642eb50f65a2b43356da857b7f5818f37fc",
+      "raster_images": 0,
+      "selectable_text": true
+    }
+  },
+  "source_only_rebuild": {
+    "copied_inputs": [
+      "build_figure.py",
+      "figure_config.json",
+      "figure_text.json"
+    ],
+    "reference_png_present": false,
+    "byte_identical_to_delivered_outputs": {
+      "SPATHI_benchmarks_graphical_abstract.svg": true,
+      "SPATHI_benchmarks_graphical_abstract.pdf": true,
+      "SPATHI_benchmarks_graphical_abstract.png": true
+    }
+  },
+  "layout_checks": {
+    "text_elements": 169,
+    "vector_primitives": 739,
+    "pdf_drawing_objects": 717,
+    "pdf_text_spans": 169,
+    "raster_images_in_pdf": 0,
+    "text_outside_regions": [],
+    "text_box_overlaps": [],
+    "reference_image_used_by_builder": false,
+    "bbox_note": "Font ascent/descent boxes; no claim of a complete geometry proof."
+  }
+}

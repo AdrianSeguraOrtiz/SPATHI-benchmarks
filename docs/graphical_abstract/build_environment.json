@@ -1,0 +1,28 @@
+{
+  "python": "3.13.5",
+  "reportlab": "4.4.9",
+  "pymupdf": "1.26.7",
+  "fonts": {
+    "regular": {
+      "filename": "DejaVuSansCondensed.ttf",
+      "sha256": "6de96c09bf752e3774583eea6bc3fb0b60f1733c595f22a926c89219ba8ade43"
+    },
+    "bold": {
+      "filename": "DejaVuSansCondensed-Bold.ttf",
+      "sha256": "21f02ebcea75529d3ed9d26e089cd1b9c59a4b784119ba3a96e9bc83cf755ec7"
+    }
+  },
+  "canvas": {
+    "width": 1448,
+    "height": 1086,
+    "physical_width_mm": 360
+  },
+  "dpi": 300,
+  "inputs": {
+    "figure_config.json": "b419e7729cdee249af4722dd2155ad93564567e777540cd05d1e2c3e4cf0a0a8",
+    "figure_text.json": "63293b236484708ab9a664659b8d5b0bd29101389cdb8611948b6043c3b44e02",
+    "build_figure.py": "a8f57c5120aeb426a9a9f6f840a111b324fede09a7f88d1dce18c92314a25590"
+  },
+  "protocol_commit": "9baa6bb8efb8e5b96b74bd9c9702a2c45de1ab75",
+  "reference_image_used": false
+}

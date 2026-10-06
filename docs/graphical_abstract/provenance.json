@@ -1,0 +1,25 @@
+{
+  "artifact_type": "programmatic_vector_reconstruction",
+  "original_generation_source_available": false,
+  "reconstruction_is_pixel_identical_to_original": false,
+  "reference_image_used_by_builder": false,
+  "original_reference": {
+    "path": "reference/original_ai_reference.png",
+    "sha256": "9613fca93bb70fd60e8037ba1bfbf2a354b54716327d133870ca0ef07b3554fc",
+    "width": 1448,
+    "height": 1086,
+    "origin": "AI-generated raster image from the preceding conversation response"
+  },
+  "source_inputs": [
+    "build_figure.py",
+    "figure_config.json",
+    "figure_text.json"
+  ],
+  "scientific_repository": "AdrianSeguraOrtiz/SPATHI-benchmarks",
+  "scientific_commit": "9baa6bb8efb8e5b96b74bd9c9702a2c45de1ab75",
+  "benchmark_executed": false,
+  "visual_checks": [
+    "MuPDF PDF rasterization",
+    "Poppler PDF rasterization"
+  ]
+}

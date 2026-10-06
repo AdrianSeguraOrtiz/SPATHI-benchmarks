@@ -1,0 +1,11 @@
+{
+  "text_elements": 169,
+  "vector_primitives": 739,
+  "pdf_drawing_objects": 717,
+  "pdf_text_spans": 169,
+  "raster_images_in_pdf": 0,
+  "text_outside_regions": [],
+  "text_box_overlaps": [],
+  "reference_image_used_by_builder": false,
+  "bbox_note": "Font ascent/descent boxes; no claim of a complete geometry proof."
+}
